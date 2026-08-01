@@ -1,7 +1,21 @@
+// Main-process entry: window creation, model construction, IPC registration,
+// and event-push wiring (the port of SpettroApp.swift's app wiring).
+
 import { app, BrowserWindow, shell } from 'electron'
 import { join } from 'path'
+import { EVENT_CHANNEL, type MainEvent } from '../shared/ipc'
+import { registerIpc, type IpcHandle } from './ipc'
+import { AppModel } from './model/appModel'
+import { buildRemoteBridge } from './model/remoteBridge'
+import { RemoteHost } from './remote/host'
+import { TerminalManager } from './terminal/panels'
 
 let mainWindow: BrowserWindow | null = null
+let model: AppModel | null = null
+let terminals: TerminalManager | null = null
+let remoteHost: RemoteHost | null = null
+let ipcHandle: IpcHandle | null = null
+let didShutdown = false
 
 function createWindow(): void {
   mainWindow = new BrowserWindow({
@@ -33,17 +47,67 @@ function createWindow(): void {
   }
 }
 
+/** Pushes one MainEvent to the window (used by the terminal manager; the
+ *  model's own events are forwarded by registerIpc). */
+function pushToWindow(event: MainEvent): void {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send(EVENT_CHANNEL, event)
+  }
+}
+
 app.whenReady().then(() => {
   createWindow()
+
+  const userDataDir = app.getPath('userData')
+  model = new AppModel({ userDataDir, appVersion: app.getVersion() })
+  terminals = new TerminalManager(pushToWindow)
+  remoteHost = new RemoteHost(buildRemoteBridge(model), {
+    dataDir: userDataDir,
+    onStateChanged: (state) => model?.setRemoteState(state)
+  })
+  model.setRemoteState(remoteHost.getState())
+  ipcHandle = registerIpc(model, terminals, remoteHost, getMainWindow)
+
+  // Kick the model off once the window exists; events emitted from here on
+  // are forwarded to the renderer by registerIpc.
+  void model.bootstrap()
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
 })
 
+function shutdownAll(): void {
+  if (didShutdown) return
+  didShutdown = true
+  try {
+    // Stops the agent and tells attached devices the disconnect is
+    // deliberate (host/state with shuttingDown: true, per doc 34) — the
+    // bridge relays that emission before the host itself goes down.
+    model?.shutdown()
+  } catch {
+    // best-effort
+  }
+  try {
+    remoteHost?.shutdown()
+  } catch {
+    // best-effort
+  }
+  try {
+    terminals?.disposeAll()
+  } catch {
+    // best-effort
+  }
+  ipcHandle?.shutdown()
+}
+
+app.on('before-quit', shutdownAll)
+
 app.on('window-all-closed', () => {
   app.quit()
 })
+
+app.on('quit', shutdownAll)
 
 export function getMainWindow(): BrowserWindow | null {
   return mainWindow

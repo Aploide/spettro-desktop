@@ -1,0 +1,485 @@
+// One conversation with the agent — the port of Spettro/Model/ChatSession.swift
+// (docs/11). Owns the transcript, the live ACP session id, the displayed
+// config state, and the streaming flags.
+//
+// Unlike the SwiftUI original (an ObservableObject), every mutation here
+// reports itself through two callbacks the AppModel installs:
+//   onItem — a transcript item was appended or mutated (→ 'chat-item' upsert)
+//   onMeta — chat-scoped metadata changed (→ 'chat-meta' patch)
+// Nothing is batched or throttled: one mutation, one emission.
+
+import { randomUUID } from 'crypto'
+import { basename } from 'path'
+import type {
+  ACPCommand,
+  ACPConfigOption,
+  ACPPlanEntry,
+  ACPToolCallEvent,
+  ACPToolStatus,
+  ACPUsage,
+  JSONValue
+} from '../../shared/acp'
+import type {
+  ChatDetail,
+  ChatMessage,
+  ChatSummary,
+  ImageAttachmentDTO,
+  StoredSession,
+  ToolCallItem,
+  TranscriptItem
+} from '../../shared/model'
+
+/** A single select or boolean config value, used for the local display state
+ *  and for queuing changes made before a live session exists. */
+export type ConfigValue = string | boolean
+
+export type ChatMetaPatch = Partial<
+  Pick<
+    ChatDetail,
+    | 'title'
+    | 'isBusy'
+    | 'configOptions'
+    | 'commands'
+    | 'plan'
+    | 'usage'
+    | 'acpSessionId'
+    | 'isPinned'
+    | 'isArchived'
+  >
+>
+
+export class ChatSession {
+  readonly id: string
+  readonly projectPath: string
+  readonly createdAt: number
+
+  /** The ACP session id, assigned once `session/new` succeeds. */
+  acpSessionId: string | null = null
+  title: string
+  items: TranscriptItem[] = []
+  configOptions: ACPConfigOption[] = []
+  commands: ACPCommand[] = []
+  isBusy = false
+  /** True until the first prompt is sent. */
+  isEmpty = true
+  isPinned = false
+  isArchived = false
+  /** Live context-window occupancy, streamed by the agent during a turn. */
+  usage: ACPUsage | null = null
+  /** The agent's current plan (task list), when it publishes one. */
+  plan: ACPPlanEntry[] = []
+
+  /** Changes the user made while this chat had no live ACP session yet;
+   *  AppModel replays them onto the session as soon as one attaches. */
+  pendingConfigChanges: Record<string, ConfigValue> = {}
+
+  /** Chunks of a re-delivered previous answer already suppressed (see
+   *  appendAssistant); reset whenever a genuinely new message starts. */
+  private replayTail = ''
+
+  onItem: ((session: ChatSession, item: TranscriptItem) => void) | null = null
+  onMeta: ((session: ChatSession, meta: ChatMetaPatch) => void) | null = null
+
+  constructor(projectPath: string, title?: string, id?: string, createdAt?: number) {
+    this.id = id ?? randomUUID()
+    this.projectPath = projectPath
+    this.createdAt = createdAt ?? Date.now()
+    this.title = title ?? basename(projectPath)
+  }
+
+  /** True for a chat that has never received a prompt (and never failed to
+   *  connect) — not a conversation, so AppModel doesn't persist it. */
+  get isPristine(): boolean {
+    return this.isEmpty && this.acpSessionId === null
+  }
+
+  get projectName(): string {
+    return basename(this.projectPath)
+  }
+
+  // -------------------------------------------------------------------------
+  // Snapshots
+  // -------------------------------------------------------------------------
+
+  /** Rebuilds a session from its on-disk snapshot. The result is "cold": it
+   *  carries the display transcript but no live ACP session yet. */
+  static restore(stored: StoredSession): ChatSession {
+    const session = new ChatSession(stored.projectPath, stored.title, stored.id, stored.createdAt)
+    session.acpSessionId = stored.acpSessionId ?? null
+    session.isPinned = stored.isPinned === true
+    session.isArchived = stored.isArchived === true
+    session.items = Array.isArray(stored.items) ? structuredClone(stored.items) : []
+    session.isEmpty = session.items.length === 0
+    session.configOptions = Array.isArray(stored.configOptions)
+      ? structuredClone(stored.configOptions)
+      : []
+    if (stored.pendingConfigChanges && typeof stored.pendingConfigChanges === 'object') {
+      for (const [key, value] of Object.entries(stored.pendingConfigChanges)) {
+        if (typeof value === 'string' || typeof value === 'boolean') {
+          session.pendingConfigChanges[key] = value
+        }
+      }
+    }
+    return session
+  }
+
+  /** A codable snapshot of this session for persistence. Live-only state
+   *  (isBusy, streaming flags, usage, plan, replayTail) is not persisted. */
+  snapshot(): StoredSession {
+    const pending: Record<string, JSONValue> = { ...this.pendingConfigChanges }
+    return {
+      id: this.id,
+      acpSessionId: this.acpSessionId,
+      projectPath: this.projectPath,
+      title: this.title,
+      createdAt: this.createdAt,
+      updatedAt: this.updatedAt,
+      isPinned: this.isPinned,
+      isArchived: this.isArchived,
+      items: structuredClone(this.items),
+      configOptions: structuredClone(this.configOptions),
+      pendingConfigChanges: pending
+    }
+  }
+
+  get updatedAt(): number {
+    const last = this.items[this.items.length - 1]
+    if (!last) return this.createdAt
+    return last.kind === 'message' ? last.message.timestamp : last.tool.timestamp
+  }
+
+  // -------------------------------------------------------------------------
+  // Projections
+  // -------------------------------------------------------------------------
+
+  summary(): ChatSummary {
+    return {
+      id: this.id,
+      title: this.title,
+      projectPath: this.projectPath,
+      createdAt: this.createdAt,
+      updatedAt: this.updatedAt,
+      isPinned: this.isPinned,
+      isArchived: this.isArchived,
+      isBusy: this.isBusy,
+      messageCount: this.items.length,
+      preview: this.previewText()
+    }
+  }
+
+  detail(): ChatDetail {
+    return {
+      id: this.id,
+      title: this.title,
+      projectPath: this.projectPath,
+      acpSessionId: this.acpSessionId,
+      isPinned: this.isPinned,
+      isArchived: this.isArchived,
+      isBusy: this.isBusy,
+      createdAt: this.createdAt,
+      items: structuredClone(this.items),
+      configOptions: structuredClone(this.configOptions),
+      commands: structuredClone(this.commands),
+      plan: structuredClone(this.plan),
+      usage: this.usage ? structuredClone(this.usage) : null
+    }
+  }
+
+  /** Walk back to the newest message worth showing — a tool call's title says
+   *  far less about a conversation than the message around it. */
+  private previewText(): string {
+    for (let i = this.items.length - 1; i >= 0; i--) {
+      const item = this.items[i]
+      if (item.kind !== 'message') continue
+      const trimmed = item.message.text.trim()
+      if (trimmed === '') continue
+      const firstLine = trimmed.split(/\r?\n/, 1)[0] ?? trimmed
+      return firstLine.slice(0, 120)
+    }
+    return ''
+  }
+
+  // -------------------------------------------------------------------------
+  // Emission helpers
+  // -------------------------------------------------------------------------
+
+  private emitItem(item: TranscriptItem): void {
+    this.onItem?.(this, item)
+  }
+
+  private emitMeta(meta: ChatMetaPatch): void {
+    this.onMeta?.(this, meta)
+  }
+
+  // -------------------------------------------------------------------------
+  // Metadata setters (each one emits the matching chat-meta patch)
+  // -------------------------------------------------------------------------
+
+  setBusy(value: boolean): void {
+    if (this.isBusy === value) return
+    this.isBusy = value
+    this.emitMeta({ isBusy: value })
+  }
+
+  setAcpSessionId(value: string | null): void {
+    this.acpSessionId = value
+    this.emitMeta({ acpSessionId: value })
+  }
+
+  setConfigOptions(options: ACPConfigOption[]): void {
+    this.configOptions = options
+    this.emitMeta({ configOptions: options })
+  }
+
+  setCommands(commands: ACPCommand[]): void {
+    this.commands = commands
+    this.emitMeta({ commands })
+  }
+
+  setPlan(entries: ACPPlanEntry[]): void {
+    this.plan = entries
+    this.emitMeta({ plan: entries })
+  }
+
+  setUsage(usage: ACPUsage | null): void {
+    this.usage = usage
+    this.emitMeta({ usage })
+  }
+
+  setPinned(value: boolean): void {
+    this.isPinned = value
+    this.emitMeta({ isPinned: value })
+  }
+
+  setArchived(value: boolean): void {
+    this.isArchived = value
+    this.emitMeta({ isArchived: value })
+  }
+
+  // -------------------------------------------------------------------------
+  // Config state
+  // -------------------------------------------------------------------------
+
+  /** Updates the displayed value of one option without a round-trip, so the
+   *  UI reflects the user's choice instantly (the agent is synced separately). */
+  applyLocalConfigValue(id: string, value: ConfigValue): void {
+    const option = this.configOptions.find((o) => o.id === id)
+    if (!option) return
+    if (option.kind.type === 'select' && typeof value === 'string') {
+      option.kind.currentValue = value
+    } else if (option.kind.type === 'boolean' && typeof value === 'boolean') {
+      option.kind.currentValue = value
+    } else {
+      return
+    }
+    this.emitMeta({ configOptions: this.configOptions })
+  }
+
+  /** The current value of every displayed option, used to reconcile a newly
+   *  attached live session with what the user was shown. */
+  displayedConfigValues(): Record<string, ConfigValue> {
+    const values: Record<string, ConfigValue> = {}
+    for (const option of this.configOptions) {
+      if (option.kind.type === 'select') {
+        const current = option.kind.currentValue
+        if (current !== null && current !== '') values[option.id] = current
+      } else {
+        values[option.id] = option.kind.currentValue
+      }
+    }
+    return values
+  }
+
+  // -------------------------------------------------------------------------
+  // Transcript mutation
+  // -------------------------------------------------------------------------
+
+  appendUserMessage(text: string, attachments: ImageAttachmentDTO[] = []): void {
+    const message: ChatMessage = {
+      id: randomUUID(),
+      role: 'user',
+      text,
+      attachments,
+      isStreaming: false,
+      timestamp: Date.now()
+    }
+    const item: TranscriptItem = { kind: 'message', message }
+    this.items.push(item)
+    this.isEmpty = false
+    this.emitItem(item)
+    // Derive the chat title from the first prompt (replacing the project-name
+    // placeholder), "Image" for an attachment-only prompt.
+    if (this.title === this.projectName || this.title === '') {
+      const titleSource = text === '' ? 'Image' : text
+      this.title = ChatSession.derivedTitle(titleSource)
+      this.emitMeta({ title: this.title })
+    }
+  }
+
+  appendNotice(text: string, isError: boolean): void {
+    const message: ChatMessage = {
+      id: randomUUID(),
+      role: 'notice',
+      noticeIsError: isError,
+      text,
+      attachments: [],
+      isStreaming: false,
+      timestamp: Date.now()
+    }
+    const item: TranscriptItem = { kind: 'message', message }
+    this.items.push(item)
+    this.emitItem(item)
+  }
+
+  /** Appends to (or starts) the current streaming reasoning bubble. */
+  appendReasoning(delta: string): void {
+    const last = this.items[this.items.length - 1]
+    if (last && last.kind === 'message' && last.message.role === 'reasoning' && last.message.isStreaming) {
+      last.message.text += delta
+      this.emitItem(last)
+      return
+    }
+    this.pushStreamingMessage('reasoning', delta)
+  }
+
+  /** Appends to (or starts) the current streaming assistant answer bubble.
+   *  Guards against duplicate delivery: the CLI re-sends the turn's final
+   *  answer in situations like a degraded resume, and blindly appending
+   *  every chunk would duplicate the last message across relaunches. */
+  appendAssistant(delta: string): void {
+    this.endReasoningStream()
+    const last = this.items[this.items.length - 1]
+    if (last && last.kind === 'message' && last.message.role === 'assistant') {
+      const message = last.message
+      if (message.isStreaming) {
+        message.text += delta
+        this.emitItem(last)
+        return
+      }
+      // A finished bubble with identical text is a re-delivery — drop it.
+      if (message.text === delta) return
+      // A finished bubble that is a strict prefix of the new chunk is a
+      // re-send of a longer final answer — replace instead of duplicating.
+      if (delta.startsWith(message.text)) {
+        message.text = delta
+        this.emitItem(last)
+        return
+      }
+      // A re-delivery of the previous turn's answer split across several
+      // chunks: suppress chunks while they keep re-stating the tail of the
+      // last finished bubble. `replayTail` accumulates what was suppressed,
+      // so the whole replay is dropped chunk by chunk instead of becoming
+      // a duplicated bubble.
+      const candidate = this.replayTail + delta
+      if (message.text.endsWith(candidate)) {
+        this.replayTail = candidate
+        return
+      }
+    }
+    this.replayTail = ''
+    this.pushStreamingMessage('assistant', delta)
+  }
+
+  private pushStreamingMessage(role: 'assistant' | 'reasoning', text: string): void {
+    const message: ChatMessage = {
+      id: randomUUID(),
+      role,
+      text,
+      attachments: [],
+      isStreaming: true,
+      timestamp: Date.now()
+    }
+    const item: TranscriptItem = { kind: 'message', message }
+    this.items.push(item)
+    this.emitItem(item)
+  }
+
+  /** Upsert keyed on the ACP toolCallId: merge in place when known (each
+   *  field applied only if present in this event), append when new. */
+  applyToolEvent(event: ACPToolCallEvent, isStart: boolean): void {
+    const combinedOutput = event.texts.join('\n')
+    const diffs = event.diffs.map((d) => ({
+      path: d.path,
+      oldText: d.oldText,
+      newText: d.newText
+    }))
+    const argsJSON = encodeArgs(event.rawInput)
+
+    const existing = this.items.find(
+      (item): item is Extract<TranscriptItem, { kind: 'tool' }> =>
+        item.kind === 'tool' && item.tool.id === event.toolCallId
+    )
+    if (existing) {
+      const tool = existing.tool
+      if (event.title !== undefined) tool.title = event.title
+      if (event.kind !== undefined) tool.kind = event.kind
+      if (event.status !== undefined) tool.status = event.status
+      // Only when non-empty, so a contentless update doesn't wipe earlier output.
+      if (combinedOutput !== '') tool.output = combinedOutput
+      if (diffs.length > 0) tool.diffs = diffs
+      if (event.locations.length > 0) tool.locations = event.locations
+      if (argsJSON !== undefined) tool.argsJSON = argsJSON
+      this.emitItem(existing)
+      return
+    }
+
+    const status: ACPToolStatus = event.status ?? (isStart ? 'in_progress' : 'completed')
+    const tool: ToolCallItem = {
+      id: event.toolCallId,
+      title: event.title ?? 'Tool call',
+      status,
+      output: combinedOutput,
+      diffs,
+      locations: event.locations,
+      timestamp: Date.now()
+    }
+    if (event.kind !== undefined) tool.kind = event.kind
+    if (argsJSON !== undefined) tool.argsJSON = argsJSON
+    const item: TranscriptItem = { kind: 'tool', tool }
+    this.items.push(item)
+    this.emitItem(item)
+  }
+
+  /** Marks the current streamed bubbles as finished at turn's end. */
+  endStreaming(): void {
+    this.endReasoningStream()
+    const last = this.items[this.items.length - 1]
+    if (last && last.kind === 'message' && last.message.isStreaming) {
+      last.message.isStreaming = false
+      this.emitItem(last)
+    }
+  }
+
+  /** Flips every streaming reasoning bubble to finished, so a turn's
+   *  reasoning phase closes the moment the first answer chunk arrives. */
+  private endReasoningStream(): void {
+    for (const item of this.items) {
+      if (item.kind === 'message' && item.message.role === 'reasoning' && item.message.isStreaming) {
+        item.message.isStreaming = false
+        this.emitItem(item)
+      }
+    }
+  }
+
+  static derivedTitle(text: string): string {
+    const trimmed = text.trim()
+    const firstLine = trimmed.split(/\r?\n/, 1)[0] ?? trimmed
+    return firstLine.slice(0, 48)
+  }
+}
+
+/** The full ACP rawInput re-encoded as JSON — the reliable argument source
+ *  (mirrors JSONValue.encodedJSONString: objects encode, strings pass
+ *  through, everything else is dropped). */
+function encodeArgs(raw: JSONValue | undefined): string | undefined {
+  if (raw === undefined || raw === null) return undefined
+  if (typeof raw === 'string') return raw
+  if (typeof raw === 'object' && !Array.isArray(raw)) {
+    try {
+      return JSON.stringify(raw)
+    } catch {
+      return undefined
+    }
+  }
+  return undefined
+}

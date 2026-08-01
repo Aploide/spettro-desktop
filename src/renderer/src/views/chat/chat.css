@@ -212,6 +212,39 @@
   white-space: nowrap;
 }
 
+/* Git stat popover (GitStatChip) */
+.popover--git {
+  min-width: 260px;
+  max-width: 420px;
+}
+
+.git-file-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-md);
+  padding: 1px 0;
+}
+
+.git-file-path {
+  flex: 1;
+  min-width: 0;
+  font-family: inherit;
+  font-size: 11.5px;
+  font-family: ui-monospace, monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  direction: rtl; /* head-truncation approximation: keep the tail visible */
+  text-align: left;
+}
+
+.git-file-more {
+  font-size: 11px;
+  color: var(--text-secondary);
+  opacity: 0.7;
+  padding-top: 2px;
+}
+
 .plan-row {
   display: flex;
   align-items: flex-start;

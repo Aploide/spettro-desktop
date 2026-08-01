@@ -11,7 +11,7 @@ import type {
   ACPQuestionAnswer,
   ACPQuestionRequest
 } from './acp'
-import type { AppStateDTO, ChatDetail, TranscriptItem } from './model'
+import type { AppStateDTO, ChatDetail, GitStat, TranscriptItem } from './model'
 
 // ---------------------------------------------------------------------------
 // Main → renderer push events
@@ -106,6 +106,8 @@ export interface RendererApi {
   // Misc
   openExternal(url: string): Promise<void>
   showItemInFolder(path: string): Promise<void>
+  /** Uncommitted-change stats for the header's git chip (GitStatModel port). */
+  gitStat(projectPath: string): Promise<GitStat>
 }
 
 export type RendererApiMethod = keyof RendererApi

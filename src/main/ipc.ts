@@ -5,6 +5,7 @@
 import { BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import { EVENT_CHANNEL, INVOKE_CHANNEL, type MainEvent, type RendererApi } from '../shared/ipc'
 import type { AppModel } from './model/appModel'
+import { gitStat } from './model/gitStat'
 import { loadMemory, saveMemory } from './model/memoryStore'
 import type { RemoteHost } from './remote/host'
 import type { TerminalManager } from './terminal/panels'
@@ -121,7 +122,8 @@ export function registerIpc(
     },
     showItemInFolder: async (path) => {
       shell.showItemInFolder(path)
-    }
+    },
+    gitStat: (projectPath) => gitStat(projectPath)
   }
 
   ipcMain.handle(INVOKE_CHANNEL, (_event, method: string, ...args: unknown[]) => {

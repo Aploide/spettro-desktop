@@ -168,6 +168,12 @@ export interface PairedDeviceDTO {
   revoked: boolean
 }
 
+/** Uncommitted working-tree stats for the chat header's git chip. */
+export interface GitStat {
+  branch: string
+  files: { path: string; added: number; removed: number }[]
+}
+
 export interface AppStateDTO {
   phase: Phase
   cli: CLIInfo | null

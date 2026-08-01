@@ -4,7 +4,9 @@
 
 import { useEffect, useRef, useState } from 'react'
 import type { ACPPlanEntry, ACPUsage } from '@shared/acp'
-import type { ChatDetail } from '@shared/model'
+import type { ChatDetail, GitStat } from '@shared/model'
+import { call } from '@renderer/state/store'
+import { DiffStatLabel } from './transcript/ToolCallView'
 
 /** `projectURL.lastPathComponent` — works for both / and \ separators. */
 export function projectName(projectPath: string): string {
@@ -13,22 +15,23 @@ export function projectName(projectPath: string): string {
 }
 
 export default function ChatHeader({ chat }: { chat: ChatDetail }): JSX.Element {
+  const git = useGitStat(chat.projectPath, chat.isBusy)
+  const name = projectName(chat.projectPath)
   return (
     <div className="chat-header">
       <div className="chat-header-titles">
         <div className="chat-header-title">{chat.title}</div>
         <div className="chat-header-project">
           <FolderIcon />
-          {/* The Swift header appends " · <branch>" from GitStatModel; the
-              branch is omitted here until git stats are wired up (see
-              GitStatChip below). */}
-          <span className="chat-header-project-name">{projectName(chat.projectPath)}</span>
+          <span className="chat-header-project-name">
+            {git.branch ? `${name} · ${git.branch}` : name}
+          </span>
         </div>
       </div>
       <div className="chat-header-spacer" />
       <div className="chat-header-chips">
         {chat.plan.length > 0 && <PlanChip entries={chat.plan} />}
-        <GitStatChip />
+        {git.files.length > 0 && <GitStatChip git={git} projectPath={chat.projectPath} />}
         {chat.usage && <ContextMeter usage={chat.usage} />}
       </div>
     </div>
@@ -111,19 +114,70 @@ function PlanChip({ entries }: { entries: ACPPlanEntry[] }): JSX.Element {
 // Git stat chip
 // ---------------------------------------------------------------------------
 
-/**
- * TODO(integration): GitStatChip / GitStatModel port.
- *
- * The macOS header owns a view-local GitStatModel that shells out to git every
- * 5 seconds (`rev-parse --abbrev-ref HEAD`, `diff HEAD --numstat`,
- * `ls-files --others --exclude-standard`) and renders a +N/-N chip with a
- * per-file popover, plus the branch name in the title block. The renderer
- * process cannot spawn git and the main process currently exposes no endpoint
- * for it, so the chip is intentionally skipped; this stub keeps the header's
- * chip-cluster structure so integration only has to fill it in.
- */
-function GitStatChip(): null {
-  return null
+/** GitStatModel port: polls the main-process `gitStat` endpoint every 5s and
+ *  immediately when the session's busy state flips (the Swift `refreshSoon`
+ *  triggers). */
+function useGitStat(projectPath: string, isBusy: boolean): GitStat {
+  const [stat, setStat] = useState<GitStat>({ branch: '', files: [] })
+  useEffect(() => {
+    let alive = true
+    const refresh = (): void => {
+      void call('gitStat', projectPath).then((s) => {
+        if (alive) setStat(s)
+      })
+    }
+    refresh()
+    const timer = setInterval(refresh, 5000)
+    return () => {
+      alive = false
+      clearInterval(timer)
+    }
+  }, [projectPath, isBusy])
+  return stat
+}
+
+function GitStatChip({ git, projectPath }: { git: GitStat; projectPath: string }): JSX.Element {
+  const [open, setOpen] = useState(false)
+  const ref = useDismiss(open, () => setOpen(false))
+  const added = git.files.reduce((sum, f) => sum + f.added, 0)
+  const removed = git.files.reduce((sum, f) => sum + f.removed, 0)
+
+  return (
+    <div className="chip-wrap" ref={ref}>
+      <button
+        type="button"
+        className="chip"
+        title={`Uncommitted changes in ${projectName(projectPath)}`}
+        onClick={() => setOpen((o) => !o)}
+      >
+        <PlusMinusIcon />
+        <DiffStatLabel added={added} removed={removed} />
+      </button>
+      {open && (
+        <div className="popover popover--git">
+          <div className="popover-heading">Uncommitted changes</div>
+          {git.files.slice(0, 14).map((file) => (
+            <div className="git-file-row" key={file.path}>
+              <span className="git-file-path">{file.path}</span>
+              <DiffStatLabel added={file.added} removed={file.removed} />
+            </div>
+          ))}
+          {git.files.length > 14 && (
+            <div className="git-file-more">… {git.files.length - 14} more files</div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function PlusMinusIcon(): JSX.Element {
+  return (
+    <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <circle cx="8" cy="8" r="6.6" stroke="currentColor" strokeWidth="1.2" />
+      <path d="M5 6.2h6M8 3.2v6M5 10.6h6" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+    </svg>
+  )
 }
 
 // ---------------------------------------------------------------------------

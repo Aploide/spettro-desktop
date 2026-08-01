@@ -1,0 +1,575 @@
+/* Modal sheets — PermissionSheet, QuestionSheet, MemoryView.
+   Port of the SwiftUI sheet presentation (docs 30/32/33). All colors come
+   from theme.css tokens; alpha variants are derived with color-mix. */
+
+/* ------------------------------------------------------------------ */
+/* Backdrop + card                                                     */
+/* ------------------------------------------------------------------ */
+
+.sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.45);
+}
+
+.sheet-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-lg);
+  background: var(--surface-raised);
+  border: 1px solid var(--hairline);
+  border-radius: var(--rad-lg);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.35);
+  padding: var(--sp-xl);
+  max-height: calc(100vh - 2 * var(--sp-xl));
+  overflow: hidden;
+  outline: none;
+}
+
+/* Fixed widths from the Swift sheets. */
+.sheet-card--permission {
+  width: 460px;
+  max-width: calc(100vw - 2 * var(--sp-xl));
+}
+.sheet-card--question {
+  width: 640px;
+  max-width: calc(100vw - 2 * var(--sp-xl));
+}
+.sheet-card--memory {
+  width: 560px;
+  max-width: calc(100vw - 2 * var(--sp-xl));
+}
+
+/* ------------------------------------------------------------------ */
+/* Header                                                              */
+/* ------------------------------------------------------------------ */
+
+.sheet-header {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-sm);
+}
+
+.sheet-header svg {
+  width: 22px;
+  height: 22px;
+  color: var(--accent);
+  flex: none;
+}
+
+.sheet-headline {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.sheet-context {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.45;
+  user-select: text;
+}
+
+/* ------------------------------------------------------------------ */
+/* Buttons                                                             */
+/* ------------------------------------------------------------------ */
+
+.sheet-btn {
+  appearance: none;
+  font: inherit;
+  font-size: 13px;
+  padding: 6px var(--sp-md);
+  border-radius: var(--rad-sm);
+  border: 1px solid var(--hairline);
+  background: color-mix(in srgb, var(--text-primary) 6%, transparent);
+  color: var(--text-primary);
+  cursor: pointer;
+  min-width: 90px;
+}
+.sheet-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--text-primary) 11%, transparent);
+}
+.sheet-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.sheet-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* .glassProminent tinted Theme.accent */
+.sheet-btn--prominent {
+  background: var(--accent);
+  border-color: transparent;
+  color: #fff;
+}
+.sheet-btn--prominent:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 88%, #fff);
+}
+
+/* reject / secondary-tinted options */
+.sheet-btn--subtle {
+  background: color-mix(in srgb, var(--text-primary) 6%, transparent);
+  color: var(--text-primary);
+}
+
+.sheet-btn-row {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--sp-sm);
+  flex-wrap: wrap;
+}
+
+.sheet-kbd-hint {
+  font-size: 10px;
+  opacity: 0.6;
+  margin-left: 6px;
+}
+
+/* ------------------------------------------------------------------ */
+/* PermissionSheet                                                     */
+/* ------------------------------------------------------------------ */
+
+.perm-title {
+  font-size: 13px;
+  color: var(--text-primary);
+  line-height: 1.4;
+  user-select: text;
+  overflow-wrap: anywhere;
+}
+
+.perm-command {
+  max-height: 160px;
+  overflow: auto;
+  border: 1px solid var(--hairline);
+  border-radius: var(--rad-sm);
+  background: color-mix(in srgb, var(--text-primary) 4%, transparent);
+}
+.perm-command pre {
+  margin: 0;
+  padding: var(--sp-sm);
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+/* ------------------------------------------------------------------ */
+/* QuestionSheet                                                       */
+/* ------------------------------------------------------------------ */
+
+.qs-body {
+  overflow-y: auto;
+  max-height: 380px;
+  padding: 2px;
+}
+
+.qs-tabstrip {
+  display: flex;
+  gap: var(--sp-sm);
+  overflow-x: auto;
+  padding: 2px 0;
+  flex: none;
+}
+
+.qs-chip {
+  appearance: none;
+  font: inherit;
+  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-xs);
+  padding: 6px var(--sp-md);
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--text-secondary) 25%, transparent);
+  background: transparent;
+  color: var(--text-primary);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.qs-chip svg {
+  width: 11px;
+  height: 11px;
+  color: var(--text-secondary);
+  flex: none;
+}
+.qs-chip--done svg {
+  color: var(--diff-added);
+}
+.qs-chip--active {
+  font-weight: 600;
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 50%, transparent);
+}
+
+.qs-question {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-primary);
+  line-height: 1.4;
+  user-select: text;
+}
+
+.qs-caption {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.qs-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-md);
+}
+
+/* Side-by-side: options left, preview pane right (when previews exist). */
+.qs-split {
+  display: flex;
+  gap: var(--sp-md);
+  align-items: stretch;
+  min-width: 0;
+}
+.qs-split .qs-options {
+  flex: 1 1 55%;
+  min-width: 0;
+}
+.qs-options {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-sm);
+}
+
+.qs-preview-pane {
+  flex: 1 1 45%;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-xs);
+  border: 1px solid var(--hairline);
+  border-radius: var(--rad-sm);
+  background: color-mix(in srgb, var(--text-primary) 4%, transparent);
+  padding: var(--sp-sm);
+}
+.qs-preview-title {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.qs-preview-pane pre {
+  margin: 0;
+  flex: 1;
+  overflow: auto;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-primary);
+  white-space: pre;
+  user-select: text;
+}
+.qs-preview-empty {
+  font-size: 11px;
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
+.qs-option {
+  appearance: none;
+  font: inherit;
+  text-align: left;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-md);
+  width: 100%;
+  padding: var(--sp-md);
+  border-radius: var(--rad-sm);
+  border: 1.5px solid var(--hairline);
+  background: var(--surface-raised);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+.qs-option:hover {
+  background: color-mix(in srgb, var(--text-primary) 5%, var(--surface-raised));
+}
+.qs-option--selected {
+  border-color: color-mix(in srgb, var(--accent) 60%, transparent);
+}
+.qs-option svg {
+  width: 15px;
+  height: 15px;
+  flex: none;
+  margin-top: 1px;
+  color: var(--text-secondary);
+}
+.qs-option--selected svg {
+  color: var(--accent);
+}
+
+.qs-option-label {
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.35;
+}
+.qs-option-desc {
+  font-size: 11px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+  margin-top: 2px;
+}
+
+.qs-badge {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--accent);
+  margin-left: var(--sp-sm);
+  vertical-align: 1px;
+  white-space: nowrap;
+}
+
+.qs-field-label {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.qs-input {
+  font: inherit;
+  font-size: 13px;
+  width: 100%;
+  padding: 6px var(--sp-sm);
+  border-radius: var(--rad-sm);
+  border: 1px solid var(--hairline);
+  background: color-mix(in srgb, var(--text-primary) 4%, transparent);
+  color: var(--text-primary);
+  user-select: text;
+}
+.qs-input:focus {
+  outline: 2px solid color-mix(in srgb, var(--accent) 60%, transparent);
+  outline-offset: -1px;
+}
+
+.qs-add-note {
+  appearance: none;
+  font: inherit;
+  font-size: 11px;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-xs);
+  border: none;
+  background: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 0;
+  align-self: flex-start;
+}
+.qs-add-note:hover {
+  color: var(--text-primary);
+}
+.qs-add-note svg {
+  width: 12px;
+  height: 12px;
+}
+
+/* Review page */
+.qs-review-row {
+  appearance: none;
+  font: inherit;
+  text-align: left;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-md);
+  width: 100%;
+  padding: var(--sp-md);
+  border-radius: var(--rad-sm);
+  border: 1px solid var(--hairline);
+  background: var(--surface-raised);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+.qs-review-row:hover {
+  background: color-mix(in srgb, var(--text-primary) 5%, var(--surface-raised));
+}
+.qs-review-header {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+.qs-review-answer {
+  font-size: 13px;
+  margin-top: 2px;
+  line-height: 1.4;
+}
+.qs-review-answer--missing {
+  color: var(--mode-yellow);
+}
+.qs-review-note {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-top: 2px;
+}
+.qs-review-chevron {
+  margin-left: auto;
+  flex: none;
+  width: 10px;
+  height: 10px;
+  color: var(--text-secondary);
+  align-self: center;
+}
+
+.qs-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-sm);
+  font-size: 11px;
+  color: var(--mode-yellow);
+  line-height: 1.4;
+}
+.qs-warning svg {
+  width: 13px;
+  height: 13px;
+  flex: none;
+  margin-top: 1px;
+}
+
+.qs-footer {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-sm);
+  flex: none;
+}
+.qs-footer .qs-spacer {
+  flex: 1;
+}
+
+/* ------------------------------------------------------------------ */
+/* MemoryView                                                          */
+/* ------------------------------------------------------------------ */
+
+.mem-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-sm);
+}
+
+.mem-segmented {
+  display: inline-flex;
+  border: 1px solid var(--hairline);
+  border-radius: var(--rad-sm);
+  overflow: hidden;
+  max-width: 260px;
+}
+.mem-segment {
+  appearance: none;
+  font: inherit;
+  font-size: 12px;
+  padding: 5px var(--sp-md);
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.mem-segment + .mem-segment {
+  border-left: 1px solid var(--hairline);
+}
+.mem-segment--active {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  color: var(--text-primary);
+  font-weight: 600;
+}
+.mem-segment:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.mem-path {
+  font-size: 11px;
+  color: color-mix(in srgb, var(--text-secondary) 70%, transparent);
+  user-select: text;
+  overflow-wrap: anywhere;
+}
+
+.mem-editor {
+  font-family: 'SF Mono', SFMono-Regular, ui-monospace, 'Cascadia Mono', 'Segoe UI Mono',
+    'JetBrains Mono', Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  width: 100%;
+  min-height: 260px;
+  resize: vertical;
+  padding: var(--sp-sm);
+  border-radius: var(--rad-md);
+  border: 1px solid color-mix(in srgb, var(--text-primary) 10%, transparent);
+  background: color-mix(in srgb, var(--text-primary) 4%, transparent);
+  color: var(--text-primary);
+  user-select: text;
+}
+.mem-editor:focus {
+  outline: 2px solid color-mix(in srgb, var(--accent) 50%, transparent);
+  outline-offset: -1px;
+}
+
+.mem-saved {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-xs);
+  font-size: 11px;
+  color: var(--diff-added);
+}
+.mem-saved svg {
+  width: 12px;
+  height: 12px;
+}
+
+.mem-dirty {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-xs);
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+.mem-dirty::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--mode-yellow);
+}
+
+.mem-error {
+  font-size: 11px;
+  color: var(--diff-removed);
+  line-height: 1.4;
+  user-select: text;
+}
+
+.mem-caption {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.mem-close {
+  appearance: none;
+  border: none;
+  background: none;
+  color: var(--text-secondary);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: var(--rad-sm);
+  margin-left: auto;
+}
+.mem-close:hover {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--text-primary) 8%, transparent);
+}

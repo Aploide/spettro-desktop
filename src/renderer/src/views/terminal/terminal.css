@@ -1,0 +1,211 @@
+/* Terminal drawer — port of TerminalDrawerView.swift styling (doc 17).
+   The terminal body pins the canvas palette; chrome uses theme.css tokens. */
+
+.terminal-drawer {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  flex-shrink: 0;
+  min-height: 0;
+  background: var(--canvas);
+  border-top: 1px solid var(--hairline);
+  overflow: hidden;
+}
+
+.terminal-drawer--hidden {
+  display: none;
+}
+
+/* Thin grab strip on the top edge: drag up to grow, down to shrink. */
+.terminal-drawer__handle {
+  height: 7px;
+  flex-shrink: 0;
+  cursor: ns-resize;
+  position: relative;
+  touch-action: none;
+}
+.terminal-drawer__handle::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 3px;
+  height: 1px;
+  background: var(--hairline);
+}
+.terminal-drawer__handle:hover::after {
+  background: var(--accent);
+  opacity: 0.5;
+}
+
+/* ---- tab bar ---------------------------------------------------------- */
+
+.terminal-drawer__tabbar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-xs);
+  padding: var(--sp-xs) var(--sp-sm);
+  background: var(--canvas);
+  border-bottom: 1px solid var(--hairline);
+  flex-shrink: 0;
+}
+
+.terminal-drawer__tabs {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-xs);
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.terminal-drawer__tabs::-webkit-scrollbar {
+  display: none;
+}
+
+/* Chip idiom, mirroring the app's tab strips elsewhere. */
+.terminal-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px var(--sp-sm);
+  border-radius: var(--rad-sm);
+  font-size: 12px;
+  color: var(--text-primary);
+  white-space: nowrap;
+  cursor: default;
+  user-select: none;
+  flex-shrink: 0;
+}
+.terminal-tab--selected {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+}
+.terminal-tab:not(.terminal-tab--selected):hover {
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.terminal-tab__glyph {
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.terminal-tab__title {
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.terminal-tab__ended {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.terminal-tab__close,
+.terminal-drawer__iconbtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: var(--rad-sm);
+}
+.terminal-tab__close {
+  width: 14px;
+  height: 14px;
+  font-size: 12px;
+}
+.terminal-tab__close:hover,
+.terminal-drawer__iconbtn:hover {
+  color: var(--text-primary);
+}
+
+.terminal-drawer__iconbtn {
+  width: 22px;
+  height: 22px;
+  font-size: 15px;
+  flex-shrink: 0;
+}
+.terminal-drawer__iconbtn:hover {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+/* ---- terminal body ---------------------------------------------------- */
+
+.terminal-drawer__body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  background: var(--canvas);
+}
+
+/* One slot per tab, all mounted; only the active one is visible so
+   scrollback survives tab (and project) switches. */
+.terminal-slot {
+  position: absolute;
+  inset: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+.terminal-slot--active {
+  visibility: visible;
+  pointer-events: auto;
+}
+
+.terminal-slot__host {
+  position: absolute;
+  inset: 0;
+  padding: var(--sp-xs) var(--sp-sm) 0 var(--sp-sm);
+}
+.terminal-slot__host .xterm {
+  height: 100%;
+}
+
+/* Subtle exited state shown briefly before the tab closes. */
+.terminal-slot__exited {
+  position: absolute;
+  left: 50%;
+  bottom: var(--sp-md);
+  transform: translateX(-50%);
+  padding: 3px 10px;
+  border-radius: var(--rad-sm);
+  background: var(--surface-raised);
+  border: 1px solid var(--hairline);
+  color: var(--text-secondary);
+  font-size: 11px;
+  pointer-events: none;
+}
+
+/* ---- empty state ------------------------------------------------------ */
+
+.terminal-drawer__empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-sm);
+}
+
+.terminal-drawer__empty-label {
+  color: var(--text-secondary);
+}
+
+.terminal-drawer__newbtn {
+  padding: 4px 12px;
+  border-radius: var(--rad-sm);
+  border: 1px solid var(--hairline);
+  background: var(--surface-raised);
+  color: var(--text-primary);
+  font-size: 12px;
+  cursor: pointer;
+}
+.terminal-drawer__newbtn:hover {
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface-raised));
+}

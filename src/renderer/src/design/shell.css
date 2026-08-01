@@ -1,0 +1,1021 @@
+/* Shell chrome — routing screens, sidebar, picker, onboarding, settings.
+   Companion to theme.css; every color goes through the theme tokens (plus the
+   plan-tier constants ported from PlanBadge.swift, declared below). */
+
+:root {
+  /* Plan tiers (PlanBadge.swift). Pastels tuned for dark; light overrides. */
+  --plan-muted: #9ca3af;
+  --plan-pro: #c4b5fd;
+  /* The TUI's six-color rainbow for the MAX badge. */
+  --plan-rainbow: #ff6b6b, #ff9e4f, #ffd93d, #6bcb77, #4d96ff, #c77dff;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --plan-pro: #7c3aed;
+  }
+}
+
+/* ---------------------------------------------------------------- layout */
+
+.app-root {
+  height: 100%;
+}
+
+.split {
+  display: flex;
+  height: 100%;
+}
+
+.detail {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.divider {
+  flex: none;
+  height: 1px;
+  background: var(--hairline);
+}
+
+.divider--faint {
+  opacity: 0.5;
+}
+
+/* --------------------------------------------------------------- buttons */
+
+.btn {
+  appearance: none;
+  font: inherit;
+  font-size: 13px;
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--surface-raised) 80%, transparent);
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  padding: 5px 14px;
+  cursor: default;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.btn:hover {
+  background: var(--surface-raised);
+}
+
+.btn:active {
+  filter: brightness(1.2);
+}
+
+.btn--prominent {
+  background: var(--accent);
+  border-color: transparent;
+  color: #fff;
+  font-weight: 500;
+}
+
+.btn--prominent:hover {
+  background: var(--accent);
+  filter: brightness(1.08);
+}
+
+.btn--large {
+  padding: 9px 20px;
+  font-size: 14px;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.icon-btn {
+  appearance: none;
+  background: none;
+  border: none;
+  padding: 3px;
+  margin: 0;
+  color: var(--text-secondary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  cursor: default;
+}
+
+.icon-btn:hover {
+  color: var(--text-primary);
+}
+
+.icon-btn--accent {
+  color: var(--accent);
+}
+
+.icon-btn--accent:hover {
+  color: var(--accent);
+  filter: brightness(1.15);
+}
+
+.text-input {
+  flex: 1;
+  min-width: 0;
+  font-family: 'SF Mono', SFMono-Regular, ui-monospace, 'Cascadia Mono', 'Segoe UI Mono',
+    'JetBrains Mono', Menlo, Consolas, monospace;
+  font-size: 12px;
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--text-secondary) 10%, transparent);
+  border: 1px solid var(--hairline);
+  border-radius: var(--rad-sm);
+  padding: 6px 10px;
+  outline: none;
+  user-select: text;
+}
+
+.text-input:focus {
+  border-color: color-mix(in srgb, var(--accent) 50%, transparent);
+}
+
+.link {
+  appearance: none;
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-size: 12px;
+  color: var(--accent);
+  cursor: default;
+}
+
+.link:hover {
+  text-decoration: underline;
+}
+
+/* --------------------------------------------------------------- spinner */
+
+.spinner {
+  display: inline-block;
+  flex: none;
+  border-style: solid;
+  border-color: color-mix(in srgb, currentColor 22%, transparent);
+  border-top-color: currentColor;
+  border-radius: 50%;
+  color: var(--text-secondary);
+  animation: spinner-rotate 0.8s linear infinite;
+}
+
+@keyframes spinner-rotate {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ------------------------------------------------------------ plan badge */
+
+.plan-badge {
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.plan-badge--free {
+  color: var(--plan-muted);
+}
+
+.plan-badge--pro {
+  color: var(--plan-pro);
+}
+
+.plan-badge--none {
+  color: color-mix(in srgb, var(--text-secondary) 70%, transparent);
+}
+
+/* The MAX rainbow: two copies of the palette slid across the text so all six
+   colors stay visible at every instant (see RainbowText in PlanBadge.swift). */
+.plan-badge--max {
+  background-image: linear-gradient(90deg, var(--plan-rainbow), var(--plan-rainbow));
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: plan-rainbow 3s linear infinite;
+}
+
+@keyframes plan-rainbow {
+  from {
+    background-position: 0% 0;
+  }
+  to {
+    background-position: 200% 0;
+  }
+}
+
+/* ------------------------------------------------------ loading / failure */
+
+.loading-view,
+.failure-view {
+  flex: 1;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-lg);
+  padding: var(--sp-lg);
+}
+
+.loading-message {
+  color: var(--text-secondary);
+}
+
+.failure-icon {
+  color: var(--mode-yellow);
+}
+
+.failure-title {
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.failure-message {
+  color: var(--text-secondary);
+  text-align: center;
+  max-width: 420px;
+  user-select: text;
+}
+
+.failure-log {
+  width: 520px;
+  max-width: 90%;
+  max-height: 160px;
+  overflow-y: auto;
+  padding: var(--sp-sm);
+  user-select: text;
+}
+
+.failure-buttons {
+  display: flex;
+  gap: var(--sp-sm);
+}
+
+/* --------------------------------------------------------------- sidebar */
+
+.sidebar {
+  flex: none;
+  width: 270px;
+  min-width: 240px;
+  max-width: 320px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--hairline);
+  background: var(--canvas);
+}
+
+.sidebar-header {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-sm);
+  padding: var(--sp-md) var(--sp-md) var(--sp-sm);
+}
+
+.sidebar-title {
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.sidebar-header .icon-btn {
+  margin-left: auto;
+}
+
+.search {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-xs);
+  margin: 0 var(--sp-md) var(--sp-sm);
+  padding: 5px var(--sp-sm);
+  border-radius: var(--rad-sm);
+  background: color-mix(in srgb, var(--text-secondary) 12%, transparent);
+  color: var(--text-secondary);
+}
+
+.search input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: none;
+  outline: none;
+  font: inherit;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.search input::placeholder {
+  color: var(--text-secondary);
+}
+
+.search .icon-btn {
+  padding: 1px;
+}
+
+.chat-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--sp-sm);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-xs);
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.section-header {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-xs);
+  padding: 4px var(--sp-sm);
+}
+
+.section-toggle {
+  appearance: none;
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-xs);
+  color: var(--text-secondary);
+  cursor: default;
+}
+
+.section-chevron {
+  flex: none;
+  color: color-mix(in srgb, var(--text-secondary) 70%, transparent);
+  transition: transform 120ms ease;
+  display: inline-flex;
+}
+
+.section-chevron--open {
+  transform: rotate(90deg);
+}
+
+.section-name {
+  font-size: 12px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.section-count {
+  flex: none;
+  font-size: 10px;
+  color: color-mix(in srgb, var(--text-secondary) 70%, transparent);
+}
+
+.chat-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-sm);
+  padding: var(--sp-sm);
+  margin-left: var(--sp-md);
+  border-radius: var(--rad-sm);
+}
+
+.chat-row--selected {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+.chat-row-status {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.chat-row-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.chat-row-text {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.chat-row-title-line {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.chat-row-title {
+  font-size: 13px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-row-pin {
+  flex: none;
+  color: var(--accent);
+  display: inline-flex;
+}
+
+.chat-row-subtitle {
+  font-size: 10px;
+  color: color-mix(in srgb, var(--text-secondary) 75%, transparent);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.no-matches {
+  font-size: 12px;
+  color: var(--text-secondary);
+  text-align: center;
+  padding: var(--sp-lg) 0;
+}
+
+.sidebar-footer {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-sm);
+  padding: var(--sp-sm) var(--sp-md);
+}
+
+.footer-status {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.footer-model {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.footer-cli {
+  font-size: 10px;
+  color: color-mix(in srgb, var(--text-secondary) 75%, transparent);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ------------------------------------------------------------ context menu */
+
+.ctx-menu {
+  position: fixed;
+  z-index: 100;
+  min-width: 160px;
+  padding: 4px;
+  background: var(--surface-raised);
+  border: 1px solid var(--hairline);
+  border-radius: var(--rad-sm);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.4);
+  display: flex;
+  flex-direction: column;
+}
+
+.ctx-item {
+  appearance: none;
+  background: none;
+  border: none;
+  font: inherit;
+  font-size: 13px;
+  color: var(--text-primary);
+  text-align: left;
+  padding: 4px 10px;
+  border-radius: 5px;
+  cursor: default;
+}
+
+.ctx-item:hover {
+  background: var(--accent);
+  color: #fff;
+}
+
+.ctx-item--destructive {
+  color: var(--diff-removed);
+}
+
+.ctx-item--destructive:hover {
+  background: var(--diff-removed);
+  color: #fff;
+}
+
+.ctx-separator {
+  height: 1px;
+  margin: 4px 8px;
+  background: var(--hairline);
+}
+
+/* --------------------------------------------------------- project picker */
+
+.picker {
+  flex: 1;
+  height: 100%;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-xl);
+  padding: calc(var(--sp-xl) * 2);
+}
+
+.picker-copy {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-sm);
+}
+
+.picker-headline {
+  font-size: 24px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.picker-sub {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  text-align: center;
+}
+
+.picker-buttons {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-md);
+}
+
+.picker-buttons .btn--prominent {
+  min-width: 240px;
+}
+
+.recent {
+  width: 100%;
+  max-width: 420px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.recent-caption {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  padding: 0 10px 4px;
+}
+
+.recent-row {
+  appearance: none;
+  background: none;
+  border: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-sm);
+  padding: 7px 10px;
+  border-radius: var(--rad-sm);
+  cursor: default;
+}
+
+.recent-row:hover {
+  background: color-mix(in srgb, var(--text-secondary) 10%, transparent);
+}
+
+.recent-row .recent-icon {
+  flex: none;
+  color: var(--text-secondary);
+  display: inline-flex;
+}
+
+.recent-name {
+  flex: none;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.recent-path {
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+  color: color-mix(in srgb, var(--text-secondary) 75%, transparent);
+  text-align: right;
+}
+
+.version-caption {
+  font-size: 11px;
+  color: color-mix(in srgb, var(--text-secondary) 75%, transparent);
+}
+
+/* -------------------------------------------------------------- onboarding */
+
+.onboarding {
+  flex: 1;
+  height: 100%;
+  overflow-y: auto;
+}
+
+.onb-column {
+  max-width: 520px;
+  margin: 0 auto;
+  padding: var(--sp-xl);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-xl);
+}
+
+.onb-header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-md);
+  padding-top: var(--sp-xl);
+  text-align: center;
+}
+
+.onb-title {
+  font-size: 24px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.onb-sub {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.onb-options {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-md);
+}
+
+.onb-card {
+  appearance: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  width: 100%;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-md);
+  padding: var(--sp-md);
+  background: color-mix(in srgb, var(--surface-raised) 85%, transparent);
+  border: 1px solid var(--hairline);
+  border-radius: var(--rad-md);
+  cursor: default;
+}
+
+.onb-card:hover {
+  background: var(--surface-raised);
+}
+
+.onb-card-icon {
+  flex: none;
+  margin-top: 1px;
+  display: inline-flex;
+  color: var(--text-primary);
+}
+
+.onb-card-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.onb-card-sub {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-top: 2px;
+}
+
+.onb-card-sub code {
+  font-size: 10px;
+}
+
+.path-input-row {
+  display: flex;
+  gap: var(--sp-sm);
+  align-items: center;
+}
+
+.banner-inline {
+  font-size: 11px;
+  color: var(--mode-yellow);
+  text-align: center;
+  user-select: text;
+}
+
+.onb-hint {
+  font-family: 'SF Mono', SFMono-Regular, ui-monospace, 'Cascadia Mono', 'Segoe UI Mono',
+    'JetBrains Mono', Menlo, Consolas, monospace;
+  font-size: 10px;
+  color: color-mix(in srgb, var(--text-secondary) 75%, transparent);
+  text-align: center;
+  padding-top: var(--sp-sm);
+  user-select: text;
+}
+
+.install-progress {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-sm);
+}
+
+.install-progress-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-sm);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.install-log {
+  height: 220px;
+  overflow-y: auto;
+  padding: var(--sp-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border-radius: var(--rad-sm);
+}
+
+.log-line {
+  font-family: 'SF Mono', SFMono-Regular, ui-monospace, 'Cascadia Mono', 'Segoe UI Mono',
+    'JetBrains Mono', Menlo, Consolas, monospace;
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: text;
+}
+
+/* ------------------------------------------------------------------ sheets */
+
+.sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: rgba(0, 0, 0, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: sheet-fade 140ms ease-out;
+}
+
+@keyframes sheet-fade {
+  from {
+    opacity: 0;
+  }
+}
+
+.sheet-card {
+  background: var(--canvas);
+  border: 1px solid var(--hairline);
+  border-radius: var(--rad-md);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.55);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  max-width: calc(100vw - 48px);
+  max-height: calc(100vh - 48px);
+  animation: sheet-rise 160ms ease-out;
+}
+
+@keyframes sheet-rise {
+  from {
+    transform: translateY(14px);
+    opacity: 0;
+  }
+}
+
+.settings-card {
+  width: 580px;
+  height: 520px;
+}
+
+.remote-card {
+  width: 520px;
+}
+
+.remote-sheet-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.sheet-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-md);
+  padding: var(--sp-md);
+}
+
+/* ---------------------------------------------------------------- settings */
+
+.settings-tabs {
+  display: flex;
+  justify-content: center;
+  padding: var(--sp-lg) var(--sp-lg) var(--sp-md);
+}
+
+.segmented {
+  display: flex;
+  width: 100%;
+  max-width: 420px;
+  padding: 2px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--text-secondary) 12%, transparent);
+}
+
+.segmented button {
+  appearance: none;
+  flex: 1;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: 12px;
+  padding: 3px 10px;
+  border-radius: 6px;
+  color: var(--text-secondary);
+  cursor: default;
+}
+
+.segmented button.active {
+  background: var(--surface-raised);
+  color: var(--text-primary);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+}
+
+.settings-pane {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.settings-version {
+  font-size: 11px;
+  color: color-mix(in srgb, var(--text-secondary) 75%, transparent);
+  user-select: text;
+}
+
+/* Grouped-form styling (Form + .formStyle(.grouped) port). */
+
+.form {
+  padding: var(--sp-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-lg);
+}
+
+.form-section-header {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  padding: 0 2px 6px;
+}
+
+.form-card {
+  background: var(--surface-raised);
+  border: 1px solid var(--hairline);
+  border-radius: var(--rad-sm);
+}
+
+.form-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-md);
+  padding: 9px var(--sp-md);
+  min-height: 20px;
+}
+
+.form-row + .form-row {
+  border-top: 1px solid var(--hairline);
+}
+
+.form-row--stack {
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--sp-sm);
+}
+
+.form-label {
+  flex: none;
+  font-size: 13px;
+}
+
+.form-value {
+  min-width: 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+  text-align: right;
+  user-select: text;
+}
+
+.form-footer-caption {
+  font-size: 11px;
+  color: color-mix(in srgb, var(--text-secondary) 75%, transparent);
+  padding: 6px 2px 0;
+}
+
+.form-buttons {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-sm);
+}
+
+.managed-card {
+  padding: var(--sp-md);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-sm);
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.managed-card code {
+  font-size: 11px;
+  color: var(--text-primary);
+  user-select: text;
+}
+
+/* Monospaced path, truncating from the head so the file name stays visible. */
+.path-value {
+  font-family: 'SF Mono', SFMono-Regular, ui-monospace, 'Cascadia Mono', 'Segoe UI Mono',
+    'JetBrains Mono', Menlo, Consolas, monospace;
+  font-size: 11px;
+  direction: rtl;
+  unicode-bidi: isolate;
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ------------------------------------------------------------------- toast */
+
+.toast {
+  position: fixed;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 200;
+  max-width: min(560px, calc(100vw - 48px));
+  background: var(--surface-raised);
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  padding: 7px 16px;
+  font-size: 12px;
+  color: var(--text-primary);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  animation: toast-in 200ms ease-out;
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -8px);
+  }
+}

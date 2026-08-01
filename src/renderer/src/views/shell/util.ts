@@ -10,10 +10,11 @@ export function basename(path: string): string {
 }
 
 /** Port of AppModel.defaultProjectURL: the selected chat's folder, else the
- *  persisted last project path, else nothing (main falls back to $HOME). */
+ *  persisted last project path, else the home directory the main process
+ *  resolved for us. */
 export function defaultProjectPath(app: AppStateDTO): string | undefined {
   const selected = app.selectedSessionId
     ? app.sessions.find((s) => s.id === app.selectedSessionId)
     : undefined
-  return selected?.projectPath ?? app.lastProjectPath ?? undefined
+  return selected?.projectPath ?? app.lastProjectPath ?? app.defaultProjectPath ?? undefined
 }

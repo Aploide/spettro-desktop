@@ -1,0 +1,319 @@
+/* Provider management — ConnectProvidersView, AddLocalEndpointView and
+   ModelPickerView. Built on the grouped-form system in design/form.css: the
+   sections are `.form-card`s, and these rules only describe the richer rows
+   (icon + two-line label + trailing control) that the Swift GroupBoxes draw.
+   Rows are scoped under `.form-card` so their hairlines line up with the plain
+   `.form-row`s in the same card. */
+
+.form-card .prov-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-md);
+  padding: var(--sp-sm) var(--sp-md);
+  min-height: 38px;
+}
+
+.form-card .prov-row + .prov-row,
+.form-card .form-row + .prov-row,
+.form-card .prov-row + .form-row {
+  border-top: 1px solid var(--hairline);
+}
+
+/* The subscription row is the loudest thing on the screen — give it room. */
+.form-card .prov-row--lead {
+  padding: var(--sp-md);
+}
+
+.form-card .prov-row--stack {
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--sp-sm);
+}
+
+.form-card .prov-row--actions {
+  justify-content: flex-start;
+}
+
+.form-card .prov-row--search {
+  padding: var(--sp-sm) var(--sp-md);
+}
+
+.prov-line {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-md);
+}
+
+.prov-icon {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  color: var(--text-secondary);
+}
+
+.prov-icon--accent {
+  color: var(--accent);
+}
+
+.prov-icon--connected {
+  color: var(--diff-added);
+}
+
+.prov-texts {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.prov-title-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.prov-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  user-select: text;
+}
+
+.prov-sub {
+  font-size: 11px;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The "popular" capsule on suggested providers. */
+.prov-pill {
+  flex: none;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  border-radius: 999px;
+  padding: 1px 5px;
+}
+
+/* The inline API-key editor, indented past the row's icon column. */
+.prov-key {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-xs);
+  padding-left: 34px;
+}
+
+.prov-key-line {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-sm);
+}
+
+.prov-hint {
+  font-size: 11px;
+  line-height: 1.4;
+  color: color-mix(in srgb, var(--text-secondary) 75%, transparent);
+}
+
+.prov-hint code {
+  font-size: 10px;
+  color: var(--text-secondary);
+  user-select: text;
+}
+
+/* ------------------------------------------------------------- notices */
+
+.notice {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-sm);
+  padding: var(--sp-md);
+  background: var(--surface-raised);
+  border: 1px solid var(--hairline);
+  border-radius: var(--rad-sm);
+}
+
+.notice-icon {
+  flex: none;
+  display: inline-flex;
+  padding-top: 1px;
+}
+
+.notice-icon--warn {
+  color: var(--mode-yellow);
+}
+
+.notice-texts {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.notice-title {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.notice-sub {
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+  user-select: text;
+}
+
+/* ------------------------------------------------------- local endpoint */
+
+.local {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-lg);
+  padding: var(--sp-xl);
+}
+
+.local-header {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.local-presets {
+  display: flex;
+  gap: var(--sp-sm);
+  flex-wrap: wrap;
+}
+
+.local-fields {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-sm);
+}
+
+.probe-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: var(--sp-md);
+  background: var(--surface-raised);
+  border: 1px solid var(--hairline);
+  border-radius: var(--rad-sm);
+}
+
+.probe-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--diff-added);
+}
+
+.probe-ok {
+  display: inline-flex;
+  color: var(--diff-added);
+}
+
+.probe-models {
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+  user-select: text;
+}
+
+.local-footer {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-sm);
+}
+
+/* --------------------------------------------------------- model picker */
+
+.model-search {
+  display: flex;
+}
+
+.form-card .model-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-sm);
+  padding: 6px var(--sp-md);
+  min-height: 38px;
+}
+
+.form-card .model-row + .model-row {
+  border-top: 1px solid var(--hairline);
+}
+
+.model-star {
+  appearance: none;
+  flex: none;
+  background: none;
+  border: none;
+  padding: 2px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: color-mix(in srgb, var(--text-secondary) 70%, transparent);
+  cursor: default;
+}
+
+.model-star:hover {
+  color: var(--text-primary);
+}
+
+.model-star--on,
+.model-star--on:hover {
+  color: var(--mode-yellow);
+}
+
+.model-id {
+  font-size: 10px;
+}
+
+.model-active {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.model-chips {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.model-chip {
+  font-size: 9px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--text-secondary) 12%, transparent);
+  border-radius: 999px;
+  padding: 1px 6px;
+  white-space: nowrap;
+}
+
+.model-chip--ctx {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+}

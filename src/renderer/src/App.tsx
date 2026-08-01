@@ -18,6 +18,7 @@ import ChatView from '@renderer/views/chat/ChatView'
 import PermissionSheet from '@renderer/views/sheets/PermissionSheet'
 import QuestionSheet from '@renderer/views/sheets/QuestionSheet'
 import RemoteAccessView from '@renderer/views/remote/RemoteAccessView'
+import ConnectProvidersView from '@renderer/views/providers/ConnectProvidersView'
 
 export default function App(): JSX.Element {
   const app = useApp()
@@ -29,6 +30,13 @@ export default function App(): JSX.Element {
   // pane the sheet opens on.
   const [settingsPane, setSettingsPane] = useState<SettingsPane | null>(null)
   const [remoteOpen, setRemoteOpen] = useState(false)
+
+  // Port of AppModel.providerSetupSkipped: the user chose to continue without
+  // finishing provider setup, so the gate doesn't pull them back. The chat
+  // will fail on its first prompt if nothing is connected, which is theirs to
+  // decide — being unable to reach settings, sessions, or the sidebar is not a
+  // reasonable price for an unfinished setup step.
+  const [providerSetupSkipped, setProviderSetupSkipped] = useState(false)
 
   useEffect(() => {
     initStore()
@@ -136,6 +144,29 @@ export default function App(): JSX.Element {
         return <OnboardingView />
       case 'failed':
         return <FailureView message={phase.message} onOpenSettings={() => setSettingsPane('agent')} />
+      case 'needsProvider':
+        // The CLI is running but has no model to run: finish setup here rather
+        // than dropping the user into a chat that would fail on its first
+        // prompt. Skipping falls through to the normal shell below.
+        if (!providerSetupSkipped) {
+          return (
+            <ConnectProvidersView
+              presentation="gate"
+              isOnboarding
+              // Main re-evaluates the gate when the extension state refreshes,
+              // which is what moves the phase back to `ready`.
+              onComplete={() => void call('refreshExtensions')}
+              onSkip={() => {
+                // Main owns the gate (`skipProviderSetup` moves the phase to
+                // ready and keeps it there); the local flag releases the
+                // screen immediately either way.
+                void call('skipProviderSetup')
+                setProviderSetupSkipped(true)
+              }}
+            />
+          )
+        }
+      // falls through — a skipped gate behaves exactly like `ready`.
       case 'needsProject':
       case 'ready':
         return (
@@ -145,7 +176,7 @@ export default function App(): JSX.Element {
               onOpenRemote={() => setRemoteOpen(true)}
             />
             <div className="detail">
-              {phase.kind === 'ready' && selectedId ? (
+              {phase.kind !== 'needsProject' && selectedId ? (
                 // Keyed by session id so switching chats rebuilds the whole
                 // chat hierarchy instead of diffing two conversations.
                 <ChatView key={selectedId} chatId={selectedId} />

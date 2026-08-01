@@ -64,6 +64,9 @@ export interface RendererApi {
   chooseProject(path: string): Promise<void>
   /** Opens a native folder picker; resolves to the chosen path or null. */
   pickFolder(): Promise<string | null>
+  /** Opens a native file picker for the CLI binary (NSOpenPanel port);
+   *  resolves to the chosen path or null. */
+  pickExecutable(): Promise<string | null>
 
   // Sessions
   newChat(projectPath?: string): Promise<string>

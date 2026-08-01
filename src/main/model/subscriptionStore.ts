@@ -100,12 +100,10 @@ export class SubscriptionStore {
       if (email === '') return { ...DISCONNECTED }
       const rawPlan =
         typeof obj.spettro_plan === 'string' ? obj.spettro_plan.trim().toLowerCase() : ''
-      // Connected with no plan field means free tier (same rule as the TUI);
-      // plan names outside the shared enum degrade to 'unknown'.
-      let plan: Plan
-      if (rawPlan === '') plan = 'free'
-      else if (rawPlan === 'free' || rawPlan === 'pro' || rawPlan === 'max') plan = rawPlan
-      else plan = 'unknown'
+      // Connected with no plan field means free tier (same rule as the TUI).
+      // Any other tier name passes through verbatim — SubscriptionPlan is an
+      // open enum, and a new tier should read as itself, not as "no plan".
+      const plan: Plan = rawPlan === '' ? 'free' : rawPlan
       return { plan, email }
     } catch {
       return { ...DISCONNECTED }

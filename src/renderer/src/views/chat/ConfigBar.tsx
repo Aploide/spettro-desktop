@@ -4,12 +4,12 @@
 // booleans render as a toggle chip. Fully data-driven — whatever the CLI
 // advertises shows up without code changes.
 
-import { useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import type { ACPConfigChoice, ACPConfigGroup, ACPConfigOption } from '@shared/acp'
 import type { ChatDetail } from '@shared/model'
 import { call } from '@renderer/state/store'
 import { modeColor } from '@renderer/design/theme'
-import { useDismiss } from './ChatHeader'
+import Popover from '@renderer/views/common/Popover'
 
 export default function ConfigBar({ chat }: { chat: ChatDetail }): JSX.Element {
   return (
@@ -56,7 +56,8 @@ function SelectChip({
   onSelect: (value: string) => void
 }): JSX.Element {
   const [open, setOpen] = useState(false)
-  const ref = useDismiss(open, () => setOpen(false))
+  const anchorRef = useRef<HTMLButtonElement>(null)
+  const close = useCallback(() => setOpen(false), [])
 
   // Grouped options render group headers; a flat list is one unnamed group.
   const groups: ACPConfigGroup[] =
@@ -68,8 +69,9 @@ function SelectChip({
   const tint = isMode && kind.currentValue ? modeColor(kind.currentValue) : undefined
 
   return (
-    <div className="chip-wrap" ref={ref}>
+    <div className="chip-wrap">
       <button
+        ref={anchorRef}
         type="button"
         className="config-chip"
         title={option.description ?? option.name}
@@ -80,36 +82,40 @@ function SelectChip({
         <span className="config-chip-label">{currentLabel(kind)}</span>
         <ChevronDownIcon />
       </button>
-      {open && (
-        <div className="popover popover--up config-menu">
-          {groups.map((group, gi) => (
-            <div className="config-menu-group" key={gi}>
-              {group.name && <div className="config-menu-group-name">{group.name}</div>}
-              {group.options.map((choice) => (
-                <button
-                  type="button"
-                  key={choice.value}
-                  className="config-menu-row"
-                  onClick={() => {
-                    setOpen(false)
-                    onSelect(choice.value)
-                  }}
-                >
-                  <span className="config-menu-check">
-                    {choice.value === kind.currentValue && <CheckIcon />}
-                  </span>
-                  <span className="config-menu-texts">
-                    <span className="config-menu-name">{choice.name}</span>
-                    {choice.description && (
-                      <span className="config-menu-description">{choice.description}</span>
-                    )}
-                  </span>
-                </button>
-              ))}
-            </div>
-          ))}
-        </div>
-      )}
+      <Popover
+        anchorRef={anchorRef}
+        open={open}
+        onClose={close}
+        placement="up"
+        className="config-menu"
+      >
+        {groups.map((group, gi) => (
+          <div className="config-menu-group" key={gi}>
+            {group.name && <div className="config-menu-group-name">{group.name}</div>}
+            {group.options.map((choice) => (
+              <button
+                type="button"
+                key={choice.value}
+                className="config-menu-row"
+                onClick={() => {
+                  setOpen(false)
+                  onSelect(choice.value)
+                }}
+              >
+                <span className="config-menu-check">
+                  {choice.value === kind.currentValue && <CheckIcon />}
+                </span>
+                <span className="config-menu-texts">
+                  <span className="config-menu-name">{choice.name}</span>
+                  {choice.description && (
+                    <span className="config-menu-description">{choice.description}</span>
+                  )}
+                </span>
+              </button>
+            ))}
+          </div>
+        ))}
+      </Popover>
     </div>
   )
 }

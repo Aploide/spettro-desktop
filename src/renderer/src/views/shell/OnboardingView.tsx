@@ -41,6 +41,14 @@ function Options({ banner }: { banner: string | null }): JSX.Element {
     if (trimmed) void call('useExplicitCLIPath', trimmed)
   }
 
+  /** The Swift card opens an NSOpenPanel; the typed field remains as the
+   *  fallback when the dialog closes without a choice. */
+  const browse = async (): Promise<void> => {
+    const chosen = await call('pickExecutable')
+    if (chosen) void call('useExplicitCLIPath', chosen)
+    else setManualOpen((o) => !o)
+  }
+
   return (
     <div className="onb-options">
       <button className="onb-card" onClick={() => void call('installCLI')}>
@@ -53,7 +61,7 @@ function Options({ banner }: { banner: string | null }): JSX.Element {
         </span>
       </button>
 
-      <button className="onb-card" onClick={() => setManualOpen((o) => !o)}>
+      <button className="onb-card" onClick={() => void browse()}>
         <span className="onb-card-icon">
           <FolderFillIcon size={18} />
         </span>

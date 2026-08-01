@@ -5,16 +5,35 @@
 
 import type { Plan } from '@shared/model'
 
+/** Tier → CSS class, mirroring PlanBadge.swift's `tierColor` switch.
+ *  SubscriptionPlan is an open enum, so an unrecognized tier takes the same
+ *  neutral grey as free and renders its own name rather than disappearing. */
+function tierClass(tier: string): string {
+  switch (tier) {
+    case 'lite':
+      return 'plan-badge--lite'
+    case 'plus':
+      return 'plan-badge--plus'
+    case 'pro':
+      return 'plan-badge--pro'
+    case 'unknown':
+      return 'plan-badge--none'
+    default:
+      return 'plan-badge--free'
+  }
+}
+
 export default function PlanBadge({ plan, size = 11 }: { plan: Plan; size?: number }): JSX.Element {
-  if (plan === 'max') {
+  const tier = (plan || 'unknown').toLowerCase()
+  if (tier === 'max') {
     return (
       <span className="plan-badge plan-badge--max" style={{ fontSize: size }} aria-label="MAX">
         MAX
       </span>
     )
   }
-  const cls = plan === 'pro' ? 'plan-badge--pro' : plan === 'free' ? 'plan-badge--free' : 'plan-badge--none'
-  const label = plan === 'unknown' ? 'NO PLAN' : plan.toUpperCase()
+  const cls = tierClass(tier)
+  const label = tier === 'unknown' ? 'NO PLAN' : tier.toUpperCase()
   return (
     <span className={`plan-badge ${cls}`} style={{ fontSize: size }}>
       {label}

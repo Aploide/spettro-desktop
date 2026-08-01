@@ -1,0 +1,489 @@
+/* The grouped-form system — the CSS port of SwiftUI's `Form` +
+   `.formStyle(.grouped)`, which is what SettingsView.swift, MobileProvidersView
+   and the provider sheets are all built out of.
+
+   The macOS metrics this reproduces, because they are the whole reason the
+   Swift settings read as a form and the first port of it read as floating
+   boxes:
+     · a section is a small caption ABOVE a rounded inset card;
+     · rows inside the card share one label column, value/control right-aligned;
+     · rows are separated by a hairline, and the last row has none;
+     · a footer caption sits under the card, outside it;
+     · the whole thing scrolls inside the pane, so it fills the sheet instead
+       of floating in the middle of it.
+
+   Everything is scoped under `.form-scroll` on purpose: shell.css still
+   carries the older, flatter `.form-*` rules for other chrome, and a
+   two-class selector wins regardless of which stylesheet the bundler emits
+   first. Buttons (`.btn`, `.btn--prominent`) and `.spinner` come from
+   shell.css and are reused, never redefined. */
+
+/* --------------------------------------------------------------- modals */
+
+/* The app already has two different `.sheet-card` definitions (shell.css and
+   sheets.css) that overwrite each other depending on bundle order — which is
+   what left the settings sheet with 24px of stray padding and its content
+   floating. The screens in this feature use their own chrome instead. */
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgba(0, 0, 0, 0.38);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: modal-fade 140ms ease-out;
+}
+
+/* A sheet presented from another sheet (Sign In over Settings). */
+.modal-backdrop--stacked {
+  z-index: 70;
+  background: rgba(0, 0, 0, 0.28);
+}
+
+@keyframes modal-fade {
+  from {
+    opacity: 0;
+  }
+}
+
+.modal-panel {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--canvas);
+  border: 1px solid var(--hairline);
+  border-radius: var(--rad-md);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.55);
+  max-width: calc(100vw - 48px);
+  max-height: calc(100vh - 48px);
+  animation: modal-rise 160ms ease-out;
+}
+
+@keyframes modal-rise {
+  from {
+    transform: translateY(14px);
+    opacity: 0;
+  }
+}
+
+/* Frames taken verbatim from the Swift views. */
+.modal-panel--settings {
+  width: 580px;
+  height: 520px;
+}
+.modal-panel--providers {
+  width: 640px;
+  height: 700px;
+}
+.modal-panel--models {
+  width: 560px;
+  height: 620px;
+}
+.modal-panel--local {
+  width: 480px;
+  height: 420px;
+}
+.modal-panel--signin {
+  width: 460px;
+  height: 420px;
+}
+
+.modal-head {
+  flex: none;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-md);
+  padding: var(--sp-xl) var(--sp-xl) var(--sp-lg);
+}
+
+.modal-head-texts {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.modal-title {
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.modal-subtitle {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.modal-actions {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-sm);
+}
+
+.modal-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.modal-foot {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-md);
+  padding: var(--sp-md);
+}
+
+/* ------------------------------------------------------------ the form */
+
+.form-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--sp-lg) var(--sp-lg) var(--sp-xl);
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.form-scroll .form-section {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Section header: the small caption above the card. */
+.form-scroll .form-section-title {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  padding: 0 var(--sp-md) 6px;
+}
+
+.form-scroll .form-card {
+  background: var(--surface-raised);
+  border: 1px solid var(--hairline);
+  border-radius: var(--rad-md);
+  overflow: hidden;
+}
+
+/* Section footer: the caption under the card, outside it. */
+.form-scroll .form-footer {
+  font-size: 11px;
+  line-height: 1.45;
+  color: color-mix(in srgb, var(--text-secondary) 80%, transparent);
+  padding: 6px var(--sp-md) 0;
+}
+
+.form-scroll .form-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-md);
+  min-height: 30px;
+  padding: 7px var(--sp-md);
+}
+
+/* Hairline between rows, never after the last one. */
+.form-scroll .form-row + .form-row {
+  border-top: 1px solid var(--hairline);
+}
+
+.form-scroll .form-label {
+  flex: none;
+  width: 124px;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.form-scroll .form-value {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--sp-sm);
+  font-size: 13px;
+  color: var(--text-secondary);
+  text-align: right;
+  user-select: text;
+}
+
+.form-scroll .form-value--primary {
+  color: var(--text-primary);
+}
+
+/* A listing row (a name and its detail) rather than a labelled control: the
+   name owns the width it needs instead of being squeezed into — or wrapped
+   inside — the label column. */
+.form-scroll .form-row--entry .form-label {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.form-scroll .form-row--entry .form-value {
+  flex: none;
+}
+
+/* A row of buttons: no label column, controls read left-to-right the way the
+   Swift `HStack { Button… ; Spacer() }` does. */
+.form-scroll .form-row--actions {
+  justify-content: flex-start;
+  gap: var(--sp-sm);
+  flex-wrap: wrap;
+}
+
+/* A row whose content owns the full width (explainers, inline editors). */
+.form-scroll .form-row--stack {
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--sp-sm);
+}
+
+.form-scroll .form-text {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  user-select: text;
+}
+
+/* The orange advisory rows (`Label(…).foregroundStyle(.orange)`). */
+.form-scroll .form-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-sm);
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--mode-yellow);
+}
+
+.form-scroll .form-note {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-sm);
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+
+.form-scroll .form-error {
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--mode-yellow);
+  user-select: text;
+}
+
+.form-scroll .form-spacer {
+  flex: 1;
+}
+
+/* Controls sharing one line inside a stacked row. */
+.form-scroll .form-inline {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-sm);
+}
+
+.form-scroll .form-note-icon {
+  flex: none;
+  display: inline-flex;
+  padding-top: 1px;
+}
+
+/* A non-active plan status (past_due, canceled, …) beside the badge. */
+.form-scroll .plan-status {
+  font-size: 11px;
+  color: var(--mode-yellow);
+}
+
+/* ---------------------------------------------------------- form fields */
+
+/* Companion to shell.css's mono `.text-input`, for prose-ish fields (search,
+   API keys) where a monospaced face would be wrong. */
+.input {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  font-size: 12px;
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--text-secondary) 10%, transparent);
+  border: 1px solid var(--hairline);
+  border-radius: var(--rad-sm);
+  padding: 6px 10px;
+  outline: none;
+  user-select: text;
+}
+
+.input::placeholder {
+  color: color-mix(in srgb, var(--text-secondary) 80%, transparent);
+}
+
+.input:focus {
+  border-color: color-mix(in srgb, var(--accent) 50%, transparent);
+}
+
+.input--mono {
+  font-family: 'SF Mono', SFMono-Regular, ui-monospace, 'Cascadia Mono', 'Segoe UI Mono',
+    'JetBrains Mono', Menlo, Consolas, monospace;
+}
+
+.btn--small {
+  font-size: 12px;
+  padding: 3px 10px;
+}
+
+/* --------------------------------------------------------- credit meter */
+
+/* CreditMeter in SettingsView.swift: a 96x5 capsule track with the remaining
+   share filled, and the percentage in monospaced digits beside it. */
+.credit-meter {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-sm);
+}
+
+.credit-track {
+  flex: none;
+  width: 96px;
+  height: 5px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text-secondary) 20%, transparent);
+  overflow: hidden;
+}
+
+.credit-fill {
+  /* A span inside a non-flex track: it has to be blockified before width and
+     height mean anything. */
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent);
+  transition: width 300ms ease-out;
+}
+
+.credit-fill--low {
+  background: var(--mode-yellow);
+}
+
+.credit-fill--critical {
+  background: var(--diff-removed);
+}
+
+.credit-label {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+}
+
+.credit-label--critical {
+  color: var(--diff-removed);
+}
+
+/* -------------------------------------------------------- settings sheet */
+
+.settings-panes {
+  flex: none;
+  display: flex;
+  justify-content: center;
+  padding: var(--sp-lg) var(--sp-lg) var(--sp-md);
+}
+
+.settings-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* MemoryView and RemoteAccessView are standalone screens with their own
+   chrome (MemoryView even presents its own full-screen backdrop). A
+   transform on this wrapper makes it the containing block for `position:
+   fixed` descendants, so an embedded screen is confined to the pane instead
+   of covering the window — the same thing `memoryTab` does in the Swift by
+   embedding the view rather than presenting it. */
+.pane-embed {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  overflow: hidden;
+  transform: translateZ(0);
+}
+
+.pane-embed .sheet-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: transparent;
+  padding: 0;
+}
+
+.pane-embed .sheet-card {
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent;
+  padding: var(--sp-lg);
+  gap: var(--sp-md);
+}
+
+/* Embedded, the memory editor grows with the pane instead of holding its
+   sheet's fixed minimum, and its own close affordance is redundant — the
+   sheet's Done button is right underneath it. */
+.pane-embed .mem-editor {
+  flex: 1;
+  min-height: 120px;
+}
+
+.pane-embed .mem-close {
+  display: none;
+}
+
+.pane-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* RemoteAccessView is sized for its own sheet (460x520); inside a pane it
+   should simply fill it. */
+.pane-scroll .remote {
+  width: 100%;
+  min-height: 0;
+  padding: var(--sp-lg);
+  gap: var(--sp-lg);
+  background: transparent;
+}
+
+/* ------------------------------------------------------- provider gate */
+
+/* The `needsProvider` phase: the agent is running but has nothing to run a
+   prompt with, so provider setup takes the whole window rather than being a
+   sheet over a chat that would fail (ContentView.swift). */
+.provider-gate {
+  height: 100%;
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  background: var(--canvas);
+}
+
+.provider-gate-inner {
+  flex: 1;
+  min-width: 0;
+  max-width: 720px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}

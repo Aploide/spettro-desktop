@@ -143,7 +143,11 @@ export interface CLIInfo {
   isDev: boolean
 }
 
-export type Plan = 'free' | 'pro' | 'max' | 'unknown'
+/** Subscription tier. Port of SubscriptionPlan.swift, which is an open enum:
+ *  the five known tiers, `unknown` for "not connected / no plan", and any
+ *  other string the service starts returning (rendered verbatim, uppercased,
+ *  rather than being flattened to unknown). */
+export type Plan = 'free' | 'lite' | 'plus' | 'pro' | 'max' | 'unknown' | (string & {})
 
 export interface SubscriptionState {
   plan: Plan
@@ -193,5 +197,9 @@ export interface AppStateDTO {
   extensions: ExtensionsState
   remote: RemoteHostState | null
   lastProjectPath: string | null
+  /** Where a new chat opens when the user doesn't pick a folder — already
+   *  resolved by the main process (selected chat → last project → $HOME), so
+   *  the renderer never has to guess at the home directory. */
+  defaultProjectPath: string
   recentProjects: string[]
 }

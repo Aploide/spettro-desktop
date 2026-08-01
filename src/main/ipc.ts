@@ -3,6 +3,8 @@
 // model's MainEvent stream to the window on `spettro:event`.
 
 import { BrowserWindow, dialog, ipcMain, shell } from 'electron'
+import { homedir } from 'os'
+import { join } from 'path'
 import { EVENT_CHANNEL, INVOKE_CHANNEL, type MainEvent, type RendererApi } from '../shared/ipc'
 import type { AppModel } from './model/appModel'
 import { gitStat } from './model/gitStat'
@@ -45,6 +47,30 @@ export function registerIpc(
       const win = getWindow()
       const options: Electron.OpenDialogOptions = {
         properties: ['openDirectory', 'createDirectory']
+      }
+      const result = win
+        ? await dialog.showOpenDialog(win, options)
+        : await dialog.showOpenDialog(options)
+      if (result.canceled || result.filePaths.length === 0) return null
+      return result.filePaths[0]
+    },
+
+    pickExecutable: async () => {
+      const win = getWindow()
+      // Mirrors the Swift NSOpenPanel: files only, opening on ~/.local/bin,
+      // with an .exe filter on Windows where the binary carries a suffix.
+      const options: Electron.OpenDialogOptions = {
+        properties: ['openFile'],
+        defaultPath: join(homedir(), '.local', 'bin'),
+        buttonLabel: 'Use',
+        title: 'Choose the Spettro CLI',
+        filters:
+          process.platform === 'win32'
+            ? [
+                { name: 'Executables', extensions: ['exe', 'cmd', 'bat'] },
+                { name: 'All files', extensions: ['*'] }
+              ]
+            : undefined
       }
       const result = win
         ? await dialog.showOpenDialog(win, options)

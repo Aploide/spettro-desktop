@@ -175,6 +175,17 @@
   text-align: left;
 }
 
+/* Portalled into <body>, so it is positioned in viewport coordinates by
+   Popover.tsx and can't be clipped by the scrolling chip rows it belongs to. */
+.popover--portal {
+  position: fixed;
+  top: auto;
+  right: auto;
+  z-index: 400;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
 .popover--up {
   top: auto;
   bottom: calc(100% + 6px);
@@ -220,8 +231,12 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  direction: rtl; /* head-truncation approximation: keep the tail visible */
-  text-align: left;
+  /* Head truncation (the Swift row uses .truncationMode(.head)): the RTL box
+     puts the ellipsis at the start, `plaintext` keeps the path itself LTR so
+     its leading "/" doesn't migrate to the end. */
+  direction: rtl;
+  unicode-bidi: plaintext;
+  text-align: right;
 }
 
 .git-file-more {

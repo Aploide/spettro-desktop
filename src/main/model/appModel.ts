@@ -201,6 +201,7 @@ export class AppModel extends EventEmitter {
       extensions: this.extensions.snapshot(),
       remote: this.remote,
       lastProjectPath: this.prefs.lastProjectPath || null,
+      defaultProjectPath: this.defaultProjectPath,
       recentProjects: this.prefs.recentProjects
     }
   }

@@ -189,6 +189,21 @@
   color: var(--plan-pro);
 }
 
+/* lite takes the primary text color; plus is the TUI's green (PlanBadge.swift) */
+.plan-badge--lite {
+  color: var(--text-primary);
+}
+
+.plan-badge--plus {
+  color: #86efac;
+}
+
+@media (prefers-color-scheme: light) {
+  .plan-badge--plus {
+    color: #16a34a;
+  }
+}
+
 .plan-badge--none {
   color: color-mix(in srgb, var(--text-secondary) 70%, transparent);
 }
@@ -983,8 +998,14 @@
   font-family: 'SF Mono', SFMono-Regular, ui-monospace, 'Cascadia Mono', 'Segoe UI Mono',
     'JetBrains Mono', Menlo, Consolas, monospace;
   font-size: 11px;
+  /* `direction: rtl` is what moves the ellipsis to the head, but with
+     `isolate` the path's leading "/" is a neutral character resolved against
+     the RTL base direction and jumps to the end ("home/…/spettro/").
+     `plaintext` takes the base direction from the first strong character
+     instead — Latin, so the text lays out LTR and reads correctly — while the
+     box stays RTL, keeping the ellipsis at the left. */
   direction: rtl;
-  unicode-bidi: isolate;
+  unicode-bidi: plaintext;
   text-align: right;
   overflow: hidden;
   text-overflow: ellipsis;

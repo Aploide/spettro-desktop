@@ -4,7 +4,7 @@
 
 import { useSyncExternalStore } from 'react'
 import type { ACPPermissionRequest, ACPQuestionRequest } from '@shared/acp'
-import type { MainEvent } from '@shared/ipc'
+import type { MainEvent, SpettroBridge } from '@shared/ipc'
 import type { AppStateDTO, ChatDetail } from '@shared/model'
 import { transcriptItemId } from '@shared/model'
 
@@ -104,5 +104,5 @@ export async function ensureChatLoaded(chatId: string): Promise<void> {
 }
 
 /** Shorthand for window.spettro.call. */
-export const call = ((...args: Parameters<typeof window.spettro.call>) =>
-  window.spettro.call(...args)) as typeof window.spettro.call
+export const call: SpettroBridge['call'] = (method, ...args) =>
+  (window.spettro.call as (...a: unknown[]) => never)(method, ...args)

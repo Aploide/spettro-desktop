@@ -119,3 +119,5 @@ function TypingDots(): JSX.Element {
     </span>
   )
 }
+
+export default TranscriptItemView

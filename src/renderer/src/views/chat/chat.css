@@ -60,20 +60,6 @@
   padding-top: var(--sp-xl);
 }
 
-.chat-welcome-icon {
-  width: 104px;
-  height: 104px;
-  border-radius: 24px;
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--accent) 88%, #fff) 0%,
-    var(--accent) 100%
-  );
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
 .chat-welcome-title {
   font-size: 24px;
   font-weight: 600;

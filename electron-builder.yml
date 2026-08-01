@@ -8,6 +8,9 @@ files:
   - package.json
 asarUnpack:
   - '**/node_modules/node-pty/**'
+extraResources:
+  - from: build/icon.png
+    to: icon.png
 npmRebuild: true
 linux:
   target:

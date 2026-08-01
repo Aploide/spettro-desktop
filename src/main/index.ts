@@ -2,6 +2,7 @@
 // and event-push wiring (the port of SpettroApp.swift's app wiring).
 
 import { app, BrowserWindow, shell } from 'electron'
+import { existsSync } from 'fs'
 import { join } from 'path'
 import { EVENT_CHANNEL, type MainEvent } from '../shared/ipc'
 import { registerIpc, type IpcHandle } from './ipc'
@@ -17,6 +18,15 @@ let remoteHost: RemoteHost | null = null
 let ipcHandle: IpcHandle | null = null
 let didShutdown = false
 
+/** The app icon, for the window and the Linux taskbar (Windows takes it from
+ *  the packaged exe). Bundled as an extra resource; falls back to the repo
+ *  copy when running from source. */
+function iconPath(): string {
+  const packaged = join(process.resourcesPath, 'icon.png')
+  if (existsSync(packaged)) return packaged
+  return join(__dirname, '../../build/icon.png')
+}
+
 function createWindow(): void {
   mainWindow = new BrowserWindow({
     width: 1280,
@@ -26,6 +36,7 @@ function createWindow(): void {
     show: false,
     autoHideMenuBar: true,
     title: 'Spettro',
+    icon: iconPath(),
     backgroundColor: '#1b1b1f',
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),

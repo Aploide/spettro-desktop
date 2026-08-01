@@ -8,6 +8,7 @@ import TerminalDrawer from '@renderer/views/terminal/TerminalDrawer'
 import TranscriptItemView from './transcript/TranscriptItemView'
 import { RunTicker } from './transcript/RunTicker'
 import ChatHeader, { projectName } from './ChatHeader'
+import AppIcon from '@renderer/views/shell/AppIcon'
 import Composer from './Composer'
 import './chat.css'
 
@@ -106,18 +107,7 @@ export default function ChatView({ chatId }: { chatId: string }): JSX.Element {
 function WelcomeBanner({ projectPath }: { projectPath: string }): JSX.Element {
   return (
     <div className="chat-welcome">
-      {/* AppIconImage stand-in: the mark from AppIconImage.swift's fallback
-          branch (accent-gradient rounded square + eye glyph). */}
-      <div className="chat-welcome-icon" aria-hidden>
-        <svg width="48" height="48" viewBox="0 0 24 24" fill="none">
-          <path
-            d="M2 12s3.5-6.5 10-6.5S22 12 22 12s-3.5 6.5-10 6.5S2 12 2 12Z"
-            stroke="#fff"
-            strokeWidth="1.1"
-          />
-          <circle cx="12" cy="12" r="3" stroke="#fff" strokeWidth="1.1" />
-        </svg>
-      </div>
+      <AppIcon size={104} />
       <div className="chat-welcome-title">How can I help?</div>
       <div className="chat-welcome-sub">Working in {projectName(projectPath)}</div>
     </div>

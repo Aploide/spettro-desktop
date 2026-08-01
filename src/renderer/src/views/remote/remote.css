@@ -1,0 +1,362 @@
+/* Remote Access settings panel — companion to RemoteAccessView.tsx.
+   Port of the layout in RemoteAccessView.swift; all colors come from the
+   design tokens in design/theme.css. */
+
+.remote {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-xl);
+  padding: var(--sp-xl);
+  width: 460px;
+  max-width: 100%;
+  min-height: 520px;
+  background: var(--canvas);
+  color: var(--text-primary);
+}
+
+.remote__divider {
+  height: 1px;
+  background: var(--hairline);
+}
+
+.remote__spacer {
+  flex: 1;
+}
+
+.remote__muted {
+  color: var(--text-secondary);
+}
+
+/* Header */
+
+.remote__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-md);
+}
+
+.remote__title {
+  margin: 0 0 var(--sp-xs);
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.remote__subtitle {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.remote__close {
+  border: none;
+  background: none;
+  padding: var(--sp-xs);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.remote__close:hover {
+  color: var(--text-primary);
+}
+
+/* Cards */
+
+.remote__card {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-md);
+  padding: var(--sp-md);
+  background: var(--surface-raised);
+  border: 1px solid var(--hairline);
+  border-radius: var(--rad-md);
+}
+
+/* Switch row */
+
+.remote__wifi {
+  display: flex;
+  width: 28px;
+  justify-content: center;
+  color: var(--text-secondary);
+}
+
+.remote__wifi--on {
+  color: var(--accent);
+}
+
+.remote__switch-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.remote__status-title {
+  font-weight: 500;
+}
+
+.remote__status-detail {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.remote__rename-link {
+  border: none;
+  background: none;
+  padding: 0;
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  text-align: left;
+  text-decoration: underline;
+  text-decoration-color: var(--hairline);
+  cursor: pointer;
+}
+
+.remote__rename-link:hover {
+  color: var(--text-primary);
+}
+
+.remote__rename-input {
+  margin-top: 2px;
+  padding: 2px 6px;
+  font-size: 12px;
+  color: var(--text-primary);
+  background: var(--canvas);
+  border: 1px solid var(--hairline);
+  border-radius: var(--rad-sm);
+  outline: none;
+}
+
+.remote__rename-input:focus {
+  border-color: var(--accent);
+}
+
+/* Toggle (SwiftUI .switch style) */
+
+.remote__toggle {
+  position: relative;
+  display: inline-flex;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.remote__toggle input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.remote__toggle-track {
+  display: inline-flex;
+  align-items: center;
+  width: 40px;
+  height: 24px;
+  padding: 2px;
+  border-radius: 12px;
+  background: var(--hairline);
+  transition: background 0.15s ease;
+}
+
+.remote__toggle input:checked + .remote__toggle-track {
+  background: var(--accent);
+}
+
+.remote__toggle-thumb {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+  transition: transform 0.15s ease;
+}
+
+.remote__toggle input:checked + .remote__toggle-track .remote__toggle-thumb {
+  transform: translateX(16px);
+}
+
+/* Pairing panel */
+
+.remote__pairing {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-lg);
+}
+
+.remote__qr {
+  width: 220px;
+  height: 220px;
+  border-radius: var(--rad-md);
+  /* The QR itself is dark-on-light; give it a quiet frame in dark mode. */
+  background: #fff;
+  padding: var(--sp-sm);
+  image-rendering: pixelated;
+}
+
+.remote__qr--missing {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-sm);
+  background: var(--surface-raised);
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.remote__pairing-text {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-xs);
+}
+
+.remote__pairing-title {
+  font-weight: 500;
+}
+
+.remote__pairing-expiry {
+  font-size: 11px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Buttons */
+
+.remote__button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-xs);
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-primary);
+  background: var(--surface-raised);
+  border: 1px solid var(--hairline);
+  border-radius: var(--rad-sm);
+  cursor: pointer;
+}
+
+.remote__button:hover {
+  border-color: var(--text-secondary);
+}
+
+.remote__button--accent {
+  color: #fff;
+  background: var(--accent);
+  border-color: transparent;
+}
+
+.remote__button--accent:hover {
+  filter: brightness(1.1);
+  border-color: transparent;
+}
+
+/* Devices */
+
+.remote__devices {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-md);
+  min-height: 0;
+}
+
+.remote__devices-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.remote__devices-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.remote__device-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-sm);
+  overflow-y: auto;
+  max-height: 260px;
+}
+
+.remote__device-icon {
+  display: flex;
+  width: 24px;
+  justify-content: center;
+  color: var(--text-secondary);
+}
+
+.remote__device-icon--on {
+  color: var(--accent);
+}
+
+.remote__device-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.remote__device-name {
+  font-weight: 500;
+}
+
+.remote__device-detail {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.remote__remove {
+  border: none;
+  background: none;
+  padding: var(--sp-xs);
+  font-size: 11px;
+  color: var(--diff-removed);
+  cursor: pointer;
+}
+
+.remote__remove:hover {
+  text-decoration: underline;
+}
+
+/* Empty state */
+
+.remote__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-sm);
+  padding: var(--sp-xl) 0;
+  color: var(--text-secondary);
+}
+
+.remote__empty-title {
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.remote__empty-detail {
+  font-size: 11px;
+  text-align: center;
+}
+
+/* Footer */
+
+.remote__footer {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-sm);
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.remote__footer svg {
+  flex-shrink: 0;
+  margin-top: 1px;
+}

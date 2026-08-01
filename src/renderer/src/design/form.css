@@ -89,6 +89,15 @@
   width: 460px;
   height: 420px;
 }
+/* RemoteAccessView.swift's own frame: 460x520, growing to 620 while a pairing
+   QR is on screen. */
+.modal-panel--remote {
+  width: 460px;
+  height: 520px;
+}
+.modal-panel--remote-pairing {
+  height: 620px;
+}
 
 .modal-head {
   flex: none;

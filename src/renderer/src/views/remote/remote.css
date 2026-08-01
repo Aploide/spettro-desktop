@@ -2,15 +2,18 @@
    Port of the layout in RemoteAccessView.swift; all colors come from the
    design tokens in design/theme.css. */
 
+/* The view fills whatever panel presents it and paints no surface of its own:
+   giving it a fixed width, a min-height and its own background drew a second
+   card inside the sheet's card, which is what made this screen read as a box
+   floating in a box. */
 .remote {
   display: flex;
   flex-direction: column;
-  gap: var(--sp-xl);
+  gap: var(--sp-lg);
   padding: var(--sp-xl);
-  width: 460px;
-  max-width: 100%;
-  min-height: 520px;
-  background: var(--canvas);
+  width: 100%;
+  flex: 1;
+  min-height: 0;
   color: var(--text-primary);
 }
 

@@ -103,18 +103,19 @@ export default function App(): JSX.Element {
       {settingsPane && <SettingsView initialPane={settingsPane} onClose={() => setSettingsPane(null)} />}
 
       {remoteOpen && (
-        <div className="sheet-backdrop">
-          <div className="sheet-card remote-card">
-            <div className="remote-sheet-body">
-              <RemoteAccessView />
-            </div>
-            <div className="divider" />
-            <div className="sheet-footer">
-              <span />
-              <button className="btn btn--prominent" onClick={() => setRemoteOpen(false)}>
-                Done
-              </button>
-            </div>
+        <div className="modal-backdrop" role="presentation">
+          <div
+            className={
+              'modal-panel modal-panel--remote' +
+              (app?.remote?.pairingQR ? ' modal-panel--remote-pairing' : '')
+            }
+            role="dialog"
+            aria-modal="true"
+            aria-label="Remote Access"
+          >
+            {/* The view carries its own header (with the close button) and
+                footer, so the panel adds chrome only — no nested card. */}
+            <RemoteAccessView onClose={() => setRemoteOpen(false)} />
           </div>
         </div>
       )}

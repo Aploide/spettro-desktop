@@ -10,8 +10,8 @@
 // - "Choose Executable…" is a typed-path field: the IPC contract exposes a
 //   folder picker only, and `useExplicitCLIPath` validates and banners on a
 //   bad path exactly like the Swift override flow.
-// - Remote access, a separate sheet on macOS, is also reachable here as a
-//   fifth pane embedding RemoteAccessView (a desktop-port addition).
+// - Remote access is its own sheet (the sidebar's phone button), exactly as on
+//   macOS — it is deliberately not a pane here.
 //
 // Everything account/provider related is live: the panes read `extensions`
 // (the mirrored AccountStore + ProviderStore) and drive the `_spettro/*`
@@ -21,7 +21,6 @@ import { useEffect, useState } from 'react'
 import { EMPTY_EXTENSIONS, creditDetail, remainingFraction, shortHost } from '@shared/extensions'
 import { call, useApp } from '@renderer/state/store'
 import MemoryView from '@renderer/views/sheets/MemoryView'
-import RemoteAccessView from '@renderer/views/remote/RemoteAccessView'
 import ConnectProvidersView, {
   UnsupportedCLINotice
 } from '@renderer/views/providers/ConnectProvidersView'
@@ -33,14 +32,13 @@ import Spinner from './Spinner'
 import { defaultProjectPath } from './util'
 import '@renderer/design/form.css'
 
-export type SettingsPane = 'account' | 'agent' | 'providers' | 'memory' | 'remote'
+export type SettingsPane = 'account' | 'agent' | 'providers' | 'memory'
 
 const PANES: { id: SettingsPane; label: string }[] = [
   { id: 'account', label: 'Account' },
   { id: 'agent', label: 'Agent' },
   { id: 'providers', label: 'Providers' },
-  { id: 'memory', label: 'Memory' },
-  { id: 'remote', label: 'Remote' }
+  { id: 'memory', label: 'Memory' }
 ]
 
 const DASHBOARD_URL = 'https://spettro.app/dashboard'
@@ -115,11 +113,6 @@ export default function SettingsView({ initialPane = 'account', onClose }: Props
                   projectPath={app ? (defaultProjectPath(app) ?? null) : null}
                   onClose={onClose}
                 />
-              </div>
-            )}
-            {pane === 'remote' && (
-              <div className="pane-scroll">
-                <RemoteAccessView />
               </div>
             )}
           </div>

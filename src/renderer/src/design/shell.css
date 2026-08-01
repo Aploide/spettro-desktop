@@ -843,16 +843,6 @@
   height: 520px;
 }
 
-.remote-card {
-  width: 520px;
-}
-
-.remote-sheet-body {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-}
-
 .sheet-footer {
   display: flex;
   align-items: center;

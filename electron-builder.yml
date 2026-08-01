@@ -1,0 +1,31 @@
+appId: app.spettro.desktop
+productName: Spettro
+directories:
+  buildResources: build
+  output: release
+files:
+  - out/**
+  - package.json
+asarUnpack:
+  - '**/node_modules/node-pty/**'
+npmRebuild: true
+linux:
+  target:
+    - AppImage
+  category: Development
+  icon: build/icon.png
+  artifactName: Spettro-${version}-linux-${arch}.${ext}
+win:
+  target:
+    - nsis
+    - msi
+  icon: build/icon.ico
+  artifactName: Spettro-${version}-win-${arch}.${ext}
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  artifactName: Spettro-Setup-${version}.${ext}
+msi:
+  artifactName: Spettro-${version}.${ext}
+publish:
+  provider: github

@@ -6,6 +6,10 @@
   "author": "Carlo Esposito",
   "license": "MIT",
   "homepage": "https://spettro.app",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cesp99/Spettro-Desktop.git"
+  },
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",

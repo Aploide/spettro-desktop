@@ -11,8 +11,24 @@ import { EventEmitter } from 'events'
 import { statSync } from 'fs'
 import { basename } from 'path'
 import type { ACPContentBlock, ACPQuestionAnswer, JSONValue } from '../../shared/acp'
+import { ExtensionMethod } from '../../shared/extensions'
 import type { RemoteBridge } from '../remote/bridge'
 import type { AppModel, PromptAttachment } from './appModel'
+
+/** The `_spettro/*` calls a phone can make that change state this process
+ *  mirrors. After one lands, the local stores are re-read so both screens
+ *  agree — a key connected on the phone must not leave this window still
+ *  showing an empty provider list (or parked on the setup gate). */
+const MUTATING_EXTENSION_METHODS = new Set<string>([
+  ExtensionMethod.accountLoginStart,
+  ExtensionMethod.accountLoginCancel,
+  ExtensionMethod.accountLogout,
+  ExtensionMethod.providersConnect,
+  ExtensionMethod.providersDisconnect,
+  ExtensionMethod.localAdd,
+  ExtensionMethod.localRemove,
+  ExtensionMethod.modelsFavorite
+])
 
 export function buildRemoteBridge(model: AppModel): RemoteBridge {
   const events = new EventEmitter()
@@ -105,7 +121,19 @@ export function buildRemoteBridge(model: AppModel): RemoteBridge {
       }
     },
 
-    agentCall: (method, params) => model.agentRaw(method, params),
+    // The phone drives its own account, subscription, and provider screens
+    // through this one passthrough — it speaks the same `_spettro/*` methods
+    // this process does, so nothing about that surface had to be restated for
+    // it. Errors propagate as-is: the host turns them into JSON-RPC faults.
+    agentCall: async (method, params) => {
+      const result = await model.agentRaw(method, params)
+      if (MUTATING_EXTENSION_METHODS.has(method)) {
+        void model.refreshExtensions().catch(() => {
+          // Best-effort mirror; the phone already has the authoritative answer.
+        })
+      }
+      return result
+    },
 
     resolvePermission: (promptId, selectedOptionId, deviceId) => {
       if (selectedOptionId !== null) {

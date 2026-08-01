@@ -116,6 +116,25 @@ export function registerIpc(
       refreshRemoteState()
     },
 
+    // -- Account / providers / models (the `_spettro/*` surface) ------------
+    // Each of these refreshes the affected store, and every store change
+    // pushes a fresh app-state, so the renderer reads results from
+    // AppStateDTO.extensions rather than from these return values. API keys
+    // are handed straight to the CLI: never logged, never persisted here.
+    refreshExtensions: () => model.refreshExtensions(),
+    skipProviderSetup: async () => model.skipProviderSetup(),
+    accountLoginStart: () => model.accountLoginStart(),
+    accountLoginPoll: () => model.accountLoginPoll(),
+    accountLoginCancel: () => model.accountLoginCancel(),
+    accountLogout: () => model.accountLogout(),
+    providerConnect: (id, apiKey, activate) => model.providerConnect(id, apiKey, activate),
+    providerDisconnect: (id) => model.providerDisconnect(id),
+    localEndpointProbe: (endpoint, apiKey) => model.localEndpointProbe(endpoint, apiKey),
+    localEndpointAdd: (endpoint, apiKey) => model.localEndpointAdd(endpoint, apiKey),
+    localEndpointRemove: (endpoint) => model.localEndpointRemove(endpoint),
+    modelSetFavorite: (provider, name, favorite) =>
+      model.modelSetFavorite(provider, name, favorite),
+
     // -- Misc ---------------------------------------------------------------
     openExternal: async (url) => {
       await shell.openExternal(url)

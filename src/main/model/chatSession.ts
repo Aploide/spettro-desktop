@@ -89,8 +89,15 @@ export class ChatSession {
 
   /** True for a chat that has never received a prompt (and never failed to
    *  connect) — not a conversation, so AppModel doesn't persist it. */
+  /** An untouched chat, which is never written to disk.
+   *
+   *  Emptiness alone decides this. The macOS app also required
+   *  `acpSessionId == nil`, but there a session was only ever attached by the
+   *  first prompt; here chats are warmed on open so their config chips show
+   *  the session's real options, which would otherwise make every glanced-at
+   *  chat persist itself. */
   get isPristine(): boolean {
-    return this.isEmpty && this.acpSessionId === null
+    return this.isEmpty
   }
 
   get projectName(): string {

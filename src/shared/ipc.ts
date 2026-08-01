@@ -12,6 +12,7 @@ import type {
   ACPQuestionRequest
 } from './acp'
 import type { AppStateDTO, ChatDetail, GitStat, TranscriptItem } from './model'
+import type { ConnectResult, LocalProbeResult, LoginStatus } from './extensions'
 
 // ---------------------------------------------------------------------------
 // Main → renderer push events
@@ -102,6 +103,24 @@ export interface RendererApi {
   remoteClosePairing(): Promise<void>
   remoteRevokeDevice(deviceId: string): Promise<void>
   remoteRenameHost(name: string): Promise<void>
+
+  // Account / providers / models (the `_spettro/*` extension surface).
+  // Every one of these refreshes AppStateDTO.extensions and pushes app-state,
+  // so the renderer reads results from the store rather than return values.
+  refreshExtensions(): Promise<void>
+  /** "Continue without setting up a provider" — releases the needsProvider
+   *  gate until the next launch. */
+  skipProviderSetup(): Promise<void>
+  accountLoginStart(): Promise<LoginStatus>
+  accountLoginPoll(): Promise<LoginStatus>
+  accountLoginCancel(): Promise<void>
+  accountLogout(): Promise<void>
+  providerConnect(id: string, apiKey: string, activate: boolean): Promise<ConnectResult>
+  providerDisconnect(id: string): Promise<void>
+  localEndpointProbe(endpoint: string, apiKey: string | null): Promise<LocalProbeResult>
+  localEndpointAdd(endpoint: string, apiKey: string | null): Promise<void>
+  localEndpointRemove(endpoint: string): Promise<void>
+  modelSetFavorite(provider: string, model: string, favorite: boolean): Promise<void>
 
   // Misc
   openExternal(url: string): Promise<void>

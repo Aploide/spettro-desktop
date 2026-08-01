@@ -194,7 +194,9 @@ export class AcpAgent {
 
   // MARK: Passthrough
 
-  /** Raw request passthrough for the remote host's agent/call relay. */
+  /** Raw request passthrough for the remote host's agent/call relay — and the
+   *  seam the typed `_spettro/*` calls in acp/extensions.ts are built on
+   *  (`ExtensionCaller`). */
   raw(method: string, params: JSONValue): Promise<JSONValue> {
     return this.connection.request(method, params)
   }

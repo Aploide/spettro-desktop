@@ -67,6 +67,11 @@ export class AcpConnection {
         transport: 'ask' | 'permission'
       }) => void)
     | null = null
+  /** An agent-originated extension notification (`_spettro/*`) — notably
+   *  `_spettro/account/update` while a device-flow login advances. Delivered
+   *  raw: the app decodes what it models, and the remote host relays the same
+   *  payload verbatim to attached phones. */
+  onExtensionNotification: ((method: string, params: JSONValue) => void) | null = null
   onTerminate: ((code: number) => void) | null = null
   onLog: ((line: string) => void) | null = null
 
@@ -285,6 +290,13 @@ export class AcpConnection {
   }
 
   private handleNotification(method: string, params: JSONValue | undefined): void {
+    // ACP extension methods are namespaced with a leading underscore. These
+    // used to be dropped on the floor, which is why an account change made in
+    // the TUI (or a login completing in the browser) never reached the app.
+    if (method.startsWith('_')) {
+      this.onExtensionNotification?.(method, params ?? null)
+      return
+    }
     if (method !== 'session/update' || params === undefined) return
     const obj = objectValue(params)
     if (!obj) return

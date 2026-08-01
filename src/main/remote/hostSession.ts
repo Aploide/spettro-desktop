@@ -212,7 +212,17 @@ export class RemoteHostSession {
       succeed(await this.handleAuthenticated(method, params))
     } catch (error) {
       if (error instanceof RPCFault) fail(error.code, error.message)
-      else fail(-32000, error instanceof Error ? error.message : String(error))
+      else {
+        // Preserve a numeric JSON-RPC code when the agent supplied one. The
+        // client's "this CLI is too old" check keys on -32601, and flattening
+        // everything to -32000 turns a missing `_spettro/*` method into a
+        // generic failure it can't explain.
+        const code = (error as { code?: unknown }).code
+        fail(
+          typeof code === 'number' ? code : -32000,
+          error instanceof Error ? error.message : String(error)
+        )
+      }
     }
   }
 

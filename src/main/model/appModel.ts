@@ -39,10 +39,13 @@ import type {
   RemoteHostState,
   SubscriptionState
 } from '../../shared/model'
+import type { ConnectResult, LocalProbeResult, LoginStatus } from '../../shared/extensions'
+import { ExtensionMethod } from '../../shared/extensions'
 import { AcpAgent, AcpConnection } from '../acp'
 import { ChatSession, type ConfigValue } from './chatSession'
 import { CLIInstaller } from './cliInstaller'
 import { locateCLI } from './cliLocator'
+import { ExtensionStores } from './extensionStores'
 import { Prefs } from './prefs'
 import { SessionStore } from './sessionStore'
 import { SubscriptionStore } from './subscriptionStore'
@@ -110,12 +113,22 @@ export class AppModel extends EventEmitter {
   private lastAgentRestart: number | null = null
 
   private sessionsByACPID = new Map<string, ChatSession>()
+  /** In-flight ACP attaches, keyed by chat id — see ensureLiveSession. */
+  private ensureInFlight = new Map<string, Promise<string | null>>()
   private readonly installer = new CLIInstaller()
   private readonly store: SessionStore
   private readonly prefs: Prefs
   private readonly subscriptionStore: SubscriptionStore
   private readonly appVersion: string
   private shuttingDown = false
+
+  /** Account, providers, and models, all driven over the CLI's `_spettro/*`
+   *  extension methods. Owned here so there is one place that attaches them to
+   *  (and detaches them from) the live agent. */
+  readonly extensions: ExtensionStores
+  /** Set once the user chooses to continue without finishing setup, so the
+   *  gate doesn't pull them back on the next refresh. */
+  private providerSetupSkipped = false
 
   constructor(opts: { userDataDir: string; appVersion: string }) {
     super()
@@ -128,6 +141,12 @@ export class AppModel extends EventEmitter {
       this.emitAppState()
     })
     this.subscription = this.subscriptionStore.current
+    this.extensions = new ExtensionStores(() => this.emitAppState())
+    // A completed sign-in is usually what unblocks a CLI with nothing
+    // configured, so re-evaluate the setup gate once the plan has loaded.
+    this.extensions.onLoginComplete = () => {
+      this.updateProviderGate()
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -179,6 +198,7 @@ export class AppModel extends EventEmitter {
       installLog: [...this.installLog],
       agentLog: [...this.agentLog],
       subscription: this.subscription,
+      extensions: this.extensions.snapshot(),
       remote: this.remote,
       lastProjectPath: this.prefs.lastProjectPath || null,
       recentProjects: this.prefs.recentProjects
@@ -198,8 +218,11 @@ export class AppModel extends EventEmitter {
     return this.sessionsByACPID.get(acpId)?.id ?? null
   }
 
+  /** The agent is up and usable by an attached phone. `needsProvider` counts:
+   *  the process is running and answering, the local user is just parked on
+   *  the setup screen (remoteAgentReady in AppModel+RemoteHost.swift). */
   agentReady(): boolean {
-    return this.phase.kind === 'ready'
+    return this.phase.kind === 'ready' || this.phase.kind === 'needsProvider'
   }
 
   /** The folder new chats open in by default: the selected chat's own folder,
@@ -326,7 +349,17 @@ export class AppModel extends EventEmitter {
       this.connection = connection
       this.agent = agent
       this.liveConnectionToken = token
-      this.setPhase({ kind: 'ready' })
+      this.extensions.attach(agent)
+
+      // Load providers before deciding the phase: a CLI with nothing
+      // configured can't answer a prompt, and dropping the user into a chat
+      // there is a dead end. This is awaited (and the account refresh below is
+      // not) so startup isn't held up by a network round trip to the
+      // subscription backend.
+      await this.extensions.refreshProviders()
+      if (token !== this.connectionToken) return
+      this.setPhase(this.isProviderSetupNeeded ? { kind: 'needsProvider' } : { kind: 'ready' })
+      void this.extensions.refreshAccount()
       this.emitHostState()
       await this.resumePersistedSessions()
     } catch (err) {
@@ -384,6 +417,9 @@ export class AppModel extends EventEmitter {
     this.connection = null
     this.pendingConnection = null
     this.agent = null
+    // Stops the login poller and forgets whether providers ever loaded: an
+    // agent that isn't there tells us nothing about what's configured.
+    this.extensions.attach(null)
     live?.stop()
     starting?.stop()
     // Nothing is left waiting on these answers: the turn that asked them died
@@ -408,7 +444,11 @@ export class AppModel extends EventEmitter {
     // Attached phones stay connected and go read-only rather than being
     // dropped: the host is still there, it's the agent that isn't.
     this.emitHostState()
-    if (this.phase.kind !== 'ready' && this.phase.kind !== 'connecting') {
+    if (
+      this.phase.kind !== 'ready' &&
+      this.phase.kind !== 'needsProvider' &&
+      this.phase.kind !== 'connecting'
+    ) {
       this.emitAppState()
       return
     }
@@ -447,6 +487,18 @@ export class AppModel extends EventEmitter {
       this.emitQuestions()
       const chatId = request.sessionId ? this.chatIdForACPSession(request.sessionId) : null
       this.emit('question-ask', request.id, chatId, raw)
+    }
+    connection.onExtensionNotification = (method, params) => {
+      // Attached phones run the same account and provider screens, so they get
+      // the same push — a login completing on this machine should update the
+      // phone's Settings without it polling.
+      this.emit('agent-notification', method, params)
+      if (method === ExtensionMethod.accountUpdate) {
+        this.extensions.applyAccountUpdate(params)
+        // Signing in is usually what unblocks a CLI that had no provider at
+        // all, so re-evaluate the setup gate.
+        void this.refreshProviderGate()
+      }
     }
     connection.onTerminate = (code) => {
       // Only the connection the app is actually using gets to drive the
@@ -658,9 +710,12 @@ export class AppModel extends EventEmitter {
     this.pushEvent({ type: 'chat-reset', chat: session.detail() })
     this.emitAppState()
     // If the agent isn't running (first launch, or it died), boot it rooted
-    // in this chat's folder.
+    // in this chat's folder. Either way the chat is warmed as soon as there
+    // is an agent, so its config chips are the session's own.
     if (!this.agent && this.phase.kind !== 'connecting') {
-      void this.connect(projectPath)
+      void this.connect(projectPath).then(() => this.warmSession(session))
+    } else {
+      this.warmSession(session)
     }
     return session
   }
@@ -674,7 +729,9 @@ export class AppModel extends EventEmitter {
     this.pushEvent({ type: 'chat-reset', chat: session.detail() })
     this.emitAppState()
     if (!this.agent && this.phase.kind !== 'connecting') {
-      void this.connect(session.projectPath)
+      void this.connect(session.projectPath).then(() => this.warmSession(session))
+    } else {
+      this.warmSession(session)
     }
   }
 
@@ -776,6 +833,13 @@ export class AppModel extends EventEmitter {
 
   private async runTurn(session: ChatSession, blocks: ACPContentBlock[]): Promise<void> {
     const acpId = await this.ensureLiveSession(session)
+    // What the user is looking at must be what the turn runs. A fresh attach
+    // already synced (and cleared) its queue; anything still pending here was
+    // queued while the agent was down or was rejected mid-session, so it is
+    // replayed before the prompt goes out rather than after.
+    if (acpId && Object.keys(session.pendingConfigChanges).length > 0) {
+      await this.syncDisplayedConfig(session, session.displayedConfigValues(), acpId)
+    }
     if (!acpId) {
       session.setBusy(false)
       this.persist()
@@ -824,12 +888,35 @@ export class AppModel extends EventEmitter {
 
   /** Lazily attaches a live ACP session the first time a chat is prompted,
    *  bringing the agent back up first if it died. */
-  private async ensureLiveSession(session: ChatSession): Promise<string | null> {
+  private ensureLiveSession(session: ChatSession, silent = false): Promise<string | null> {
     // The stored id only counts if it still routes to a live ACP session:
     // after the agent restarts it survives on disk but means nothing to the
     // new process until it has been resumed.
     const liveId = this.liveACPSessionId(session)
-    if (liveId) return liveId
+    if (liveId) return Promise.resolve(liveId)
+    // One attach at a time per chat: warming (below) and the first prompt can
+    // race, and two session/new calls would strand the first ACP session —
+    // its streamed updates would route to a chat that no longer claims it.
+    const inFlight = this.ensureInFlight.get(session.id)
+    if (inFlight) return inFlight
+    const attach = this.attachLiveSession(session, silent).finally(() => {
+      this.ensureInFlight.delete(session.id)
+    })
+    this.ensureInFlight.set(session.id, attach)
+    return attach
+  }
+
+  /** Warms a chat the moment it is on screen: attaching the ACP session is
+   *  what produces the real config options, so the chips under the composer
+   *  show what the session will actually run instead of staying empty (or
+   *  showing only the last chat's cached set) until the first prompt. */
+  private warmSession(session: ChatSession): void {
+    if (!this.agent) return
+    if (this.liveACPSessionId(session)) return
+    void this.ensureLiveSession(session, true)
+  }
+
+  private async attachLiveSession(session: ChatSession, silent: boolean): Promise<string | null> {
     if (!this.agent) {
       await this.connect(session.projectPath)
       // Connecting resumes the persisted chats; if this one came back, keep
@@ -839,7 +926,9 @@ export class AppModel extends EventEmitter {
     }
     const agent = this.agent
     if (!agent) {
-      session.appendNotice("The agent isn't running yet — try again in a moment.", true)
+      if (!silent) {
+        session.appendNotice("The agent isn't running yet — try again in a moment.", true)
+      }
       return null
     }
     try {
@@ -853,7 +942,11 @@ export class AppModel extends EventEmitter {
       await this.syncDisplayedConfig(session, displayed, result.sessionId)
       return result.sessionId
     } catch (err) {
-      session.appendNotice(`Couldn't start a session: ${errMessage(err)}`, true)
+      // A background warm must not spray notices into an empty chat; the
+      // prompt path reports the same failure when the user actually sends.
+      if (!silent) {
+        session.appendNotice(`Couldn't start a session: ${errMessage(err)}`, true)
+      }
       return null
     }
   }
@@ -899,6 +992,11 @@ export class AppModel extends EventEmitter {
       this.persist()
     } catch (err) {
       session.appendNotice(`Couldn't change ${configId}: ${errMessage(err)}`, true)
+      // The chip already shows the new value but the agent never took it.
+      // Queue it so the pre-prompt sync retries before the next turn runs —
+      // otherwise the user would prompt against settings they can't see.
+      session.pendingConfigChanges[configId] = value
+      this.persist()
     }
   }
 
@@ -942,6 +1040,133 @@ export class AppModel extends EventEmitter {
     this.pendingQuestions.splice(index, 1)
     this.emitQuestions()
     this.emit('question-resolved', requestId, resolvedBy)
+  }
+
+  // -------------------------------------------------------------------------
+  // Provider gate (needsProvider)
+  // -------------------------------------------------------------------------
+
+  /** Whether to route the user into provider setup.
+   *
+   *  This gate fails open on purpose. It only closes when the provider list
+   *  loaded successfully *and* came back empty *and* no subscription is signed
+   *  in — anything else (a failed load, an old CLI, a transient error) means
+   *  "we don't know", and an unknown answer must never cost someone access to
+   *  the rest of the app. */
+  private get isProviderSetupNeeded(): boolean {
+    if (this.providerSetupSkipped) return false
+    if (!this.extensions.needsProviderSetup) return false
+    // Being signed in is itself proof there's a way to run a model, even when
+    // the plan details haven't loaded yet.
+    return !this.extensions.isSignedIn
+  }
+
+  /** Recomputes the gate from what the stores already know, without a fetch.
+   *  Only ever moves between the two connected phases, so it can't disturb
+   *  setup, install, or failure. */
+  private updateProviderGate(): void {
+    if (this.phase.kind !== 'ready' && this.phase.kind !== 'needsProvider') return
+    const next: Phase = this.isProviderSetupNeeded ? { kind: 'needsProvider' } : { kind: 'ready' }
+    if (next.kind === this.phase.kind) return
+    this.setPhase(next)
+    this.emitHostState()
+  }
+
+  /** Re-checks whether a provider is configured, moving the app out of (or
+   *  into) the `needsProvider` phase. */
+  async refreshProviderGate(): Promise<void> {
+    if (this.phase.kind !== 'ready' && this.phase.kind !== 'needsProvider') return
+    await this.extensions.refreshProviders()
+    this.updateProviderGate()
+  }
+
+  /** Called once provider setup completes, to leave the `needsProvider` phase
+   *  without a full reconnect. */
+  async providerSetupCompleted(): Promise<void> {
+    await this.extensions.refreshProviders()
+    if (this.isProviderSetupNeeded) return
+    if (this.phase.kind === 'needsProvider') {
+      this.setPhase({ kind: 'ready' })
+      this.emitHostState()
+      await this.resumePersistedSessions()
+    }
+  }
+
+  /** Leaves provider setup without configuring anything. The chat will fail on
+   *  its first prompt if nothing is connected, which is the user's call to
+   *  make — being unable to reach settings, sessions, or the sidebar is not a
+   *  reasonable price for an unfinished setup step. */
+  skipProviderSetup(): void {
+    this.providerSetupSkipped = true
+    if (this.phase.kind === 'needsProvider') {
+      this.setPhase({ kind: 'ready' })
+      this.emitHostState()
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Account / providers / models (the `_spettro/*` surface)
+  //
+  // Every mutating call refreshes the affected store, so the renderer reads
+  // results from AppStateDTO.extensions rather than from return values. API
+  // keys are passed straight through to the CLI: never logged, never stored.
+  // -------------------------------------------------------------------------
+
+  async refreshExtensions(): Promise<void> {
+    await this.extensions.refresh()
+    this.updateProviderGate()
+  }
+
+  /** Starts a device-flow sign-in. The returned status carries the URL the
+   *  renderer opens; the main process then polls the flow to completion. */
+  accountLoginStart(): Promise<LoginStatus> {
+    return this.extensions.startLogin()
+  }
+
+  /** One synchronous read of the in-flight login — for a screen that
+   *  reappeared and may have missed a push. */
+  accountLoginPoll(): Promise<LoginStatus> {
+    return this.extensions.pollLogin()
+  }
+
+  accountLoginCancel(): Promise<void> {
+    return this.extensions.cancelLogin()
+  }
+
+  async accountLogout(): Promise<void> {
+    await this.extensions.logout()
+    this.updateProviderGate()
+  }
+
+  async providerConnect(id: string, apiKey: string, activate: boolean): Promise<ConnectResult> {
+    const result = await this.extensions.connect(id, apiKey, activate)
+    // The store already refreshed; releasing the user out of `needsProvider`
+    // is what makes a successful connect the end of setup.
+    this.updateProviderGate()
+    return result
+  }
+
+  async providerDisconnect(id: string): Promise<void> {
+    await this.extensions.disconnect(id)
+    this.updateProviderGate()
+  }
+
+  localEndpointProbe(endpoint: string, apiKey: string | null): Promise<LocalProbeResult> {
+    return this.extensions.probeLocal(endpoint, apiKey)
+  }
+
+  async localEndpointAdd(endpoint: string, apiKey: string | null): Promise<void> {
+    await this.extensions.addLocal(endpoint, apiKey)
+    this.updateProviderGate()
+  }
+
+  async localEndpointRemove(endpoint: string): Promise<void> {
+    await this.extensions.removeLocal(endpoint)
+    this.updateProviderGate()
+  }
+
+  modelSetFavorite(provider: string, model: string, favorite: boolean): Promise<void> {
+    return this.extensions.setFavorite(provider, model, favorite)
   }
 
   // -------------------------------------------------------------------------
@@ -1013,6 +1238,7 @@ export class AppModel extends EventEmitter {
     this.shuttingDown = true
     this.emitHostState(true)
     this.teardownAgent()
+    this.extensions.dispose()
     this.subscriptionStore.stop()
     this.store.save(this.sessions.filter((s) => !s.isPristine).map((s) => s.snapshot()))
   }

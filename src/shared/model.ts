@@ -10,6 +10,7 @@ import type {
   ACPUsage,
   JSONValue
 } from './acp'
+import type { ExtensionsState } from './extensions'
 
 // ---------------------------------------------------------------------------
 // Transcript
@@ -128,6 +129,10 @@ export type Phase =
   | { kind: 'installing' }
   | { kind: 'needsProject' }
   | { kind: 'connecting' }
+  /** Agent running, but no provider key, local endpoint, or subscription is
+   *  configured — it cannot answer a single prompt yet, so the user is routed
+   *  into provider setup instead of a chat that would fail. */
+  | { kind: 'needsProvider' }
   | { kind: 'ready' }
   | { kind: 'failed'; message: string }
 
@@ -184,6 +189,8 @@ export interface AppStateDTO {
   installLog: string[]
   agentLog: string[]
   subscription: SubscriptionState
+  /** Account / providers / models, mirrored from the `_spettro/*` surface. */
+  extensions: ExtensionsState
   remote: RemoteHostState | null
   lastProjectPath: string | null
   recentProjects: string[]

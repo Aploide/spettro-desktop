@@ -1,0 +1,108 @@
+// The renderer's mirror of the main-process model. A tiny external store
+// (no state library): main pushes MainEvent's, we fold them into one
+// immutable snapshot, views subscribe with useSyncExternalStore.
+
+import { useSyncExternalStore } from 'react'
+import type { ACPPermissionRequest, ACPQuestionRequest } from '@shared/acp'
+import type { MainEvent } from '@shared/ipc'
+import type { AppStateDTO, ChatDetail } from '@shared/model'
+import { transcriptItemId } from '@shared/model'
+
+export interface RendererState {
+  app: AppStateDTO | null
+  /** Full detail for every chat the renderer has opened/received. */
+  chats: Record<string, ChatDetail>
+  permissions: ACPPermissionRequest[]
+  questions: ACPQuestionRequest[]
+}
+
+let state: RendererState = { app: null, chats: {}, permissions: [], questions: [] }
+const listeners = new Set<() => void>()
+
+function emit(next: RendererState): void {
+  state = next
+  listeners.forEach((l) => l())
+}
+
+function subscribe(listener: () => void): () => void {
+  listeners.add(listener)
+  return () => listeners.delete(listener)
+}
+
+export function getState(): RendererState {
+  return state
+}
+
+function reduce(event: MainEvent): void {
+  switch (event.type) {
+    case 'app-state':
+      emit({ ...state, app: event.state })
+      break
+    case 'chat-reset':
+      emit({ ...state, chats: { ...state.chats, [event.chat.id]: event.chat } })
+      break
+    case 'chat-item': {
+      const chat = state.chats[event.chatId]
+      if (!chat) break
+      const id = transcriptItemId(event.item)
+      const idx = chat.items.findIndex((it) => transcriptItemId(it) === id)
+      const items = idx >= 0 ? chat.items.map((it, i) => (i === idx ? event.item : it)) : [...chat.items, event.item]
+      emit({ ...state, chats: { ...state.chats, [event.chatId]: { ...chat, items } } })
+      break
+    }
+    case 'chat-meta': {
+      const chat = state.chats[event.chatId]
+      if (!chat) break
+      emit({ ...state, chats: { ...state.chats, [event.chatId]: { ...chat, ...event.meta } } })
+      break
+    }
+    case 'chat-removed': {
+      const { [event.chatId]: _, ...rest } = state.chats
+      emit({ ...state, chats: rest })
+      break
+    }
+    case 'permissions':
+      emit({ ...state, permissions: event.requests })
+      break
+    case 'questions':
+      emit({ ...state, questions: event.requests })
+      break
+    // terminal-data / terminal-exit are consumed directly by the terminal
+    // component via window.spettro.onEvent — they never enter this store.
+    default:
+      break
+  }
+}
+
+let initialized = false
+
+/** Idempotent; call once from App. Pulls the initial snapshot and subscribes. */
+export function initStore(): void {
+  if (initialized) return
+  initialized = true
+  window.spettro.onEvent(reduce)
+  void window.spettro.call('getState').then((app) => emit({ ...state, app }))
+}
+
+export function useStore<T>(selector: (s: RendererState) => T): T {
+  return useSyncExternalStore(subscribe, () => selector(state))
+}
+
+export function useApp(): AppStateDTO | null {
+  return useStore((s) => s.app)
+}
+
+export function useChat(chatId: string | null): ChatDetail | null {
+  return useStore((s) => (chatId ? (s.chats[chatId] ?? null) : null))
+}
+
+/** Ensure a chat's detail is loaded into the store (fetch once on open). */
+export async function ensureChatLoaded(chatId: string): Promise<void> {
+  if (state.chats[chatId]) return
+  const chat = await window.spettro.call('getChat', chatId)
+  if (chat) reduce({ type: 'chat-reset', chat })
+}
+
+/** Shorthand for window.spettro.call. */
+export const call = ((...args: Parameters<typeof window.spettro.call>) =>
+  window.spettro.call(...args)) as typeof window.spettro.call

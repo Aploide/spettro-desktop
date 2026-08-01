@@ -6,6 +6,9 @@
 /** Dependency-free dynamic JSON value (port of JSONValue.swift). */
 export type JSONValue = null | boolean | number | string | JSONValue[] | { [key: string]: JSONValue }
 
+/** JSON-RPC id — the app's own ids are ints; agent-originated ids may be strings. */
+export type RPCID = number | string
+
 // ---------------------------------------------------------------------------
 // Content blocks
 // ---------------------------------------------------------------------------

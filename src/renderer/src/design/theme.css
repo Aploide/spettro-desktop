@@ -1,0 +1,102 @@
+/* Port of Spettro/Design/Theme.swift — spacing, radii, semantic colors.
+   Dark is the default appearance; light overrides via prefers-color-scheme.
+   All views reference ONLY these custom properties (never raw colors). */
+
+:root {
+  /* Spacing */
+  --sp-xs: 4px;
+  --sp-sm: 8px;
+  --sp-md: 12px;
+  --sp-lg: 16px;
+  --sp-xl: 24px;
+
+  /* Radii */
+  --rad-sm: 8px;
+  --rad-md: 12px;
+  --rad-lg: 18px;
+  --rad-bubble: 16px;
+
+  /* Dark appearance (default) */
+  --accent: #6073cc;
+  --agent-accent: #ad7bf9;
+  --diff-added: #40c977;
+  --diff-removed: #fa423e;
+  --canvas: #0e0e0e;
+  --surface-raised: #1c1c1c; /* white 0.11 */
+  --assistant-bubble: #212121; /* white 0.13 */
+  --user-bubble: var(--accent);
+  --hairline: rgba(255, 255, 255, 0.08);
+  --text-primary: rgba(255, 255, 255, 0.92);
+  --text-secondary: rgba(255, 255, 255, 0.55);
+
+  color-scheme: dark light;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --accent: #526fff;
+    --canvas: #f9f9f7;
+    --surface-raised: #ffffff;
+    --assistant-bubble: #ffffff;
+    --hairline: rgba(0, 0, 0, 0.08);
+    --text-primary: rgba(0, 0, 0, 0.88);
+    --text-secondary: rgba(0, 0, 0, 0.55);
+  }
+}
+
+/* Mode tints (Theme.modeColor); resolved in JS via modeColor() below's
+   companion in theme.ts — these are the raw palette values. */
+:root {
+  --mode-blue: #a78bfa;
+  --mode-green: #34d399;
+  --mode-cyan: #60a5fa;
+  --mode-yellow: #f59e0b;
+  --mode-magenta: #c084fc;
+  --mode-purple: #bd93f9;
+  --mode-red: #ef4444;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--canvas);
+  color: var(--text-primary);
+  font-family:
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    Roboto,
+    'Noto Sans',
+    Ubuntu,
+    Cantarell,
+    sans-serif;
+  font-size: 13px;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+}
+
+code,
+pre,
+.mono {
+  font-family: 'SF Mono', SFMono-Regular, ui-monospace, 'Cascadia Mono', 'Segoe UI Mono',
+    'JetBrains Mono', Menlo, Consolas, monospace;
+}
+
+/* The soft card surface (CardBackground / .card() modifier). */
+.card {
+  background: var(--surface-raised);
+  border: 1px solid var(--hairline);
+  border-radius: var(--rad-md);
+}
+.card--unfilled {
+  background: transparent;
+}

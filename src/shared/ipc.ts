@@ -125,6 +125,16 @@ export interface RendererApi {
   localEndpointRemove(endpoint: string): Promise<void>
   modelSetFavorite(provider: string, model: string, favorite: boolean): Promise<void>
 
+  // Updates. The main process checks GitHub on a timer and pushes results in
+  // AppStateDTO.update; these are the user-initiated versions.
+  /** Re-checks both components now, ignoring the cached result. */
+  checkForUpdates(): Promise<void>
+  /** Downloads the release installer for this platform and hands off to it —
+   *  the app quits once the installer is running. */
+  installAppUpdate(): Promise<void>
+  /** Re-runs the official CLI install script, then reconnects the agent. */
+  installCLIUpdate(): Promise<void>
+
   // Misc
   openExternal(url: string): Promise<void>
   showItemInFolder(path: string): Promise<void>

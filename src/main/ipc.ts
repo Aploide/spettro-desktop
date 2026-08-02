@@ -161,6 +161,13 @@ export function registerIpc(
     modelSetFavorite: (provider, name, favorite) =>
       model.modelSetFavorite(provider, name, favorite),
 
+    // -- Updates ------------------------------------------------------------
+    // Results land in AppStateDTO.update (the manager pushes app-state as it
+    // downloads and installs), so these resolve with nothing.
+    checkForUpdates: () => model.checkForUpdates(),
+    installAppUpdate: () => model.installAppUpdate(),
+    installCLIUpdate: () => model.installCLIUpdate(),
+
     // -- Misc ---------------------------------------------------------------
     openExternal: async (url) => {
       await shell.openExternal(url)

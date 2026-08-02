@@ -7,7 +7,9 @@
 import { useMemo, useState } from 'react'
 import type { ACPConfigOption } from '@shared/acp'
 import type { ChatSummary } from '@shared/model'
+import { isUpdateBusy, type UpdateState } from '@shared/update'
 import { call, useApp, useStore } from '@renderer/state/store'
+import type { SettingsPane } from './SettingsView'
 import AppIcon from './AppIcon'
 import PlanBadge from './PlanBadge'
 import Spinner from './Spinner'
@@ -17,6 +19,7 @@ import {
   ArchiveIcon,
   ChevronRightIcon,
   ClearIcon,
+  DownloadIcon,
   FolderFillIcon,
   FolderPlusIcon,
   GearIcon,
@@ -27,7 +30,8 @@ import {
 } from './icons'
 
 interface Props {
-  onOpenSettings: () => void
+  /** The pane argument lets the update prompt open Settings on Updates. */
+  onOpenSettings: (pane?: SettingsPane) => void
   onOpenRemote: () => void
 }
 
@@ -160,6 +164,8 @@ export default function Sidebar({ onOpenSettings, onOpenRemote }: Props): JSX.El
 
       <div className="divider divider--faint" />
 
+      {app?.update && <UpdatePrompt update={app.update} onOpen={() => onOpenSettings('updates')} />}
+
       <div className="sidebar-footer">
         <FooterStatus selectedId={selectedId} agentVersion={app?.agentVersion ?? null} />
         <button
@@ -169,12 +175,70 @@ export default function Sidebar({ onOpenSettings, onOpenRemote }: Props): JSX.El
         >
           <PhoneIcon size={16} active={app?.remote?.enabled ?? false} />
         </button>
-        <button className="icon-btn" title="Settings" onClick={onOpenSettings}>
+        <button className="icon-btn" title="Settings" onClick={() => onOpenSettings()}>
           <GearIcon size={16} />
         </button>
       </div>
 
       {menu && <ContextMenu x={menu.x} y={menu.y} entries={menuEntries(menu.session)} onClose={() => setMenu(null)} />}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------- updates
+
+/** The one place an update is visible without opening Settings: a single row
+ *  above the footer, shown only when a newer release exists (or while one is
+ *  being applied). The row opens Settings > Updates for the notes and the
+ *  detail; the button applies the update straight away, which is what a user
+ *  who has already decided actually wants. */
+function UpdatePrompt({
+  update,
+  onOpen
+}: {
+  update: UpdateState
+  onOpen: () => void
+}): JSX.Element | null {
+  const appBusy = isUpdateBusy(update.app)
+  const cliBusy = isUpdateBusy(update.cli)
+  const busy = appBusy || cliBusy
+  // The app comes first: updating it restarts the whole thing, so doing the
+  // CLI first would only throw that work away.
+  const target = update.app.available ? 'app' : update.cli.available ? 'cli' : null
+  if (!target && !busy) return null
+
+  const label = busy
+    ? (appBusy ? update.app.message : update.cli.message) || 'Updating…'
+    : target === 'app'
+      ? `Spettro ${update.app.latest} is available`
+      : `Spettro CLI ${update.cli.latest} is available`
+
+  const install = (): void => {
+    if (target === 'app') {
+      // A build that can't replace itself has no in-app path — send the user
+      // to the pane, which offers the download instead.
+      if (update.canInstallApp) void call('installAppUpdate')
+      else onOpen()
+    } else if (target === 'cli') {
+      void call('installCLIUpdate')
+    }
+  }
+
+  return (
+    <div className="sidebar-update">
+      <button className="sidebar-update-text" onClick={onOpen} title="Open update details">
+        <span className="sidebar-update-icon">
+          <DownloadIcon size={13} />
+        </span>
+        <span className="sidebar-update-label">{label}</span>
+      </button>
+      {busy ? (
+        <Spinner size={12} />
+      ) : (
+        <button className="btn btn--small btn--prominent" onClick={install}>
+          Update
+        </button>
+      )}
     </div>
   )
 }

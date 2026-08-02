@@ -478,6 +478,49 @@
   padding: var(--sp-sm) var(--sp-md);
 }
 
+/* The update prompt sits directly above the footer and is the only tinted
+   row in the sidebar, so a waiting update reads at a glance without ever
+   covering the chat. It is absent unless there is something to install. */
+.sidebar-update {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-sm);
+  margin: var(--sp-sm) var(--sp-md) 0;
+  padding: 6px 8px 6px 10px;
+  border-radius: var(--rad-sm);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+.sidebar-update-text {
+  appearance: none;
+  border: none;
+  background: none;
+  font: inherit;
+  padding: 0;
+  cursor: default;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-primary);
+  text-align: left;
+}
+
+.sidebar-update-icon {
+  display: flex;
+  color: var(--accent);
+  flex: none;
+}
+
+.sidebar-update-label {
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .footer-status {
   flex: 1;
   min-width: 0;
@@ -862,7 +905,7 @@
 .segmented {
   display: flex;
   width: 100%;
-  max-width: 420px;
+  max-width: 480px;
   padding: 2px;
   border-radius: 8px;
   background: color-mix(in srgb, var(--text-secondary) 12%, transparent);
@@ -879,6 +922,19 @@
   border-radius: 6px;
   color: var(--text-secondary);
   cursor: default;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+}
+
+/* "There is something waiting in here" marker on a tab. */
+.segmented-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: var(--accent);
+  flex: none;
 }
 
 .segmented button.active {

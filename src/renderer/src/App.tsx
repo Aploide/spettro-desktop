@@ -173,7 +173,7 @@ export default function App(): JSX.Element {
         return (
           <div className="split">
             <Sidebar
-              onOpenSettings={() => setSettingsPane('account')}
+              onOpenSettings={(pane) => setSettingsPane(pane ?? 'account')}
               onOpenRemote={() => setRemoteOpen(true)}
             />
             <div className="detail">

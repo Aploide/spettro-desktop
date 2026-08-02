@@ -11,6 +11,7 @@ import type {
   JSONValue
 } from './acp'
 import type { ExtensionsState } from './extensions'
+import type { UpdateState } from './update'
 
 // ---------------------------------------------------------------------------
 // Transcript
@@ -195,6 +196,8 @@ export interface AppStateDTO {
   subscription: SubscriptionState
   /** Account / providers / models, mirrored from the `_spettro/*` surface. */
   extensions: ExtensionsState
+  /** App + CLI release checks and the progress of an update being applied. */
+  update: UpdateState
   remote: RemoteHostState | null
   lastProjectPath: string | null
   /** Where a new chat opens when the user doesn't pick a folder — already

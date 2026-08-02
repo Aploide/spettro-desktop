@@ -70,7 +70,14 @@ app.whenReady().then(() => {
   createWindow()
 
   const userDataDir = app.getPath('userData')
-  model = new AppModel({ userDataDir, appVersion: app.getVersion() })
+  model = new AppModel({
+    userDataDir,
+    appVersion: app.getVersion(),
+    // A dev run has no installer to replace, and quitting is how the update
+    // hands the machine over to the one it downloaded.
+    isPackaged: app.isPackaged,
+    quit: () => app.quit()
+  })
   terminals = new TerminalManager(pushToWindow)
   remoteHost = new RemoteHost(buildRemoteBridge(model), {
     dataDir: userDataDir,

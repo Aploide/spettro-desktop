@@ -29,16 +29,18 @@ import SignInView from '@renderer/views/account/SignInView'
 import { badgePlan, WarningTriangleIcon } from '@renderer/views/providers/icons'
 import PlanBadge from './PlanBadge'
 import Spinner from './Spinner'
+import UpdatesPane from './UpdatesPane'
 import { defaultProjectPath } from './util'
 import '@renderer/design/form.css'
 
-export type SettingsPane = 'account' | 'agent' | 'providers' | 'memory'
+export type SettingsPane = 'account' | 'agent' | 'providers' | 'memory' | 'updates'
 
 const PANES: { id: SettingsPane; label: string }[] = [
   { id: 'account', label: 'Account' },
   { id: 'agent', label: 'Agent' },
   { id: 'providers', label: 'Providers' },
-  { id: 'memory', label: 'Memory' }
+  { id: 'memory', label: 'Memory' },
+  { id: 'updates', label: 'Updates' }
 ]
 
 const DASHBOARD_URL = 'https://spettro.app/dashboard'
@@ -56,6 +58,7 @@ export default function SettingsView({ initialPane = 'account', onClose }: Props
   const [showConnect, setShowConnect] = useState(false)
   const [showModels, setShowModels] = useState(false)
   const version = app?.agentVersion ?? app?.cli?.version ?? null
+  const updateAvailable = Boolean(app?.update.app.available || app?.update.cli.available)
 
   // Credits and plan are a snapshot from when the agent connected; opening
   // Settings is exactly when they need to be current (the Swift's
@@ -87,6 +90,10 @@ export default function SettingsView({ initialPane = 'account', onClose }: Props
                   onClick={() => setPane(p.id)}
                 >
                   {p.label}
+                  {/* One dot on the tab is the whole "you have an update"
+                      affordance inside the sheet — the sidebar carries the
+                      version that is visible without opening Settings. */}
+                  {p.id === 'updates' && updateAvailable && <span className="segmented-dot" />}
                 </button>
               ))}
             </div>
@@ -103,6 +110,7 @@ export default function SettingsView({ initialPane = 'account', onClose }: Props
                 onBrowseModels={() => setShowModels(true)}
               />
             )}
+            {pane === 'updates' && <UpdatesPane />}
             {pane === 'memory' && (
               // MemoryView is a standalone screen that presents its own
               // backdrop; `.pane-embed` confines it to the pane, which is what

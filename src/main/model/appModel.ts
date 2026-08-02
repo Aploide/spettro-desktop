@@ -40,6 +40,7 @@ import type {
   SubscriptionState
 } from '../../shared/model'
 import type { ConnectResult, LocalProbeResult, LoginStatus } from '../../shared/extensions'
+import type { UpdateState } from '../../shared/update'
 import { ExtensionMethod } from '../../shared/extensions'
 import { AcpAgent, AcpConnection } from '../acp'
 import { ChatSession, type ConfigValue } from './chatSession'
@@ -49,6 +50,7 @@ import { ExtensionStores } from './extensionStores'
 import { Prefs } from './prefs'
 import { SessionStore } from './sessionStore'
 import { SubscriptionStore } from './subscriptionStore'
+import { UpdateManager } from './updater'
 
 interface PendingPermission {
   request: ACPPermissionRequest
@@ -126,14 +128,38 @@ export class AppModel extends EventEmitter {
    *  extension methods. Owned here so there is one place that attaches them to
    *  (and detaches them from) the live agent. */
   readonly extensions: ExtensionStores
+  /** App + CLI release checks. Owned here because updating the CLI means
+   *  restarting the agent, which only this class can do. */
+  readonly updates: UpdateManager
   /** Set once the user chooses to continue without finishing setup, so the
    *  gate doesn't pull them back on the next refresh. */
   private providerSetupSkipped = false
 
-  constructor(opts: { userDataDir: string; appVersion: string }) {
+  constructor(opts: {
+    userDataDir: string
+    appVersion: string
+    /** False under `electron-vite dev`, where the app can't replace itself. */
+    isPackaged?: boolean
+    /** Quits the app once an update installer has been handed off. */
+    quit?: () => void
+  }) {
     super()
     this.setMaxListeners(100)
     this.appVersion = opts.appVersion
+    // Built before the stores: getState() reads it, and a store that emitted
+    // during its own construction would otherwise find it undefined.
+    this.updates = new UpdateManager({
+      appVersion: opts.appVersion,
+      isPackaged: opts.isPackaged ?? false,
+      // The handshake's version is authoritative; before the agent is up the
+      // locator's `--version` reading is the best we have.
+      cliVersion: () => this.agentVersion ?? this.cli?.version ?? null,
+      installCLI: (onEvent) => this.installer.install(onEvent),
+      // Whatever was running is the old binary — restart onto the new one.
+      onCLIInstalled: () => this.reconnect(),
+      onChange: () => this.emitAppState(),
+      quit: opts.quit ?? ((): void => undefined)
+    })
     this.prefs = new Prefs(opts.userDataDir)
     this.store = new SessionStore(opts.userDataDir)
     this.subscriptionStore = new SubscriptionStore((state) => {
@@ -199,6 +225,7 @@ export class AppModel extends EventEmitter {
       agentLog: [...this.agentLog],
       subscription: this.subscription,
       extensions: this.extensions.snapshot(),
+      update: this.updates.state(),
       remote: this.remote,
       lastProjectPath: this.prefs.lastProjectPath || null,
       defaultProjectPath: this.defaultProjectPath,
@@ -252,6 +279,9 @@ export class AppModel extends EventEmitter {
 
   async bootstrap(): Promise<void> {
     this.subscriptionStore.start()
+    // Starts the periodic GitHub check for the app and the CLI; the first one
+    // lands a few seconds in, so it never competes with the handshake.
+    this.updates.start()
     // Show any saved conversations immediately, before the CLI is located or
     // connected, so the sidebar is never empty on a cold launch.
     this.loadPersistedSessions()
@@ -347,6 +377,9 @@ export class AppModel extends EventEmitter {
         return
       }
       this.agentVersion = info.agentVersion
+      // The handshake is the authoritative CLI version — re-decide whether the
+      // release we already know about is newer than what is now running.
+      this.updates.refreshCLIVersion()
       this.connection = connection
       this.agent = agent
       this.liveConnectionToken = token
@@ -665,6 +698,27 @@ export class AppModel extends EventEmitter {
         this.setPhase({ kind: 'needsSetup' })
       }
     })
+  }
+
+  // -------------------------------------------------------------------------
+  // Updates
+  // -------------------------------------------------------------------------
+
+  /** Checks both the desktop app and the CLI against their latest releases. */
+  checkForUpdates(): Promise<void> {
+    return this.updates.check()
+  }
+
+  /** Downloads this platform's installer and hands the app over to it. */
+  installAppUpdate(): Promise<void> {
+    return this.updates.installApp()
+  }
+
+  /** Re-runs the CLI install script, then restarts the agent on the new
+   *  binary. Chats keep their transcripts; their ACP sessions are re-attached
+   *  by the reconnect, exactly as they are after a crash-restart. */
+  installCLIUpdate(): Promise<void> {
+    return this.updates.installCLI()
   }
 
   async useExplicitPath(path: string): Promise<void> {
@@ -1241,6 +1295,7 @@ export class AppModel extends EventEmitter {
     this.teardownAgent()
     this.extensions.dispose()
     this.subscriptionStore.stop()
+    this.updates.shutdown()
     this.store.save(this.sessions.filter((s) => !s.isPristine).map((s) => s.snapshot()))
   }
 }

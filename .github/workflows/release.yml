@@ -9,34 +9,11 @@ permissions:
   contents: write
 
 jobs:
-  linux:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Set version from tag
-        shell: bash
-        run: npm version --no-git-tag-version "${GITHUB_REF_NAME#v}"
-
-      - name: Build
-        run: npm run build
-
-      - name: Package and publish (Linux)
-        shell: bash
-        run: npx electron-builder --linux --publish always
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
+  # Windows x64 and arm64 come out of one job on purpose. node-pty ships N-API
+  # prebuilds for both, so arm64 cross-packages from an x64 runner with no
+  # toolchain at all — and a single electron-builder invocation writes one
+  # latest.yml describing every installer, which two separate jobs would
+  # overwrite each other's copy of.
   windows:
     runs-on: windows-latest
     steps:
@@ -59,8 +36,54 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Package and publish (Windows)
+      - name: Package and publish (Windows x64 + arm64)
         shell: bash
-        run: npx electron-builder --win --publish always
+        run: npx electron-builder --win --x64 --arm64 --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Linux has no node-pty prebuilds, so each arch has to compile the addon
+  # natively — hence one job per runner architecture rather than the single
+  # cross-packaging job Windows gets.
+  linux:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            arch: x64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # npmRebuild is off so that Windows never invokes node-gyp, but on Linux
+      # node-pty is compiled from source and must target Electron's headers
+      # rather than the runner's Node. This is the rebuild the old postinstall
+      # hook used to perform.
+      - name: Rebuild native modules for Electron
+        run: npm run rebuild:native
+
+      - name: Set version from tag
+        shell: bash
+        run: npm version --no-git-tag-version "${GITHUB_REF_NAME#v}"
+
+      - name: Build
+        run: npm run build
+
+      - name: Package and publish (Linux ${{ matrix.arch }})
+        shell: bash
+        run: npx electron-builder --linux --${{ matrix.arch }} --publish always
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

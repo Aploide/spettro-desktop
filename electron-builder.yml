@@ -11,25 +11,41 @@ asarUnpack:
 extraResources:
   - from: build/icon.png
     to: icon.png
-npmRebuild: true
+# node-pty is the only native dependency and it is an N-API (node-addon-api)
+# module shipping its own prebuilds for win32-x64, win32-arm64 and darwin-*.
+# N-API is ABI-stable across Node and Electron, so those prebuilds load in
+# Electron as-is — rebuilding them would only force an MSVC toolchain onto
+# every Windows build machine for no gain. Linux has no prebuilds, so there
+# node-pty still compiles from source via its own install script during
+# `npm install` (gcc is present on the Linux runners).
+npmRebuild: false
 linux:
   target:
-    - AppImage
+    - target: AppImage
+      arch:
+        - x64
+        - arm64
   category: Development
   icon: build/icon.png
   artifactName: Spettro-${version}-linux-${arch}.${ext}
 win:
   target:
-    - nsis
-    - msi
+    - target: nsis
+      arch:
+        - x64
+        - arm64
+    - target: msi
+      arch:
+        - x64
+        - arm64
   icon: build/icon.ico
   artifactName: Spettro-${version}-win-${arch}.${ext}
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
-  artifactName: Spettro-Setup-${version}.${ext}
+  artifactName: Spettro-Setup-${version}-${arch}.${ext}
 msi:
-  artifactName: Spettro-${version}.${ext}
+  artifactName: Spettro-${version}-win-${arch}.${ext}
 publish:
   provider: github
   releaseType: release

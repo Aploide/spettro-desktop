@@ -32,6 +32,17 @@ export default function OnboardingView(): JSX.Element {
   )
 }
 
+/** The same one-liner the "Install automatically" card runs, for anyone who
+ *  would rather paste it into their own shell. Kept in step with
+ *  CLIInstaller.manualCommand in the main process. */
+const REPO_RAW = 'https://raw.githubusercontent.com/aploide/spettro/main'
+
+function manualInstallCommand(): string {
+  return window.spettro.platform === 'win32'
+    ? `irm ${REPO_RAW}/install.ps1 | iex`
+    : `curl -sSfL ${REPO_RAW}/install.sh | sh`
+}
+
 function Options({ banner }: { banner: string | null }): JSX.Element {
   const [manualOpen, setManualOpen] = useState(false)
   const [path, setPath] = useState('')
@@ -78,7 +89,11 @@ function Options({ banner }: { banner: string | null }): JSX.Element {
           <input
             className="text-input"
             type="text"
-            placeholder="/home/you/.local/bin/spettro"
+            placeholder={
+              window.spettro.platform === 'win32'
+                ? 'C:\\Users\\you\\AppData\\Local\\Programs\\spettro\\spettro.exe'
+                : '/home/you/.local/bin/spettro'
+            }
             value={path}
             autoFocus
             onChange={(e) => setPath(e.target.value)}
@@ -94,7 +109,7 @@ function Options({ banner }: { banner: string | null }): JSX.Element {
 
       {banner && <div className="banner-inline">{banner}</div>}
 
-      <div className="onb-hint">Manual install: curl -sSfL https://spettro.app/install | sh</div>
+      <div className="onb-hint">Manual install: {manualInstallCommand()}</div>
     </div>
   )
 }

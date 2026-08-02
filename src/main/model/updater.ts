@@ -41,7 +41,7 @@ import {
 import type { InstallerEvent } from './cliInstaller'
 
 /** Where the desktop app's own releases live. */
-export const APP_REPO = 'cesp99/spettro-desktop'
+export const APP_REPO = 'aploide/spettro-desktop'
 /** Where the CLI's releases live (the same repo the install script is in). */
 export const CLI_REPO = 'Aploide/spettro'
 

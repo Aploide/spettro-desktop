@@ -1,10 +1,10 @@
 {
   "name": "spettro-desktop",
-  "version": "2.6.8",
+  "version": "0.1.5",
   "description": "Spettro for Linux and Windows — a desktop UI for the spettro command-line agent",
   "main": "./out/main/index.js",
-  "author": "Carlo Esposito",
-  "license": "MIT",
+  "author": "Carlo Esposito - Eyed",
+  "license": "GPL-3.0",
   "homepage": "https://spettro.app",
   "repository": {
     "type": "git",

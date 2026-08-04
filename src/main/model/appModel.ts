@@ -937,7 +937,7 @@ export class AppModel extends EventEmitter {
     this.emit(
       'chat-state',
       session.summary(),
-      notice ? { stopReason, notice: notice.text } : { stopReason }
+      notice ? { stopReason, notice } : { stopReason }
     )
   }
 

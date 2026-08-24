@@ -75,10 +75,13 @@ jobs:
     # about what twenty rows landing at once look like; that does not survive
     # code review.
     #
-    # Deliberately non-blocking. Offscreen rendering needs no display server —
-    # which is the whole reason capture.cjs uses it — but it does need
-    # Electron's shared libraries, and a runner image that drops one of them
-    # should cost us a screenshot, not a merge.
+    # Deliberately non-blocking: screenshots are a review aid, not a
+    # correctness gate, and this is the one job with a moving part outside the
+    # repo. Electron 43 has no postinstall — it exposes its downloader as a bin
+    # instead — so `npm ci` does not fetch the ~100MB runtime and shoot.sh
+    # fetches it on demand. A slow or unavailable release mirror should cost a
+    # screenshot, not a merge. (Offscreen rendering itself needs no display
+    # server, which is the whole reason capture.cjs uses it.)
     name: Screenshots
     runs-on: ubuntu-latest
     continue-on-error: true

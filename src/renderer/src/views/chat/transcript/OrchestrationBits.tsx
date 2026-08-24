@@ -128,7 +128,9 @@ export function CountsLabel({ counts }: { counts: OrchCounts }): JSX.Element {
   const terms: { key: string; text: string; failed?: boolean }[] = []
   if (counts.running > 0) terms.push({ key: 'running', text: `${counts.running} running` })
   if (counts.done > 0) terms.push({ key: 'done', text: `${counts.done} done` })
-  if (counts.failed > 0) terms.push({ key: 'failed', text: `${counts.failed} failed`, failed: true })
+  if (counts.failed > 0) {
+    terms.push({ key: 'failed', text: `${counts.failed} failed`, failed: true })
+  }
   if (counts.cached > 0) terms.push({ key: 'cached', text: `${counts.cached} replayed` })
   return (
     <span className="orch-counts">
@@ -179,7 +181,9 @@ export function MemberRow({
   const summary = member.result?.summary ?? ''
   const hasDetail = member.children.length > 0 || summary !== ''
   const last = member.children[member.children.length - 1]
-  const live = running && last ? displayDetail(last) : ''
+  // displayDetail re-applies the "[code#3] " title prefix; here the row
+  // already says whose work this is, so repeating it just eats the width.
+  const live = running && last ? stripInstance(displayDetail(last), member.instance) : ''
   const detail = live !== '' ? live : member.task
 
   return (
@@ -247,6 +251,11 @@ export function truncateInstance(name: string, max: number): string {
   const keep = max - suffix.length - 1
   if (keep < 1) return truncateLabel(name, max)
   return name.slice(0, keep) + '…' + suffix
+}
+
+function stripInstance(detail: string, instance: string): string {
+  const prefix = `[${instance}] `
+  return detail.startsWith(prefix) ? detail.slice(prefix.length) : detail
 }
 
 function truncateLabel(text: string, max: number): string {

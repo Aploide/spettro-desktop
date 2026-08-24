@@ -1,0 +1,58 @@
+/* Harness chrome only — never ship this. Everything inside .hz-transcript is
+   the real app's markup and styling, so the screenshot is honest. */
+html,
+body,
+#root {
+  margin: 0;
+  background: var(--canvas);
+  color: var(--text-primary);
+  font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+.hz-root {
+  display: flex;
+  flex-direction: column;
+  gap: 40px;
+  padding: 28px 32px 64px;
+}
+.hz-scene {
+  border-top: 1px solid var(--hairline);
+  padding-top: 20px;
+}
+.hz-scene-head h2 {
+  font-size: 15px;
+  margin: 0 0 4px;
+  letter-spacing: -0.01em;
+}
+.hz-scene-head p {
+  margin: 0 0 6px;
+  max-width: 78ch;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+.hz-scene-head code {
+  font-size: 11px;
+  color: var(--accent);
+}
+.hz-scene-body {
+  display: flex;
+  gap: 20px;
+  align-items: flex-start;
+  margin-top: 16px;
+}
+.hz-transcript {
+  flex: 1 1 auto;
+  min-width: 0;
+  background: var(--canvas);
+  border: 1px solid var(--hairline);
+  border-radius: var(--rad-md);
+  padding: 16px;
+}
+.hz-panel {
+  flex: 0 0 300px;
+  width: 300px;
+  max-height: 560px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--rad-md);
+  overflow: hidden;
+}

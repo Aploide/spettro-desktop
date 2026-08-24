@@ -7,3 +7,7 @@ release/
 .vscode/
 *.tsbuildinfo
 .spettro/
+
+# visual harness output
+.visual-dist/
+.visual-shots/

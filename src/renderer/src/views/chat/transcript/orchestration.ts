@@ -394,7 +394,8 @@ function finishWorkflow(build: RunBuild): WorkflowRun {
       ? build.tool.title.slice('workflow '.length).trim()
       : build.tool.title
 
-  const description = argStr(args, 'description') !== '' ? argStr(args, 'description') : text.description
+  const declaredDescription = argStr(args, 'description')
+  const description = declaredDescription !== '' ? declaredDescription : text.description
   const summary = status === 'running' ? '' : text.summary
 
   return {
@@ -475,7 +476,8 @@ export function groupTranscript(items: TranscriptItem[]): TranscriptRow[] {
 
     // A member's own call is titled with its own instance in brackets, so a
     // bracket that names *someone else* is what marks a nested child.
-    const owner = prefix !== null && prefix !== argStr(args, 'agent') ? members.get(prefix) : undefined
+    const owner =
+      prefix !== null && prefix !== argStr(args, 'agent') ? members.get(prefix) : undefined
     if (owner) {
       owner.children.push(tool)
       absorbed.add(transcriptItemId(item))

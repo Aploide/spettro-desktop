@@ -1,0 +1,436 @@
+/* Styles for the live orchestration panel (OrchestrationPanel.tsx).
+
+   The panel sits beside the transcript, so it has to read as a quieter
+   surface than the conversation without becoming a separate application: one
+   raised plane, one hairline, one accent, and type that steps down from the
+   run name to the phase to the agent detail. Everything else is spacing.
+
+   Two rules run through the whole file. Nothing animates a property that
+   triggers layout — this repaints several times a second during a fan-out,
+   and a growing row would make the column shiver. And every string is a
+   one-line clamp, because the detail beside an agent's name changes on every
+   tool call and a wrapping one would change the panel's height with it.
+
+   Colours are theme.css tokens or color-mix() over them, never literals: the
+   panel is a dense, low-contrast surface and a hardcoded dark-mode grey is
+   exactly the thing that turns invisible in light mode. */
+
+.orp {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  /* Width is the container's decision (.chat-orchestration); the panel only
+     promises to fill it. */
+  min-width: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: color-mix(in srgb, var(--surface-raised) 45%, var(--canvas));
+  font-variant-numeric: tabular-nums;
+}
+
+/* ------------------------------------------------------------------------- */
+/* Header                                                                     */
+/* ------------------------------------------------------------------------- */
+
+.orp-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  height: 34px;
+  padding: 0 var(--sp-sm) 0 var(--sp-md);
+  background: color-mix(in srgb, var(--surface-raised) 45%, var(--canvas));
+  border-bottom: 1px solid var(--hairline);
+}
+
+.orp-head-dot {
+  width: 5px;
+  height: 5px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: orp-pulse 2.4s ease-in-out infinite;
+}
+
+@keyframes orp-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.orp-head-title {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.7px;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.orp-head-count {
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 15px;
+  padding: 0 5px;
+  border-radius: 999px;
+  color: color-mix(in srgb, var(--accent) 85%, var(--text-primary));
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+.orp-head-spacer {
+  flex: 1 1 auto;
+}
+
+.orp-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  margin: 0;
+  border: none;
+  border-radius: var(--rad-sm);
+  background: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: opacity 0.15s ease-out;
+  opacity: 0.75;
+}
+
+.orp-close:hover {
+  opacity: 1;
+  background: color-mix(in srgb, var(--text-secondary) 12%, transparent);
+}
+
+.orp-close:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
+/* ------------------------------------------------------------------------- */
+/* Body                                                                       */
+/* ------------------------------------------------------------------------- */
+
+.orp-body {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding-bottom: var(--sp-md);
+}
+
+/* A new run rises into place instead of appearing: transform and opacity
+   only, so a run starting mid-fan-out never nudges the rows above it. */
+@keyframes orp-rise {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.orp-run,
+.orp-settled {
+  min-width: 0;
+  border-bottom: 1px solid var(--hairline);
+  animation: orp-rise 0.24s ease-out;
+}
+
+.orp-run:last-child,
+.orp-settled:last-child {
+  border-bottom: none;
+}
+
+.orp-run {
+  display: flex;
+  flex-direction: column;
+  padding: var(--sp-md) var(--sp-md) var(--sp-lg);
+}
+
+/* The shared meter is a fixed 110px pill in the cards; here the column is the
+   measure, so it spans. Scoped to .orp — the cards keep their own geometry. */
+.orp .orch-meter {
+  width: 100%;
+}
+
+.orp .orch-meter-track {
+  height: 3px;
+}
+
+.orp .orch-counts {
+  font-size: 10.5px;
+}
+
+/* --- run header ---------------------------------------------------------- */
+
+.orp-run-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.orp-run-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.orp-run-frac {
+  flex: none;
+  font-size: 10.5px;
+  color: var(--text-secondary);
+}
+
+.orp-run-meta {
+  margin-top: 2px;
+  padding-left: 17px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.orp-run-meter {
+  display: flex;
+  margin-top: var(--sp-sm);
+  min-width: 0;
+}
+
+.orp-run-counts {
+  display: flex;
+  margin-top: 5px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* --- phases -------------------------------------------------------------- */
+
+.orp-groups {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-md);
+  margin-top: var(--sp-md);
+  min-width: 0;
+}
+
+.orp-phase {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.orp-phase-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* A phase nobody has reached yet stays listed and dimmed: the plan was
+   declared up front, and what is still to come is half of what it says. */
+.orp-phase-dot {
+  width: 5px;
+  height: 5px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--text-secondary);
+  opacity: 0.4;
+}
+
+.orp-phase--active .orp-phase-dot {
+  background: var(--accent);
+  opacity: 1;
+}
+
+.orp-phase--done .orp-phase-dot {
+  background: var(--diff-added);
+  opacity: 0.85;
+}
+
+.orp-phase--failed .orp-phase-dot {
+  background: var(--diff-removed);
+  opacity: 1;
+}
+
+.orp-phase-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.orp-phase--active .orp-phase-title,
+.orp-phase--failed .orp-phase-title {
+  color: var(--text-primary);
+}
+
+.orp-phase-frac {
+  flex: none;
+  font-size: 10px;
+  color: var(--tr-tertiary, var(--text-secondary));
+}
+
+.orp-phase--pending .orp-phase-frac {
+  letter-spacing: 0.3px;
+}
+
+.orp-phase-meter {
+  display: flex;
+  margin-top: 5px;
+  margin-left: 11px;
+  min-width: 0;
+}
+
+.orp-phase--pending .orp-phase-meter,
+.orp-phase--pending .orp-phase-title {
+  opacity: 0.6;
+}
+
+/* --- members ------------------------------------------------------------- */
+
+.orp-members {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 6px;
+  margin-left: 11px;
+  padding-left: var(--sp-sm);
+  min-width: 0;
+  border-left: 1px solid var(--hairline);
+}
+
+/* A swarm has no phase header to hang the guide off, so its members sit flush
+   with the run's own meter. */
+.orp-phase--flat > .orp-members {
+  margin-top: 0;
+  margin-left: 0;
+}
+
+.orp-member {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  height: 16px;
+}
+
+.orp-member-dot {
+  width: 4px;
+  height: 4px;
+  flex: none;
+  border-radius: 50%;
+  animation: orp-pulse 1.8s ease-in-out infinite;
+}
+
+.orp-member-name {
+  flex: none;
+  max-width: 45%;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.orp-member-live {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: 'SF Mono', SFMono-Regular, ui-monospace, 'Cascadia Mono', 'Segoe UI Mono',
+    'JetBrains Mono', Menlo, Consolas, monospace;
+  font-size: 10.5px;
+  color: var(--tr-tertiary, var(--text-secondary));
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.orp-more,
+.orp-empty {
+  font-size: 10.5px;
+  color: var(--text-secondary);
+  opacity: 0.75;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.orp-more {
+  height: 16px;
+  line-height: 16px;
+}
+
+.orp-empty {
+  margin-top: var(--sp-md);
+}
+
+/* ------------------------------------------------------------------------- */
+/* The settled line — a finished run, on its way out                          */
+/* ------------------------------------------------------------------------- */
+
+.orp-settled {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: var(--sp-sm) var(--sp-md);
+  min-width: 0;
+  opacity: 0.7;
+  transition: opacity 0.2s ease-out;
+}
+
+.orp-settled:hover {
+  opacity: 1;
+}
+
+.orp-settled-name {
+  flex: none;
+  max-width: 55%;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.orp-settled-note {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 10.5px;
+  color: var(--text-secondary);
+  text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Someone who has asked for less motion still gets the state, just not the
+   pulse — the meters and the counts carry the same information. */
+@media (prefers-reduced-motion: reduce) {
+  .orp-run,
+  .orp-settled,
+  .orp-head-dot,
+  .orp-member-dot {
+    animation: none;
+  }
+}

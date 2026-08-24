@@ -12,7 +12,17 @@ import type {
   ACPQuestionRequest
 } from './acp'
 import type { AppStateDTO, ChatDetail, GitStat, TranscriptItem } from './model'
-import type { ConnectResult, LocalProbeResult, LoginStatus } from './extensions'
+import type {
+  ConnectResult,
+  LocalProbeResult,
+  LoginStatus,
+  WorkflowInfo,
+  WorkflowList,
+  WorkflowRunInfo,
+  WorkflowScope,
+  WorkflowSource,
+  WorkflowValidation
+} from './extensions'
 
 // ---------------------------------------------------------------------------
 // Main → renderer push events
@@ -124,6 +134,23 @@ export interface RendererApi {
   localEndpointAdd(endpoint: string, apiKey: string | null): Promise<void>
   localEndpointRemove(endpoint: string): Promise<void>
   modelSetFavorite(provider: string, model: string, favorite: boolean): Promise<void>
+
+  // Workflows (`_spettro/workflow/*`, CLI extensions v4). Scoped by chat
+  // because a workflow lives in the repo it automates and the chat is what
+  // knows which repo. These return their result rather than pushing app-state:
+  // the studio edits the files it reads, and a cached copy would go stale the
+  // moment the TUI or the agent wrote one.
+  workflowList(chatId: string): Promise<WorkflowList>
+  workflowRead(chatId: string, name: string): Promise<WorkflowSource | null>
+  workflowWrite(
+    chatId: string,
+    name: string,
+    scope: WorkflowScope,
+    script: string
+  ): Promise<WorkflowInfo | null>
+  workflowDelete(chatId: string, name: string, scope: WorkflowScope): Promise<boolean>
+  workflowValidate(chatId: string, script: string): Promise<WorkflowValidation | null>
+  workflowRuns(chatId: string): Promise<WorkflowRunInfo[]>
 
   // Updates. The main process checks GitHub on a timer and pushes results in
   // AppStateDTO.update; these are the user-initiated versions.

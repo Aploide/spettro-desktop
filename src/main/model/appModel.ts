@@ -39,7 +39,18 @@ import type {
   RemoteHostState,
   SubscriptionState
 } from '../../shared/model'
-import type { ConnectResult, LocalProbeResult, LoginStatus } from '../../shared/extensions'
+import type {
+  ConnectResult,
+  LocalProbeResult,
+  LoginStatus,
+  WorkflowInfo,
+  WorkflowList,
+  WorkflowRunInfo,
+  WorkflowScope,
+  WorkflowSource,
+  WorkflowValidation
+} from '../../shared/extensions'
+import { EMPTY_WORKFLOW_LIST } from '../../shared/extensions'
 import type { UpdateState } from '../../shared/update'
 import { ExtensionMethod } from '../../shared/extensions'
 import { AcpAgent, AcpConnection, AcpError } from '../acp'
@@ -1019,6 +1030,78 @@ export class AppModel extends EventEmitter {
     const session = this.sessionById(chatId)
     if (!session || !this.agent || !session.acpSessionId) return
     this.agent.cancel(session.acpSessionId)
+  }
+
+  // -------------------------------------------------------------------------
+  // Workflows (`_spettro/workflow/*`)
+  //
+  // Scoped by chat rather than globally: a workflow lives in the repo it
+  // automates, so "which workflows exist" is a question about a project, and
+  // the chat is what knows which project. Each call resolves the chat's live
+  // ACP session and lets the CLI derive the folder from it — the app never
+  // sends a path, so a script cannot land in the wrong repo because the two
+  // sides disagreed about the working directory.
+  //
+  // Unlike the account calls these return their result instead of folding it
+  // into app-state. The studio is one screen reading files it is about to
+  // edit; a cached copy in the global snapshot would go stale the moment the
+  // TUI, or the agent itself, wrote one.
+  // -------------------------------------------------------------------------
+
+  /** The chat's live ACP session, or null when the chat is cold. */
+  private workflowSession(chatId: string): string | null {
+    const session = this.sessionById(chatId)
+    if (!session) return null
+    return this.liveACPSessionId(session)
+  }
+
+  async listWorkflows(chatId: string): Promise<WorkflowList> {
+    const client = this.extensions.client
+    const acpId = this.workflowSession(chatId)
+    // A cold chat has no session to scope by. An empty list is the honest
+    // answer — the alternative is guessing at a project.
+    if (!client || !acpId) return EMPTY_WORKFLOW_LIST
+    return client.listWorkflows(acpId)
+  }
+
+  async readWorkflow(chatId: string, name: string): Promise<WorkflowSource | null> {
+    const client = this.extensions.client
+    const acpId = this.workflowSession(chatId)
+    if (!client || !acpId) return null
+    return client.readWorkflow(acpId, name)
+  }
+
+  async writeWorkflow(
+    chatId: string,
+    name: string,
+    scope: WorkflowScope,
+    script: string
+  ): Promise<WorkflowInfo | null> {
+    const client = this.extensions.client
+    const acpId = this.workflowSession(chatId)
+    if (!client || !acpId) return null
+    return client.writeWorkflow(acpId, name, scope, script)
+  }
+
+  async deleteWorkflow(chatId: string, name: string, scope: WorkflowScope): Promise<boolean> {
+    const client = this.extensions.client
+    const acpId = this.workflowSession(chatId)
+    if (!client || !acpId) return false
+    return client.deleteWorkflow(acpId, name, scope)
+  }
+
+  async validateWorkflow(chatId: string, script: string): Promise<WorkflowValidation | null> {
+    const client = this.extensions.client
+    const acpId = this.workflowSession(chatId)
+    if (!client || !acpId) return null
+    return client.validateWorkflow(acpId, script)
+  }
+
+  async listWorkflowRuns(chatId: string): Promise<WorkflowRunInfo[]> {
+    const client = this.extensions.client
+    const acpId = this.workflowSession(chatId)
+    if (!client || !acpId) return []
+    return client.listWorkflowRuns(acpId)
   }
 
   // -------------------------------------------------------------------------

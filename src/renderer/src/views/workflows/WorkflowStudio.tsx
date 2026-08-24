@@ -82,9 +82,21 @@ export default function WorkflowStudio({
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [runChatId, setRunChatId] = useState<string | null>(null)
+  // Set when the CLI is too old to serve `_spettro/workflow/*` at all. That is
+  // a different thing from "this project has no workflows", and showing the
+  // empty state for it would invite the user to write one into a CLI that
+  // cannot save it.
+  const [unsupported, setUnsupported] = useState<string | null>(null)
 
   const refresh = useCallback(async () => {
-    setList(await call('workflowList', chatId))
+    try {
+      setList(await call('workflowList', chatId))
+      setUnsupported(null)
+    } catch (err) {
+      const message = messageOf(err)
+      if (isUnsupported(message)) setUnsupported(message)
+      else setError(message)
+    }
   }, [chatId])
 
   useEffect(() => {
@@ -215,6 +227,32 @@ export default function WorkflowStudio({
   }, [chatId, draft, validation, runChatId, refresh])
 
   const canRun = draft !== null && validation?.ok === true && busy === null
+
+  if (unsupported !== null) {
+    return (
+      <div className="wfs">
+        <header className="wfs-head">
+          <Icon name="flowchart" size={15} />
+          <h2>Workflows</h2>
+          <span className="wfs-spacer" />
+          <button className="icon-btn" onClick={onClose} title="Close" aria-label="Close workflows">
+            <Icon name="xmark.circle.fill" size={15} />
+          </button>
+        </header>
+        <div className="wfs-body">
+          <section className="wfs-main wfs-main--empty">
+            <Icon name="arrow.counterclockwise" size={34} />
+            <h3>The CLI is too old for this</h3>
+            <p>{unsupported}</p>
+            <p className="wfs-paths">
+              Workflow authoring needs Spettro CLI extensions v4. Settings &rsaquo; Updates will
+              bring it up to date.
+            </p>
+          </section>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="wfs">
@@ -479,4 +517,12 @@ function RunPane({ chatId }: { chatId: string }): JSX.Element {
 function messageOf(err: unknown): string {
   if (err instanceof Error) return err.message
   return String(err)
+}
+
+/** The main process raises UnsupportedExtensionError when the CLI answers a
+ *  `_spettro/*` call with "method not found". Electron flattens errors across
+ *  the IPC boundary to their message, so the name is matched in the text —
+ *  ugly, but the alternative is a second error channel for one case. */
+function isUnsupported(message: string): boolean {
+  return message.includes('UnsupportedExtensionError') || message.includes("doesn't support")
 }

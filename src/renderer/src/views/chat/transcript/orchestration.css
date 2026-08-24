@@ -220,3 +220,116 @@
 .orch-nested:last-child {
   margin-bottom: 0;
 }
+
+/* ------------------------------------------------------------------------- */
+/* Machine output — a returned value, a structured report, a script           */
+/* ------------------------------------------------------------------------- */
+
+/* Output the agent did not write for a human (JSON from a schema'd call, a
+   script's return value) is shown as code and given a hard height ceiling:
+   the value matters, but a 300-line dump inside a card turns the transcript
+   into a scrollbar. */
+.orch-code {
+  margin: 0;
+  padding: var(--sp-sm);
+  border-radius: var(--rad-sm);
+  background: color-mix(in srgb, var(--text-secondary) 8%, transparent);
+  border: 1px solid var(--hairline);
+  font-family: 'SF Mono', SFMono-Regular, ui-monospace, 'Cascadia Mono', 'Segoe UI Mono',
+    'JetBrains Mono', Menlo, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+  white-space: pre;
+  overflow: auto;
+  max-height: 260px;
+  min-width: 0;
+}
+
+/* ------------------------------------------------------------------------- */
+/* A workflow that never started                                              */
+/* ------------------------------------------------------------------------- */
+
+/* Deliberately quieter than a run card. This is a workflow that produced
+   nothing — giving it the card's full framing would make a non-event look
+   like the run it failed to become. */
+.orch-script {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--hairline);
+  border-radius: var(--rad-md);
+  background: var(--surface-raised);
+}
+
+.orch-script--failed {
+  border-color: color-mix(in srgb, var(--diff-removed) 38%, var(--hairline));
+  background: color-mix(in srgb, var(--diff-removed) 7%, var(--surface-raised));
+}
+
+.orch-script-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-sm);
+  width: 100%;
+  padding: 6px var(--sp-sm);
+  background: none;
+  border: none;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  outline: none;
+  min-width: 0;
+}
+
+.orch-script-icon {
+  display: inline-flex;
+  flex: none;
+  color: var(--accent);
+}
+
+.orch-script-title {
+  flex: none;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+
+.orch-script-name {
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+/* The reason takes the leftover width and is clamped to one line: a failure
+   the reader has to expand something to see is a failure the row hid. */
+.orch-script-reason {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11.5px;
+  color: color-mix(in srgb, var(--diff-removed) 65%, var(--text-secondary));
+}
+
+.orch-script-spacer {
+  flex: 0 1 auto;
+}
+
+.orch-script-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-xs);
+  padding: 0 var(--sp-sm) var(--sp-sm);
+  min-width: 0;
+}
+
+.orch-script-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: var(--tr-tertiary);
+}

@@ -13,7 +13,24 @@
 
    Colours are theme.css tokens or color-mix() over them, never literals: the
    panel is a dense, low-contrast surface and a hardcoded dark-mode grey is
-   exactly the thing that turns invisible in light mode. */
+   exactly the thing that turns invisible in light mode. Deriving from a token
+   is not on its own enough, though — see --orp-plane below: a mix can be a
+   dark-mode-only colour even when both of its terms are tokens. */
+
+:root {
+  /* The panel's one plane, held here so the surface and its sticky header can
+     never drift apart.
+
+     It is deliberately NOT color-mix(--surface-raised, --canvas). "Raised" is
+     lighter than the canvas in dark (#1c1c1c over #0e0e0e) and lighter again
+     in light (#ffffff over #f9f9f7), so that mix steps the panel 14 → 20 in
+     dark and 249 → 252 in light: a plane in one scheme and nothing at all in
+     the other. Offsetting the canvas toward the TEXT colour inverts with the
+     scheme instead — a shade lighter than the conversation in dark, a shade
+     deeper in light — which is the same perceptual step (ΔL* ≈ 3) either way,
+     and in both schemes lands the panel quieter than the bubbles beside it. */
+  --orp-plane: color-mix(in srgb, var(--canvas) 96%, var(--text-primary));
+}
 
 .orp {
   display: flex;
@@ -24,7 +41,7 @@
   min-width: 0;
   overflow-y: auto;
   overflow-x: hidden;
-  background: color-mix(in srgb, var(--surface-raised) 45%, var(--canvas));
+  background: var(--orp-plane);
   font-variant-numeric: tabular-nums;
 }
 
@@ -42,7 +59,7 @@
   flex: none;
   height: 34px;
   padding: 0 var(--sp-sm) 0 var(--sp-md);
-  background: color-mix(in srgb, var(--surface-raised) 45%, var(--canvas));
+  background: var(--orp-plane);
   border-bottom: 1px solid var(--hairline);
 }
 

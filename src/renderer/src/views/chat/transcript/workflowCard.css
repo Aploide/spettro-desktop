@@ -195,6 +195,16 @@
   padding: 2px var(--sp-md) var(--sp-md);
 }
 
+/* A finished run is a record, not a workspace: same structure, less air. */
+.wfc--settled .wfc-body {
+  gap: var(--sp-sm);
+  padding-bottom: var(--sp-sm);
+}
+
+.wfc--settled .wfc-phase--pending {
+  padding-bottom: var(--sp-xs);
+}
+
 .wfc-empty {
   margin: 0;
   font-size: 11.5px;
@@ -362,6 +372,41 @@
 
 .wfc-more:hover {
   color: var(--text-primary);
+}
+
+/* The settled form of the same control: "3 done" is a disclosure, not a
+   truncation notice, so it wears a chevron and sits quieter than a row. */
+.wfc-more--quiet {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding-left: 4px;
+  color: var(--tr-tertiary);
+}
+
+/* A member and, when it failed, the reason under it. */
+.wfc-memberline {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* Why it failed, on the card rather than one click inside it. Clamped to two
+   lines: a stack trace must not become the tallest thing in the transcript,
+   and the first two lines of one are the part that names the fault. The full
+   text is still in the member's own disclosure. */
+.wfc-reason {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  margin: -1px 0 3px;
+  padding: 0 var(--sp-sm) 0 23px;
+  font-size: 11px;
+  line-height: 1.45;
+  color: color-mix(in srgb, var(--diff-removed) 60%, var(--text-secondary));
+  overflow-wrap: anywhere;
+  user-select: text;
 }
 
 /* ------------------------------------------------------------------------- */

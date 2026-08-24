@@ -14,9 +14,10 @@
 // its "#N" suffix, and a running member shows what it is doing NOW rather than
 // the item it was handed at launch.
 
+import { useState } from 'react'
 import type { JSX, ReactNode } from 'react'
 import { displayDetail } from './toolPresentation'
-import type { MemberCall, OrchCounts, OrchStatus } from './orchestration'
+import type { MemberCall, OrchCounts, OrchStatus, WorkflowScript } from './orchestration'
 import { Icon } from './ToolCallView'
 import { MarkdownText } from './MarkdownText'
 import { SpettroSpinner } from './RunTicker'
@@ -178,7 +179,11 @@ export function MemberRow({
   children?: ReactNode
 }): JSX.Element {
   const running = member.status === 'running'
-  const summary = member.result?.summary ?? ''
+  // `resultText` rather than `result?.summary`: an agent given a schema
+  // returns its structured value and one asked a question returns prose, and
+  // neither carries a `summary` field. A member that produced output must
+  // never render as a row with nothing behind it.
+  const summary = member.resultText
   const hasDetail = member.children.length > 0 || summary !== ''
   const last = member.children[member.children.length - 1]
   // displayDetail re-applies the "[code#3] " title prefix; here the row
@@ -224,8 +229,75 @@ export function MemberRow({
           {children}
           {summary !== '' && (
             <div className="orch-member-summary">
-              <MarkdownText source={summary} />
+              {member.resultIsJSON ? (
+                <pre className="orch-code">{summary}</pre>
+              ) : (
+                <MarkdownText source={summary} />
+              )}
             </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// A workflow that never started
+// ---------------------------------------------------------------------------
+
+/**
+ * The `workflow` tool call on its own — a script the model submitted that
+ * started no run, which in practice means it failed on the way in (a saved
+ * workflow that does not exist, a script that would not parse).
+ *
+ * It is drawn here rather than by the ordinary tool row because that row shows
+ * a call's arguments, and this call's arguments are an entire JavaScript
+ * program: several hundred characters of escaped source, rendered as one line
+ * of raw JSON with a red badge on the end. The failure is the point and the
+ * source is the detail, so that is the order they appear in — the program is
+ * behind a disclosure, and what the reader gets for free is which workflow
+ * failed and why.
+ */
+export function ScriptCallRow({ script }: { script: WorkflowScript }): JSX.Element {
+  const [expanded, setExpanded] = useState(false)
+  const name = script.savedAs === '' ? 'workflow' : script.savedAs
+  const reason = script.error !== '' ? script.error : script.tool.output.trim()
+  const hasSource = script.source !== '' || script.returned !== ''
+
+  return (
+    <div className={`orch-script orch-script--${script.status}`}>
+      <button
+        className="orch-script-head"
+        type="button"
+        aria-expanded={expanded}
+        onClick={() => {
+          if (hasSource) setExpanded((value) => !value)
+        }}
+      >
+        <span className="orch-script-icon">
+          <Icon name="flowchart" size={13} />
+        </span>
+        <span className="orch-script-title">
+          Workflow<span className="orch-script-name"> · {name}</span>
+        </span>
+        <StatusGlyph status={script.status} />
+        {reason !== '' && <span className="orch-script-reason">{reason.split('\n')[0]}</span>}
+        <span className="orch-script-spacer" />
+        {hasSource && (
+          <span className={`tr-chevron${expanded ? ' tr-chevron--open' : ''}`}>
+            <Icon name="chevron.right" size={8} />
+          </span>
+        )}
+      </button>
+      {expanded && hasSource && (
+        <div className="orch-script-body">
+          {script.source !== '' && <pre className="orch-code">{script.source}</pre>}
+          {script.returned !== '' && (
+            <>
+              <span className="orch-script-label">returned</span>
+              <pre className="orch-code">{script.returned}</pre>
+            </>
           )}
         </div>
       )}

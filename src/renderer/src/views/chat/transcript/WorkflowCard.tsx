@@ -9,14 +9,24 @@
 // that has already happened. A phase nobody has reached yet is exactly the
 // information a reader wants, so it is drawn dimmed rather than omitted.
 //
-// The other tension is with the conversation itself. While a run is in flight
-// the card is the most interesting thing on screen and opens itself; the
-// moment it finishes it is history, and history must not own half the
-// scrollback — so it collapses to one line, and stays wherever the user last
-// put it. Same reason each phase caps its visible rows: when a fan-out is
-// wider than the eye can scan, the rows that survive are the ones still
-// running and the ones that failed, because a success in a batch of twenty is
-// the least interesting row on the card.
+// The other tension is with the conversation itself: a finished run is history
+// and history must not own half the scrollback. The first cut resolved that by
+// collapsing a settled run to a single line — and that was the wrong trade, as
+// a screenshot made obvious. The one line said "4 agents · 1 failed" and the
+// failure survived only as a red sliver in the meter, so the state a reader
+// scrolls BACK to was the state that told them least.
+//
+// So a settled run drops successful *detail*, never *structure*. The phase
+// spine stays, each phase keeps its meter and its "3/3 done", every failed
+// member keeps its row AND gains the reason it failed, and the successes —
+// the least interesting rows on the card, a fact this file already believed
+// while a run was live — fold into one "N done" per phase that expands. The
+// card is a few lines tall instead of one, and it answers "what did this run
+// do, and what broke" without a click.
+//
+// Same reason each phase caps its visible rows while running: when a fan-out
+// is wider than the eye can scan, the rows that survive are the ones still
+// running and the ones that failed.
 
 import { useEffect, useState } from 'react'
 import type { JSX } from 'react'
@@ -34,13 +44,14 @@ const PHASE_ROW_CAP = 12
 const LOG_INLINE_MAX = 3
 
 export function WorkflowCard({ run }: { run: WorkflowRun }): JSX.Element {
-  // `null` means "nobody has decided yet", which is what lets the card follow
-  // the run — open in flight, collapsed once done — without fighting a user
-  // who has expressed a preference.
+  // `null` means "nobody has decided yet". The body is open in both states —
+  // a settled run compacts rather than disappears — but a reader who closes
+  // the card keeps it closed as further updates arrive.
   const [override, setOverride] = useState<boolean | null>(null)
   const [rawOpen, setRawOpen] = useState(false)
   const running = run.status === 'running'
-  const open = override ?? running
+  const settled = !running
+  const open = override ?? true
 
   const elapsed = useElapsed(running, run.tool.timestamp)
   const finished = run.counts.done + run.counts.failed
@@ -59,7 +70,9 @@ export function WorkflowCard({ run }: { run: WorkflowRun }): JSX.Element {
   const phases = run.phases.filter((phase) => phase.title !== '' || phase.members.length > 0)
 
   return (
-    <section className={`wfc wfc--${run.status}${open ? ' wfc--open' : ''}`}>
+    <section
+      className={`wfc wfc--${run.status}${open ? ' wfc--open' : ''}${settled ? ' wfc--settled' : ''}`}
+    >
       <button
         className="wfc-head"
         type="button"
@@ -97,7 +110,9 @@ export function WorkflowCard({ run }: { run: WorkflowRun }): JSX.Element {
                 </span>
               )}
               <CountsLabel counts={run.counts} />
-              <span className="wfc-readout">{tail}</span>
+              {/* Only the clock: the ratio beside the meter already said
+                  "2/4", and printing it twice on one line was noise. */}
+              {running && elapsed !== '' && <span className="wfc-readout">{elapsed}</span>}
             </span>
           )}
         </span>
@@ -114,11 +129,11 @@ export function WorkflowCard({ run }: { run: WorkflowRun }): JSX.Element {
           ) : (
             <div className="wfc-tree">
               {phases.map((phase, i) => (
-                <PhaseGroup key={`${phase.title}-${i}`} phase={phase} />
+                <PhaseGroup key={`${phase.title}-${i}`} phase={phase} compact={settled} />
               ))}
             </div>
           )}
-          {run.logs.length > 0 && <LogBlock logs={run.logs} />}
+          {run.logs.length > 0 && <LogBlock logs={run.logs} compact={settled} />}
           {run.rendered !== '' && (
             <div className="wfc-raw">
               <button
@@ -152,13 +167,36 @@ type PhaseState = 'pending' | 'running' | 'failed' | 'done'
  * colouring the header, matching workflowPhaseGroup(): what is happening now
  * is what the header should be reporting, even if something already went wrong
  * beside it — the failure still has its own row and its own count.
+ *
+ * `compact` is the settled form. The header is unchanged — a phase that is
+ * over still owes the reader its meter and its ratio — and so is every row
+ * that did not succeed. What goes is the roll of successes, which becomes a
+ * single "N done" the reader can open if they want it.
  */
-function PhaseGroup({ phase }: { phase: WorkflowPhase }): JSX.Element {
+function PhaseGroup({ phase, compact }: { phase: WorkflowPhase; compact: boolean }): JSX.Element {
   const [showAll, setShowAll] = useState(false)
   const state = phaseState(phase)
   const total = phase.members.length
   const finished = phase.counts.done + phase.counts.failed
-  const { shown, hidden } = capMembers(phase.members, showAll ? total : PHASE_ROW_CAP)
+  const quiet = phase.members.filter((member) => member.status === 'done').length
+
+  let shown: MemberCall[]
+  let hidden: number
+  if (compact && !showAll) {
+    shown = phase.members.filter((member) => member.status !== 'done')
+    hidden = quiet
+  } else {
+    const capped = capMembers(phase.members, showAll ? total : PHASE_ROW_CAP)
+    shown = capped.shown
+    hidden = capped.hidden
+  }
+
+  const toggleable = compact ? quiet > 0 : hidden > 0 || (showAll && total > PHASE_ROW_CAP)
+  const toggleLabel = showAll
+    ? 'show fewer'
+    : compact
+      ? `${hidden} done`
+      : `… ${hidden} more`
 
   return (
     <div className={`wfc-phase wfc-phase--${state}`}>
@@ -180,19 +218,24 @@ function PhaseGroup({ phase }: { phase: WorkflowPhase }): JSX.Element {
             </>
           )}
         </div>
-        {shown.length > 0 && (
+        {(shown.length > 0 || toggleable) && (
           <div className="wfc-members">
             {shown.map((member) => (
               <MemberLine key={member.tool.id} member={member} />
             ))}
-            {(hidden > 0 || showAll) && total > PHASE_ROW_CAP && (
+            {toggleable && (
               <button
-                className="wfc-more"
+                className={`wfc-more${compact ? ' wfc-more--quiet' : ''}`}
                 type="button"
                 aria-expanded={showAll}
                 onClick={() => setShowAll((value) => !value)}
               >
-                {showAll ? 'show fewer' : `… ${hidden} more`}
+                {compact && (
+                  <span className={`tr-chevron${showAll ? ' tr-chevron--open' : ''}`}>
+                    <Icon name="chevron.right" size={8} />
+                  </span>
+                )}
+                {toggleLabel}
               </button>
             )}
           </div>
@@ -208,25 +251,31 @@ function PhaseGroup({ phase }: { phase: WorkflowPhase }): JSX.Element {
  * whatever the user did to it as siblings arrive above and below it.
  *
  * MemberRow already renders the agent's reported summary as markdown, so all
- * this passes down is the agent's own tool calls.
+ * this passes down is the agent's own tool calls — plus, for a failure only,
+ * the reason printed straight onto the card. A failure whose cause is one
+ * click away is a failure the card hid, and the text is already in hand.
  */
 function MemberLine({ member }: { member: MemberCall }): JSX.Element {
   const [expanded, setExpanded] = useState(false)
+  const reason = failureReason(member)
   return (
-    <MemberRow
-      member={member}
-      tint={memberTint(member.specId)}
-      expanded={expanded}
-      onToggle={() => setExpanded((value) => !value)}
-    >
-      {member.children.length > 0 && (
-        <div className="orch-nested">
-          {member.children.map((child) => (
-            <ToolRow key={child.id} tool={child} />
-          ))}
-        </div>
-      )}
-    </MemberRow>
+    <div className="wfc-memberline">
+      <MemberRow
+        member={member}
+        tint={memberTint(member.specId)}
+        expanded={expanded}
+        onToggle={() => setExpanded((value) => !value)}
+      >
+        {member.children.length > 0 && (
+          <div className="orch-nested">
+            {member.children.map((child) => (
+              <ToolRow key={child.id} tool={child} />
+            ))}
+          </div>
+        )}
+      </MemberRow>
+      {reason !== '' && <p className="wfc-reason">{reason}</p>}
+    </div>
   )
 }
 
@@ -238,11 +287,13 @@ function MemberLine({ member }: { member: MemberCall }): JSX.Element {
  * The `log()` lines the script emitted. They are the only narration a workflow
  * has — the CLI folds its progress traces into the lifecycle call and never
  * emits them as rows — so they are always reachable, but a chatty script must
- * not out-shout the phase tree it is narrating.
+ * not out-shout the phase tree it is narrating. Once the run is over the tree
+ * is the record and the narration is not, so a settled card always folds it
+ * away however short it is.
  */
-function LogBlock({ logs }: { logs: string[] }): JSX.Element {
+function LogBlock({ logs, compact }: { logs: string[]; compact: boolean }): JSX.Element {
   const [open, setOpen] = useState(false)
-  if (logs.length <= LOG_INLINE_MAX) {
+  if (!compact && logs.length <= LOG_INLINE_MAX) {
     return (
       <div className="wfc-log">
         {logs.map((line, i) => (
@@ -280,6 +331,41 @@ function LogBlock({ logs }: { logs: string[] }): JSX.Element {
 // ---------------------------------------------------------------------------
 // Derivations
 // ---------------------------------------------------------------------------
+
+/**
+ * Why a member failed, in one string. The agent's reported summary is the
+ * best answer and is already parsed; when the output was not the report shape
+ * we take the error-ish field out of whatever JSON it was, and failing that
+ * the raw text — a provider's plain "429 after 3 attempts" is the case that
+ * matters most and never arrives as a report.
+ *
+ * Deliberately duplicated in SwarmCard.tsx rather than lifted: it is ten lines
+ * of card presentation, and the two cards are the only surfaces that print a
+ * reason on the row.
+ */
+function failureReason(member: MemberCall): string {
+  if (member.status !== 'failed') return ''
+  const reported = (member.result?.summary ?? '').trim()
+  if (reported !== '') return reported
+  const raw = member.tool.output.trim()
+  if (raw === '') return ''
+  if (raw.startsWith('{')) {
+    try {
+      const value: unknown = JSON.parse(raw)
+      if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
+        const record = value as Record<string, unknown>
+        for (const key of ['error', 'message', 'summary', 'reason']) {
+          const found = record[key]
+          if (typeof found === 'string' && found.trim() !== '') return found.trim()
+        }
+        return ''
+      }
+    } catch {
+      // Not JSON after all — fall through and show it as text.
+    }
+  }
+  return raw
+}
 
 function phaseState(phase: WorkflowPhase): PhaseState {
   if (phase.members.length === 0) return 'pending'

@@ -628,6 +628,21 @@
   background: color-mix(in srgb, var(--mode-yellow) 16%, var(--surface-raised));
 }
 
+/* The --mode-* palette is declared once and never re-declared for the light
+   scheme, so amber-as-*text* is a dark-mode colour wearing a token's name:
+   #f59e0b reads 8:1 on the dark chip and 2.1:1 on the white one, where the
+   off-state Ultra label goes ghostly. Deepening it toward the text colour
+   inverts with the scheme and keeps it amber rather than brown; the border
+   and the tinted fill still carry the raw palette value, so the chip's colour
+   identity is unchanged. Placed above the --ultra-on and --locked rules on
+   purpose: both of those set their own colour and must still win.
+   (No dark override — dark is where the raw value already works.) */
+@media (prefers-color-scheme: light) {
+  .config-chip--ultra {
+    color: color-mix(in srgb, var(--mode-yellow) 70%, var(--text-primary));
+  }
+}
+
 .config-chip--ultra-on,
 .config-chip--ultra-on:hover {
   background: var(--mode-yellow);

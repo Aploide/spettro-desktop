@@ -159,6 +159,61 @@
   grid-column: 1 / -1;
 }
 
+/* Once the run is over the survivors are the failures, and each one owns its
+   row: the reason has to be readable, and a 260px column turns one sentence
+   into two clipped lines. While the swarm is live the grid keeps its geometry
+   instead — a cell that widens under a reader watching it is worse than a
+   reason that wraps. */
+.swc--settled .swc-cell--failed {
+  grid-column: 1 / -1;
+}
+
+/* Why it failed, on the card rather than one click inside it. Two lines at
+   most — a stack trace must not become the tallest thing in the transcript,
+   and its full text is still in the member's own disclosure. */
+.swc-reason {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  margin: -1px 0 3px;
+  padding: 0 var(--sp-sm) 0 23px;
+  font-size: 11px;
+  line-height: 1.45;
+  color: color-mix(in srgb, var(--diff-removed) 60%, var(--text-secondary));
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+/* The successes of a settled swarm, folded into one line. It is a disclosure,
+   not a truncation notice — everything it hides is one click away — so it
+   wears a chevron and sits at the quiet end of the type scale. */
+.swc-quiet {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin: 0;
+  padding: 2px var(--sp-md) var(--sp-sm) 14px;
+  background: none;
+  border: none;
+  font: inherit;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--tr-tertiary);
+  cursor: pointer;
+  outline: none;
+}
+
+.swc-quiet:hover {
+  color: var(--text-primary);
+}
+
+.swc-quiet:focus-visible {
+  outline: 1px solid color-mix(in srgb, var(--accent) 70%, transparent);
+  outline-offset: -2px;
+  border-radius: var(--rad-sm);
+}
+
 @keyframes swc-cell-in {
   from {
     opacity: 0;

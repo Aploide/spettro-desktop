@@ -23,6 +23,19 @@
 // entire point of the card, we mine them back out of the CLI's own rendered
 // text (`acpWorkflow.render()` in internal/acp/workflow.go), whose format is
 // stable. Structured args always win; the text only fills what is missing.
+//
+// The other thing the wire gets wrong for us is that a workflow arrives as TWO
+// tool calls with the same name. `workflow {"save_as":…,"script":"export const
+// meta = …"}` is the model's actual invocation of the `workflow` TOOL, and it
+// carries the entire script as arguments; `workflow <name>` (call id `wf-…`)
+// is the lifecycle trace the run is built from. Left alone the first renders
+// as a full page of raw JSON directly above the card it belongs to, so it is
+// folded into the run — matched by the `run_id` its `<workflow_result>` block
+// declares, or, failing that, by position, since a script call can only ever
+// precede the run it starts. The exception is load-bearing: a script call that
+// FAILED before any run existed has no lifecycle call to hide behind, and it
+// is the only trace that a workflow was attempted at all, so it survives as a
+// row of its own.
 
 import type { JSONValue } from '@shared/acp'
 import type { ToolCallItem, TranscriptItem } from '@shared/model'
@@ -63,6 +76,21 @@ export interface MemberCall {
   /** The member's own tool calls, arrival order. */
   children: ToolCallItem[]
   result: SubAgentResult | null
+  /**
+   * What to SHOW for this member, which is not the same question as "did it
+   * file a report". `subAgentResult` only recognises the `{agent,status,
+   * summary}` shape the CLI wraps a plain delegation in; an `agent()` call
+   * given a `schema` returns its structured value instead
+   * (`{"content":"beta\n","file":"b.txt"}`), and a member that just answered
+   * in prose returns the prose. Both have no `summary`, so trusting `result`
+   * alone makes a finished member render as an empty row — the card would be
+   * hiding output it is holding. This is the summary when there is one and
+   * the raw output otherwise, and it is '' only when the member really said
+   * nothing.
+   */
+  resultText: string
+  /** `resultText` is pretty-printed JSON: show it preformatted, not as prose. */
+  resultIsJSON: boolean
 }
 
 export interface WorkflowPhase {
@@ -71,6 +99,33 @@ export interface WorkflowPhase {
   detail: string
   members: MemberCall[]
   counts: OrchCounts
+}
+
+/**
+ * The `workflow` tool call the model made — the script itself, not the run.
+ *
+ * Kept apart from WorkflowRun because the two disagree about what they are:
+ * the run is a live tree of agents, this is a submitted program and whatever
+ * it evaluated to. Usually it belongs inside its run's card (a `script`
+ * disclosure plus the returned value); when the call failed before a run
+ * existed, it IS the whole story and renders on its own.
+ */
+export interface WorkflowScript {
+  /** The call itself, so a card can show its status, timing and raw output. */
+  tool: ToolCallItem
+  /** The JS the model submitted ('' when it ran a saved workflow by name). */
+  source: string
+  /** `save_as` / `name` — what the workflow is called ('' when anonymous). */
+  savedAs: string
+  /** The run_id declared by `<workflow_result>`; '' when nothing ever ran. */
+  runId: string
+  /** Where the script came from: 'inline', a path, '' when unstated. */
+  origin: string
+  /** The value the script returned, pretty-printed when it is JSON. */
+  returned: string
+  status: OrchStatus
+  /** The failure text of a call that never started a run ('' otherwise). */
+  error: string
 }
 
 export interface WorkflowRun {
@@ -88,6 +143,9 @@ export interface WorkflowRun {
   counts: OrchCounts
   /** The CLI's own text tree, kept as a raw fallback. */
   rendered: string
+  /** The `workflow` tool call that submitted the script, when we could match
+   *  one to this run. Null for a run whose script call never reached us. */
+  script: WorkflowScript | null
 }
 
 export interface SwarmRun {
@@ -100,6 +158,16 @@ export interface SwarmRun {
   items: string[]
   status: OrchStatus
   members: MemberCall[]
+  /**
+   * The items no member has taken yet — the tail of `items` past the members
+   * that exist, because Ultra dispatches in item order. Ultra ramps its
+   * launches (five at once, then one every 700ms), so a twenty-item swarm
+   * spends its first seconds with most of its work un-launched; that work is
+   * pending, not absent, and the cards draw it as ghost cells.
+   */
+  pending: string[]
+  /** Counted over `items`, not over the members that happen to exist yet: a
+   *  meter whose denominator grows makes a swarm appear to go backwards. */
   counts: OrchCounts
 }
 
@@ -110,6 +178,11 @@ export type TranscriptRow =
   | { kind: 'item'; id: string; item: TranscriptItem }
   | { kind: 'agent'; id: string; member: MemberCall }
   | { kind: 'run'; id: string; run: OrchRun }
+  /** A `workflow` tool call that started no run — the only surviving trace of
+   *  a workflow that failed before its first agent. It carries `item` as well,
+   *  so a renderer that has not learned this kind yet degrades to the ordinary
+   *  tool row instead of dropping the row on the floor. */
+  | { kind: 'script'; id: string; script: WorkflowScript; item: TranscriptItem }
 
 // ---------------------------------------------------------------------------
 // JSON argument accessors
@@ -175,6 +248,27 @@ function toolStatus(tool: Pick<ToolCallItem, 'status'>): OrchStatus {
     default:
       return 'running'
   }
+}
+
+/**
+ * The `workflow` TOOL call, as opposed to the lifecycle trace of the run it
+ * starts. Both are titled `workflow …`, so they are told apart by what the
+ * arguments carry: an invocation carries the program (`script`, `save_as`,
+ * `args`, `max_concurrency`) and knows nothing about a run yet, while the
+ * trace carries `run_id` and `workflow`. Checking for the absence of those
+ * two is what makes this safe — a payload with either is never an invocation,
+ * whatever else is in it.
+ */
+function isWorkflowScriptTool(name: string, args: Args): boolean {
+  if (args === null) return false
+  if (argStr(args, 'run_id') !== '' || argStr(args, 'workflow') !== '') return false
+  if (name !== 'workflow') return false
+  return (
+    argStr(args, 'script') !== '' ||
+    argStr(args, 'save_as') !== '' ||
+    argStr(args, 'script_path') !== '' ||
+    argStr(args, 'name') !== ''
+  )
 }
 
 /** The workflow lifecycle call: `workflow <name>`, args carrying `workflow`
@@ -310,6 +404,70 @@ export function parseRenderedWorkflow(output: string, failed: boolean): Rendered
 }
 
 // ---------------------------------------------------------------------------
+// The `workflow` tool call, read back
+// ---------------------------------------------------------------------------
+
+/**
+ * The block the tool answers with (internal/acp/workflow.go):
+ *
+ *     <workflow_result name="check-files" run_id="wf_2026…">
+ *     <summary>3 agents · 0 failed · 0 replayed from journal · 29203 tokens</summary>
+ *     <phases>Read</phases>
+ *     <returned>
+ *     [ "…", "…" ]
+ *     </returned>
+ *     </workflow_result>
+ *     Script: inline · transcript: /home/…/workflows/wf_2026…
+ *
+ * `run_id` is the reliable way to tie the call to its run, and `<returned>` is
+ * the script's actual answer — the one thing in the whole exchange the model
+ * wrote code to produce, and the thing a raw-JSON row buried. Anything that
+ * fails to match degrades to '', never to a throw: a workflow whose output
+ * shape drifts must still render.
+ */
+function newScript(tool: ToolCallItem, args: Args): WorkflowScript {
+  const output = tool.output
+  const header = /<workflow_result([^>]*)>/.exec(output)
+  const attrs = header?.[1] ?? ''
+  const runId = /\brun_id="([^"]*)"/.exec(attrs)?.[1] ?? ''
+  const resultName = /\bname="([^"]*)"/.exec(attrs)?.[1] ?? ''
+  const returned = /<returned>([\s\S]*?)<\/returned>/.exec(output)?.[1] ?? ''
+  const origin = /^Script:\s*([^\n·]+)/m.exec(output)?.[1]?.trim() ?? ''
+
+  const savedAs =
+    argStr(args, 'save_as') !== ''
+      ? argStr(args, 'save_as')
+      : argStr(args, 'name') !== ''
+        ? argStr(args, 'name')
+        : resultName
+
+  const status = toolStatus(tool)
+  return {
+    tool,
+    source: argStr(args, 'script'),
+    savedAs,
+    runId,
+    origin: origin !== '' ? origin : argStr(args, 'script_path'),
+    returned: prettyJSON(returned.trim()),
+    status,
+    // A call that produced a <workflow_result> ran; anything else it printed
+    // while failing is the reason it never did.
+    error: status === 'failed' && header === null ? output.trim() : ''
+  }
+}
+
+/** Pretty-prints JSON, and leaves anything else exactly as it came. Machine
+ *  output that is shown to a human is worth re-indenting; prose is not. */
+function prettyJSON(text: string): string {
+  if (text === '' || (text[0] !== '{' && text[0] !== '[')) return text
+  try {
+    return JSON.stringify(JSON.parse(text) as JSONValue, null, 2)
+  } catch {
+    return text
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Grouping
 // ---------------------------------------------------------------------------
 
@@ -319,6 +477,7 @@ interface RunBuild {
   args: Args
   runId: string
   members: MemberCall[]
+  script: WorkflowScript | null
 }
 
 function newMember(tool: ToolCallItem, args: Args): MemberCall {
@@ -327,6 +486,7 @@ function newMember(tool: ToolCallItem, args: Args): MemberCall {
   const task = argStr(args, 'task') !== '' ? argStr(args, 'task') : (call?.task ?? '')
   const result = subAgentResult(tool)
   const hash = instance.indexOf('#')
+  const shown = memberOutput(tool, result)
   return {
     tool,
     instance,
@@ -337,8 +497,29 @@ function newMember(tool: ToolCallItem, args: Args): MemberCall {
     cached: argBool(args, 'cached'),
     status: result?.status === 'error' ? 'failed' : toolStatus(tool),
     children: [],
-    result
+    result,
+    resultText: shown.text,
+    resultIsJSON: shown.isJSON
   }
+}
+
+/**
+ * The member's output as something showable. `subAgentResult` answers a
+ * narrower question — "did this agent file a `{agent,status,summary}` report"
+ * — and its contract is relied on elsewhere, so the widening happens here: a
+ * schema'd `agent()` call returns its structured value and a prose answer
+ * returns prose, and neither has a `summary` to find. Structured output is
+ * re-indented because the CLI sends it minified onto one enormous line.
+ */
+function memberOutput(
+  tool: ToolCallItem,
+  result: SubAgentResult | null
+): { text: string; isJSON: boolean } {
+  if (result !== null && result.summary !== '') return { text: result.summary, isJSON: false }
+  const raw = tool.output.trim()
+  if (raw === '') return { text: '', isJSON: false }
+  const structured = raw.startsWith('{') || raw.startsWith('[')
+  return { text: structured ? prettyJSON(raw) : raw, isJSON: structured }
 }
 
 function finishWorkflow(build: RunBuild): WorkflowRun {
@@ -410,24 +591,64 @@ function finishWorkflow(build: RunBuild): WorkflowRun {
     phases,
     logs: text.logs,
     counts: countMembers(build.members),
-    rendered
+    rendered,
+    script: build.script
   }
 }
 
 function finishSwarm(build: RunBuild): SwarmRun {
   const args = build.args
   const isolation = argStr(args, 'isolation')
+  const items = argStrings(args, 'items')
+  // Members are dispatched in item order, so everything past the members that
+  // exist is exactly what the ramp still owes.
+  const pending = items.length > build.members.length ? items.slice(build.members.length) : []
   return {
     kind: 'swarm',
     tool: build.tool,
     description: argStr(args, 'description'),
     subagentType: argStr(args, 'subagent_type'),
     isolation: isolation === 'worktree' ? 'worktree' : '',
-    items: argStrings(args, 'items'),
+    items,
     status: toolStatus(build.tool),
     members: build.members,
-    counts: countMembers(build.members)
+    pending,
+    // The denominator is the work that was ASKED for. Counting launched
+    // members instead made the header say "4/7" directly above "10 items" —
+    // two numbers for one swarm, neither of them the one the user requested.
+    counts: { ...countMembers(build.members), total: build.members.length + pending.length }
   }
+}
+
+/**
+ * Finds the script call a lifecycle trace belongs to and marks it taken.
+ *
+ * `run_id` is the honest link and is used whenever the `<workflow_result>`
+ * block carried one. The fallback is positional and safe for the same reason
+ * the swarm's is: a script call is the thing that *starts* a run, so it can
+ * only ever precede its own lifecycle call, and the nearest unclaimed one
+ * above is the only candidate. Earlier unclaimed calls are left alone — they
+ * are failed attempts, and stealing one into this run would hide it.
+ */
+function claimScript(
+  scripts: { script: WorkflowScript; claimed: boolean }[],
+  byRunId: Map<string, { script: WorkflowScript; claimed: boolean }>,
+  runId: string
+): WorkflowScript | null {
+  const exact = runId !== '' ? byRunId.get(runId) : undefined
+  if (exact && !exact.claimed) {
+    exact.claimed = true
+    return exact.script
+  }
+  for (let i = scripts.length - 1; i >= 0; i--) {
+    const entry = scripts[i]
+    if (entry.claimed) continue
+    // A script call that already names a *different* run is not this one's.
+    if (entry.script.runId !== '' && runId !== '' && entry.script.runId !== runId) continue
+    entry.claimed = true
+    return entry.script
+  }
+  return null
 }
 
 /**
@@ -445,6 +666,11 @@ export function groupTranscript(items: TranscriptItem[]): TranscriptRow[] {
   const members = new Map<string, MemberCall>()
   const standalone = new Map<string, MemberCall>()
   const absorbed = new Set<string>()
+  // Script calls seen so far, oldest first, with the ones already claimed by a
+  // run marked. Whatever is still unclaimed at the end started no run and
+  // becomes a row of its own.
+  const scripts: { script: WorkflowScript; claimed: boolean }[] = []
+  const scriptByRunId = new Map<string, { script: WorkflowScript; claimed: boolean }>()
   let lastWorkflow: RunBuild | null = null
   let openWorkflow: RunBuild | null = null
   let lastSwarm: RunBuild | null = null
@@ -456,9 +682,23 @@ export function groupTranscript(items: TranscriptItem[]): TranscriptRow[] {
     const tool = item.tool
     const { agent: prefix, name, args } = parsedTitle(tool)
 
+    if (isWorkflowScriptTool(name, args)) {
+      const entry = { script: newScript(tool, args), claimed: false }
+      scripts.push(entry)
+      if (entry.script.runId !== '') scriptByRunId.set(entry.script.runId, entry)
+      continue
+    }
+
     if (isWorkflowTool(tool, name, args)) {
       const runId = argStr(args, 'run_id')
-      const build: RunBuild = { kind: 'workflow', tool, args, runId, members: [] }
+      const build: RunBuild = {
+        kind: 'workflow',
+        tool,
+        args,
+        runId,
+        members: [],
+        script: claimScript(scripts, scriptByRunId, runId)
+      }
       builds.set(tool.id, build)
       if (runId !== '') byRunId.set(runId, build)
       lastWorkflow = build
@@ -467,7 +707,7 @@ export function groupTranscript(items: TranscriptItem[]): TranscriptRow[] {
     }
 
     if (isUltraTool(name)) {
-      const build: RunBuild = { kind: 'swarm', tool, args, runId: '', members: [] }
+      const build: RunBuild = { kind: 'swarm', tool, args, runId: '', members: [], script: null }
       builds.set(tool.id, build)
       lastSwarm = build
       if (toolStatus(tool) === 'running') openSwarm = build
@@ -514,6 +754,16 @@ export function groupTranscript(items: TranscriptItem[]): TranscriptRow[] {
     runs.set(id, build.kind === 'workflow' ? finishWorkflow(build) : finishSwarm(build))
   }
 
+  // A script call that found a run is now part of that run's card; one that
+  // did not is a workflow that never began, and dropping it would erase the
+  // only evidence it was ever attempted.
+  const orphans = new Map<string, WorkflowScript>()
+  const claimed = new Set<string>()
+  for (const entry of scripts) {
+    if (entry.claimed) claimed.add(entry.script.tool.id)
+    else orphans.set(entry.script.tool.id, entry.script)
+  }
+
   // Pass 2 — emit, in the original order.
   const rows: TranscriptRow[] = []
   for (const item of items) {
@@ -529,6 +779,12 @@ export function groupTranscript(items: TranscriptItem[]): TranscriptRow[] {
         rows.push({ kind: 'agent', id: `agent-${item.tool.id}`, member })
         continue
       }
+      const orphan = orphans.get(item.tool.id)
+      if (orphan) {
+        rows.push({ kind: 'script', id: `script-${item.tool.id}`, script: orphan, item })
+        continue
+      }
+      if (claimed.has(item.tool.id)) continue
     }
     if (absorbed.has(id)) continue
     rows.push({ kind: 'item', id, item })

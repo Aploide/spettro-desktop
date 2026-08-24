@@ -14,6 +14,15 @@
 // fan-out the items are near-identical by construction and tell you nothing
 // about progress — MemberRow implements that rule for every surface.
 //
+// That second failure came back in a different costume: the card opened
+// collapsed once the run was over, so a settled swarm was one line and its one
+// failure was a red sliver in the meter. A finished swarm showing nothing is
+// the exact bug view_swarm.go was written to prevent, so the settled card is
+// not collapsed — it is *filtered*. Members that failed keep their cell and
+// gain the reason they failed; the successes, which in a fan-out are twenty
+// near-identical lines saying the same thing, fold into one "N done" that
+// expands. What broke is on screen; what worked is one click away.
+//
 // The layout departs from the workflow card on purpose. A workflow is deep: a
 // handful of agents inside an ordered spine of phases, which wants a tree. A
 // swarm is flat and wide: N peers, no order, no dependencies. Rendering peers
@@ -21,16 +30,12 @@
 // along?), so the members are a responsive grid — twenty of them read as one
 // shape you take in at a glance rather than a scroll.
 //
-// Two things here are not in the transcript and have to be reasoned about:
-//   * Ultra ramps its launches (5 at once, then one every 700ms), so a 20-item
-//     swarm spends its first fifteen seconds with most members not yet born.
-//     They are drawn as ghost cells and counted in the meter's denominator;
-//     without that, an early swarm shows two thirds of a full bar and then
-//     appears to go backwards as the rest of the roster arrives.
-//   * The card never collapses itself out from under the reader. Whether it
-//     opens collapsed is decided once, at mount, from the run's status: a run
-//     restored from disk is history and stays out of the way, while a run you
-//     watched finish keeps the shape it had a second ago.
+// One thing here is not in the transcript and has to be reasoned about: Ultra
+// ramps its launches (5 at once, then one every 700ms), so a 20-item swarm
+// spends its first fifteen seconds with most members not yet born. They are
+// drawn as ghost cells and counted in the meter's denominator; without that,
+// an early swarm shows two thirds of a full bar and then appears to go
+// backwards as the rest of the roster arrives.
 
 import { useState } from 'react'
 import type { JSX } from 'react'
@@ -40,11 +45,18 @@ import { Icon, ToolRow } from './ToolCallView'
 import './swarmCard.css'
 
 export function SwarmCard({ run }: { run: SwarmRun }): JSX.Element {
-  // Decided once, deliberately: see the note at the top of the file.
-  const [collapsed, setCollapsed] = useState(() => run.status !== 'running')
+  // Open in both states: a settled swarm compacts rather than vanishes. The
+  // reader can still close it, and it stays closed.
+  const [collapsed, setCollapsed] = useState(false)
+  const [showDone, setShowDone] = useState(false)
   const [open, setOpen] = useState<ReadonlySet<string>>(() => new Set<string>())
 
+  const settled = run.status !== 'running'
   const members = orderMembers(run.members)
+  const quiet = settled ? members.filter((member) => member.status === 'done').length : 0
+  const visible = quiet > 0 && !showDone
+    ? members.filter((member) => member.status !== 'done')
+    : members
   const pending = pendingItems(run)
   const counts = withPending(run.counts, pending.length)
   const empty = run.members.length === 0 && pending.length === 0
@@ -59,7 +71,7 @@ export function SwarmCard({ run }: { run: SwarmRun }): JSX.Element {
   }
 
   return (
-    <section className={`swc swc--${run.status}`}>
+    <section className={`swc swc--${run.status}${settled ? ' swc--settled' : ''}`}>
       <button
         className="swc-head"
         type="button"
@@ -88,12 +100,18 @@ export function SwarmCard({ run }: { run: SwarmRun }): JSX.Element {
 
       {!collapsed && note !== '' && <p className="swc-note">{note}</p>}
 
-      {!collapsed && (members.length > 0 || pending.length > 0) && (
+      {!collapsed && (visible.length > 0 || pending.length > 0) && (
         <div className="swc-grid">
-          {members.map((member) => {
+          {visible.map((member) => {
             const expanded = open.has(member.tool.id)
+            const reason = failureReason(member)
             return (
-              <div key={member.tool.id} className={`swc-cell${expanded ? ' swc-cell--open' : ''}`}>
+              <div
+                key={member.tool.id}
+                className={`swc-cell${expanded ? ' swc-cell--open' : ''}${
+                  reason === '' ? '' : ' swc-cell--failed'
+                }`}
+              >
                 <MemberRow
                   member={member}
                   tint={memberTint(member.specId)}
@@ -108,6 +126,7 @@ export function SwarmCard({ run }: { run: SwarmRun }): JSX.Element {
                     </div>
                   )}
                 </MemberRow>
+                {reason !== '' && <p className="swc-reason">{reason}</p>}
               </div>
             )
           })}
@@ -115,6 +134,20 @@ export function SwarmCard({ run }: { run: SwarmRun }): JSX.Element {
             <GhostCell key={`ghost-${i}`} item={item} />
           ))}
         </div>
+      )}
+
+      {!collapsed && quiet > 0 && (
+        <button
+          className="swc-quiet"
+          type="button"
+          aria-expanded={showDone}
+          onClick={() => setShowDone((value) => !value)}
+        >
+          <span className={`tr-chevron${showDone ? ' tr-chevron--open' : ''}`}>
+            <Icon name="chevron.right" size={8} />
+          </span>
+          {showDone ? 'hide the members that succeeded' : `${quiet} done`}
+        </button>
       )}
     </section>
   )
@@ -163,17 +196,53 @@ function GhostCell({ item }: { item: string }): JSX.Element {
 // ---------------------------------------------------------------------------
 
 /**
+ * Why a member failed, in one string — the twin of the same function in
+ * WorkflowCard.tsx, duplicated rather than lifted because it is ten lines of
+ * card presentation and these two cards are the only surfaces that print a
+ * reason on the row. The agent's reported summary is the best answer and is
+ * already parsed; when the output was not the report shape we take the
+ * error-ish field out of whatever JSON it was, and failing that the raw text —
+ * a provider's plain "429 after 3 attempts" never arrives as a report.
+ */
+function failureReason(member: MemberCall): string {
+  if (member.status !== 'failed') return ''
+  const reported = (member.result?.summary ?? '').trim()
+  if (reported !== '') return reported
+  const raw = member.tool.output.trim()
+  if (raw === '') return ''
+  if (raw.startsWith('{')) {
+    try {
+      const value: unknown = JSON.parse(raw)
+      if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
+        const record = value as Record<string, unknown>
+        for (const key of ['error', 'message', 'summary', 'reason']) {
+          const found = record[key]
+          if (typeof found === 'string' && found.trim() !== '') return found.trim()
+        }
+        return ''
+      }
+    } catch {
+      // Not JSON after all — fall through and show it as text.
+    }
+  }
+  return raw
+}
+
+/**
  * Running members first, dispatch order kept inside each group — the grid's
  * form of prioritiseRunning() in view_swarm.go. What is still moving is the
- * only part of a swarm you can act on; the finished half is a record.
- * Array.sort is stable, so the second group stays in launch order for free.
+ * only part of a swarm you can act on; the finished half is a record. Once
+ * nothing is moving, failures lead for the same reason: they are the rows the
+ * reader came back for. Array.sort is stable, so launch order survives inside
+ * every group for free.
  */
 function orderMembers(members: MemberCall[]): MemberCall[] {
   return [...members].sort((a, b) => rank(a) - rank(b))
 }
 
 function rank(member: MemberCall): number {
-  return member.status === 'running' ? 0 : 1
+  if (member.status === 'running') return 0
+  return member.status === 'failed' ? 1 : 2
 }
 
 /**

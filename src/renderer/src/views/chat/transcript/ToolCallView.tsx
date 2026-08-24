@@ -348,13 +348,18 @@ const STROKE_ICONS: Record<string, ReactNode> = {
   'chevron.right': <path d="M5.5 3l5 5-5 5" strokeWidth="2.4" />,
   'chevron.down': <path d="M3 5.5l5 5 5-5" strokeWidth="2.4" />,
   // A workflow is a plan drawn before the run: one root fanning into phases.
+  // A root that fans out into two: the shape of a phase that dispatches and a
+  // phase that collects. Drawn on a wider, flatter grid than the first attempt
+  // — squat 5x3 nodes with a full-width bus — because the earlier 4.4x3.2
+  // boxes with a 1-unit radius rendered as three rounded blobs the moment the
+  // glyph was used above ~20px.
   flowchart: (
     <>
-      <rect x="5.8" y="1.3" width="4.4" height="3.2" rx="1" />
-      <rect x="1.2" y="11.5" width="4.4" height="3.2" rx="1" />
-      <rect x="10.4" y="11.5" width="4.4" height="3.2" rx="1" />
-      <path d="M8 4.5v3.4" />
-      <path d="M3.4 11.5V7.9h9.2v3.6" />
+      <rect x="5.5" y="1.4" width="5" height="3" rx="0.8" />
+      <rect x="1.1" y="11.6" width="5" height="3" rx="0.8" />
+      <rect x="9.9" y="11.6" width="5" height="3" rx="0.8" />
+      <path d="M8 4.4v3.2" />
+      <path d="M3.6 11.6V7.6h8.8v4" />
     </>
   ),
   // Ultra: the fan-out that hits all at once.
@@ -436,7 +441,7 @@ export function Icon({
       viewBox="0 0 16 16"
       fill="none"
       stroke={filled ? 'none' : 'currentColor'}
-      strokeWidth="1.5"
+      strokeWidth={strokeFor(size)}
       strokeLinecap="round"
       strokeLinejoin="round"
       aria-hidden="true"
@@ -444,4 +449,19 @@ export function Icon({
       {children}
     </svg>
   )
+}
+
+/**
+ * Stroke width in viewBox units for a given rendered size.
+ *
+ * These glyphs live at 8–14px, where a flat 1.5 is right. The same 1.5 on a
+ * 40px empty-state icon is a 3.75px stroke — heavy enough that the shapes
+ * close up and the icon reads as a blob rather than a diagram. Past the row
+ * sizes the stroke thins toward a constant *rendered* weight, so a glyph looks
+ * like itself at any size; below that nothing changes, because every icon in
+ * the transcript was drawn against 1.5 and should stay exactly as it is.
+ */
+function strokeFor(size: number): number {
+  if (size <= 16) return 1.5
+  return Math.max(0.9, (1.5 * 16) / size)
 }

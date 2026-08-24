@@ -317,19 +317,110 @@
   font-variant-numeric: tabular-nums;
 }
 
-.wfs-code {
+/* The stack is the positioning context for the mirror; both children fill it
+   completely so a scroll offset applied to one lands identically on the other. */
+.wfs-code-stack {
+  position: relative;
   flex: 1 1 auto;
   min-width: 0;
+}
+
+/* Every metric that decides where a glyph lands is declared once, here, and
+   worn by both the mirror and the input. Splitting them into two rule sets is
+   how a mirror drifts a pixel at a time until the colours sit under the wrong
+   characters. */
+.wfs-code {
+  position: absolute;
+  inset: 0;
+  margin: 0;
   padding: 10px 12px;
   border: 0;
   outline: none;
   resize: none;
   background: transparent;
-  color: var(--text-primary);
   font: inherit;
+  font-family: inherit;
+  font-size: inherit;
+  line-height: inherit;
+  letter-spacing: normal;
   tab-size: 2;
   white-space: pre;
   overflow: auto;
+}
+
+.wfs-code-mirror {
+  pointer-events: none;
+  color: var(--text-primary);
+  /* The mirror must not paint its own scrollbars: the input owns scrolling and
+     a second set would both overlap and disagree. */
+  scrollbar-width: none;
+  overflow: hidden;
+}
+
+.wfs-code-input {
+  color: transparent;
+  caret-color: var(--accent);
+}
+
+/* Transparent glyphs make a selection an invisible smear unless the selected
+   text is painted back in. */
+.wfs-code-input::selection {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--accent) 40%, transparent);
+}
+
+/* Syntax colours.
+   Hue carries meaning rather than decoration: the workflow runtime's own
+   globals — agent, parallel, pipeline, phase — are the one thing this view can
+   usefully say something semantic about, so they get the accent and everything
+   else stays quiet around them. Derived from the --mode-* palette so the
+   editor belongs to the same app as the cards it writes. */
+.tok--keyword {
+  color: var(--mode-magenta);
+}
+.tok--string {
+  color: var(--mode-green);
+}
+.tok--number {
+  color: var(--mode-yellow);
+}
+.tok--comment {
+  color: var(--text-secondary);
+  font-style: italic;
+}
+.tok--builtin {
+  color: var(--mode-cyan);
+  font-weight: 600;
+}
+.tok--property {
+  color: var(--mode-blue);
+}
+.tok--punct {
+  color: var(--text-secondary);
+}
+.tok--plain {
+  color: var(--text-primary);
+}
+
+/* The --mode-* set is tuned for a dark surface; on the light editor the two
+   lightest of them wash out entirely. Deepened toward the text colour, which
+   keeps the hue and restores the contrast. */
+@media (prefers-color-scheme: light) {
+  .tok--keyword {
+    color: color-mix(in srgb, var(--mode-magenta) 55%, var(--text-primary));
+  }
+  .tok--string {
+    color: color-mix(in srgb, var(--mode-green) 45%, var(--text-primary));
+  }
+  .tok--number {
+    color: color-mix(in srgb, var(--mode-yellow) 55%, var(--text-primary));
+  }
+  .tok--builtin {
+    color: color-mix(in srgb, var(--mode-cyan) 60%, var(--text-primary));
+  }
+  .tok--property {
+    color: color-mix(in srgb, var(--mode-blue) 60%, var(--text-primary));
+  }
 }
 
 /* ---------------------------------------------------------------- verdict */

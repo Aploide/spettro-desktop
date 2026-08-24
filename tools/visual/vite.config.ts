@@ -23,7 +23,8 @@ export default defineConfig({
     rollupOptions: {
       input: {
         index: resolve(__dirname, 'index.html'),
-        studio: resolve(__dirname, 'studio.html')
+        studio: resolve(__dirname, 'studio.html'),
+        chrome: resolve(__dirname, 'chrome.html')
       }
     }
   }

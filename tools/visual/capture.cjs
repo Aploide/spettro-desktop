@@ -99,8 +99,9 @@ async function shoot(theme) {
   // A scene id prefixed "studio" targets the studio harness page instead of
   // the scene gallery; anything after a colon is its mode.
   const studio = SCENE.startsWith('studio')
-  const page = studio ? 'studio.html' : 'index.html'
-  const query = studio
+  const chrome = SCENE.startsWith('chrome')
+  const page = studio ? 'studio.html' : chrome ? 'chrome.html' : 'index.html'
+  const query = studio || chrome
     ? SCENE.includes(':')
       ? `?mode=${SCENE.split(':')[1]}`
       : ''

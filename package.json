@@ -1,6 +1,6 @@
 {
   "name": "spettro-desktop",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "Spettro for Linux and Windows — a desktop UI for the spettro command-line agent",
   "main": "./out/main/index.js",
   "author": "Carlo Esposito - Eyed",

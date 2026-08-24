@@ -643,21 +643,30 @@
   }
 }
 
+/* Idle Ultra is amber-on-dark like any other chip; armed is amber, full stop.
+   The first attempt filled it solid amber with a 3px glow ring, which made it
+   half again the visual weight of every neighbour and — because .config-bar is
+   a scroll container — pushed the ring outside the bar, where it was clipped
+   mid-glow. A chip that arms itself by growing out of its own bar looks
+   broken. The second attempt over-corrected into a tint so close to the idle
+   state that the two were hard to tell apart, which is worse: this control
+   changes what a turn does, and "is it on?" must be answerable at a glance.
+   So: the fill inverts, the label goes dark, and the chip stays exactly the
+   size it was. No shadow, nothing outside the border box. */
 .config-chip--ultra-on,
 .config-chip--ultra-on:hover {
   background: var(--mode-yellow);
-  border-color: transparent;
-  /* Amber is a light colour in both schemes, so the label is dark on it —
-     --canvas is the one token that is dark in dark mode and near-white in
-     light mode, which is backwards here; #1a1205 is a fixed near-black that
-     stays legible on amber in either scheme. */
+  border-color: var(--mode-yellow);
+  /* Amber is light in both schemes, so the label is dark on it. --canvas is
+     dark in dark mode and near-white in light, which is backwards here;
+     #1a1205 is a fixed near-black that stays legible on amber either way. */
   color: #1a1205;
   font-weight: 600;
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--mode-yellow) 18%, transparent);
 }
 
 .config-chip--ultra-on:hover {
-  background: color-mix(in srgb, var(--mode-yellow) 88%, #fff);
+  background: color-mix(in srgb, var(--mode-yellow) 86%, #fff);
+  border-color: color-mix(in srgb, var(--mode-yellow) 86%, #fff);
 }
 
 .config-chip--locked,
@@ -667,6 +676,10 @@
   background: var(--surface-raised);
   opacity: 0.55;
   cursor: not-allowed;
+}
+
+.config-chip--ultra-on .config-chip-bolt {
+  filter: drop-shadow(0 0 4px color-mix(in srgb, var(--mode-yellow) 55%, transparent));
 }
 
 .config-chip-lock {

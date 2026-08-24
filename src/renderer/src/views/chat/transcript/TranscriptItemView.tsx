@@ -18,6 +18,7 @@ import type { ChatMessage, TranscriptItem } from '@shared/model'
 import { MarkdownText } from './MarkdownText'
 import { Icon, SubAgentCallView, ToolCallView } from './ToolCallView'
 import { subAgentCall } from './toolPresentation'
+import { ActivationText } from '../ActivationGlow'
 import type { MemberCall, TranscriptRow } from './orchestration'
 import { ScriptCallRow } from './OrchestrationBits'
 import { SwarmCard } from './SwarmCard'
@@ -98,7 +99,13 @@ function UserBubble({ message }: { message: ChatMessage }): JSX.Element {
             ))}
           </div>
         )}
-        {message.text !== '' && <div className="tr-user-bubble">{message.text}</div>}
+        {message.text !== '' && (
+          <div className="tr-user-bubble">
+            {/* The phrase stays lit after sending: what armed the turn should
+                still be visible in the turn it armed. */}
+            <ActivationText text={message.text} />
+          </div>
+        )}
       </div>
     </div>
   )

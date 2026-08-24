@@ -188,11 +188,11 @@ export function WarningIcon({ size }: IconProps): JSX.Element {
 export function FlowchartIcon({ size }: IconProps): JSX.Element {
   return (
     <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden="true">
-      <rect x="6.2" y="1.4" width="3.6" height="3" rx="1" stroke="currentColor" strokeWidth="1.3" />
-      <rect x="1.4" y="11.6" width="3.6" height="3" rx="1" stroke="currentColor" strokeWidth="1.3" />
-      <rect x="11" y="11.6" width="3.6" height="3" rx="1" stroke="currentColor" strokeWidth="1.3" />
+      <rect x="5.5" y="1.4" width="5" height="3" rx="0.8" stroke="currentColor" strokeWidth="1.3" />
+      <rect x="1.1" y="11.6" width="5" height="3" rx="0.8" stroke="currentColor" strokeWidth="1.3" />
+      <rect x="9.9" y="11.6" width="5" height="3" rx="0.8" stroke="currentColor" strokeWidth="1.3" />
       <path
-        d="M8 4.4v2.4M3.2 11.6V9.2a1 1 0 0 1 1-1h7.6a1 1 0 0 1 1 1v2.4"
+        d="M8 4.4v3.2M3.6 11.6V7.6h8.8v4"
         stroke="currentColor"
         strokeWidth="1.3"
         strokeLinecap="round"

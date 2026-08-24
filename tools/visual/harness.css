@@ -68,3 +68,36 @@ body,
   border-radius: var(--rad-md);
   overflow: hidden;
 }
+
+/* Chrome harness */
+.hz-root--chrome {
+  gap: 28px;
+  max-width: 1000px;
+}
+.hz-chrome-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.hz-chrome-label {
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+.hz-bar {
+  background: var(--canvas);
+  border: 1px solid var(--hairline);
+  border-radius: var(--rad-md);
+  padding: 10px 12px;
+  max-width: 760px;
+}
+.hz-composer {
+  max-width: 760px;
+}
+.hz-bubbles {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 760px;
+}

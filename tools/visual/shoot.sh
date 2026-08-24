@@ -17,7 +17,9 @@ SCENES=(
   swarm-finished
   mixed
   studio
+  studio:empty
   studio:broken
+  chrome
 )
 
 rm -rf "$OUT"

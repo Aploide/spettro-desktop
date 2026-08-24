@@ -343,7 +343,7 @@ function LockIcon(): JSX.Element {
 
 function BoltIcon({ filled }: { filled: boolean }): JSX.Element {
   return (
-    <svg width="13" height="13" viewBox="0 0 16 16" aria-hidden>
+    <svg className="config-chip-bolt" width="13" height="13" viewBox="0 0 16 16" aria-hidden>
       <path
         d="M9.2 1.5 3.5 9h3.4l-.9 5.5L11.8 7H8.4l.8-5.5Z"
         fill={filled ? 'currentColor' : 'none'}

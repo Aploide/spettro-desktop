@@ -23,9 +23,69 @@ const WIDTH = 1280
 // that a fixed height beats scroll-stitching.
 const HEIGHT = Number(process.env.SHOT_HEIGHT || 5200)
 
+// Destroying a shot's window leaves zero windows open, and Electron's default
+// window-all-closed handler quits the app on Linux and Windows. That ended the
+// process after the first theme — no error, exit code 0, half the screenshots,
+// and nothing to suggest anything had gone wrong. The lifetime here is the
+// loop's, not the window's.
+app.on('window-all-closed', () => {})
+
 app.disableHardwareAcceleration()
 app.commandLine.appendSwitch('disable-gpu')
 app.commandLine.appendSwitch('force-device-scale-factor', '1')
+
+/**
+ * Loads a page and waits for it to actually finish.
+ *
+ * `loadURL`'s promise is not a reliable signal here. Flipping
+ * nativeTheme.themeSource between shots makes Chromium re-evaluate the page,
+ * which aborts the load in flight — so the promise rejects with ERR_FAILED
+ * (-2) for a page that then loads perfectly well a moment later. Taking that
+ * rejection at face value cost every second theme its screenshot, silently:
+ * the run still produced files, just half as many as it claimed to.
+ *
+ * So the finished-loading event is the authority and the promise is only
+ * consulted for a failure the event never contradicts.
+ */
+/** Sets the rendered viewport to an arbitrary height, past what a window can
+ *  be. Best-effort: if the debugger is unavailable the shot is still taken,
+ *  just clipped to the window, which is what happened before this existed. */
+async function resizeViewport(win, height) {
+  const contents = win.webContents
+  try {
+    if (!contents.debugger.isAttached()) contents.debugger.attach('1.3')
+    await contents.debugger.sendCommand('Emulation.setDeviceMetricsOverride', {
+      width: WIDTH,
+      height,
+      deviceScaleFactor: 1,
+      mobile: false
+    })
+    // One frame for the new metrics to be laid out and painted.
+    await new Promise((r) => setTimeout(r, 250))
+  } catch (err) {
+    console.warn(`viewport override unavailable (${err.message}); shot may be clipped`)
+  }
+}
+
+function load(win, url) {
+  return new Promise((resolve, reject) => {
+    let settled = false
+    const done = () => {
+      if (settled) return
+      settled = true
+      resolve()
+    }
+    win.webContents.once('did-finish-load', done)
+    win.loadURL(url).then(done, (err) => {
+      // Give the event a moment to arrive before believing the rejection.
+      setTimeout(() => {
+        if (settled) return
+        settled = true
+        reject(err)
+      }, 500)
+    })
+  })
+}
 
 async function shoot(theme) {
   nativeTheme.themeSource = theme
@@ -48,17 +108,28 @@ async function shoot(theme) {
       ? `?scene=${SCENE}`
       : ''
   const url = `file://${path.join(DIST, page)}${query}`
-  await win.loadURL(url)
+  await load(win, url)
   // One rAF is not enough: fonts and the CSS transitions on the cards settle
   // a frame or two later, and a screenshot taken before they do is a lie.
   await new Promise((r) => setTimeout(r, Number(process.env.SHOT_WAIT || 1200)))
   const full = await win.webContents.executeJavaScript(
     'document.documentElement.scrollHeight'
   )
-  if (full > HEIGHT) console.warn(`page is ${full}px, frame is ${HEIGHT}px — tail cut off`)
+  // A BrowserWindow cannot be taller than the display, even offscreen, so a
+  // long scene used to lose its tail to whatever monitor happened to be
+  // attached — and the CI runner's virtual display is a different height
+  // again, which would have made the artifacts silently inconsistent with the
+  // ones taken locally. Overriding the device metrics through the debugger
+  // sets the viewport directly and is bounded by nothing.
+  await resizeViewport(win, Math.max(full, HEIGHT))
   const image = await win.webContents.capturePage()
   fs.mkdirSync(OUT, { recursive: true })
-  const file = path.join(OUT, `${SCENE || 'all'}-${theme}.png`)
+  // A scene id can carry a mode after a colon ("studio:broken"), and a colon
+  // is not a legal character in a GitHub artifact path — nor in a Windows
+  // filename. Sanitised here rather than at the call site so no caller has to
+  // remember.
+  const slug = (SCENE || 'all').replace(/[^a-zA-Z0-9._-]+/g, '-')
+  const file = path.join(OUT, `${slug}-${theme}.png`)
   fs.writeFileSync(file, image.toPNG())
   console.log(`${file}  ${JSON.stringify(image.getSize())}  page=${full}px`)
   win.destroy()

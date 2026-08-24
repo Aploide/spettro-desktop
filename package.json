@@ -18,7 +18,7 @@
     "pack:linux": "electron-vite build && electron-builder --linux --x64 --arm64",
     "pack:win": "electron-vite build && electron-builder --win --x64 --arm64",
     "pack": "electron-vite build && electron-builder",
-    "visual": "vite build -c tools/visual/vite.config.ts && electron --no-sandbox tools/visual/capture.cjs .visual-dist .visual-shots",
+    "visual": "vite build -c tools/visual/vite.config.ts && tools/visual/shoot.sh",
     "test": "vitest run",
     "test:watch": "vitest"
   },

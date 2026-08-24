@@ -17,7 +17,7 @@
 //     wrapping, which is why they share a class rather than two lists of
 //     matching declarations, and why the mirror is scrolled in lockstep.
 
-import { useCallback, useEffect, useLayoutEffect, useRef } from 'react'
+import { Fragment, useCallback, useEffect, useLayoutEffect, useRef } from 'react'
 import type {
   ChangeEvent,
   ClipboardEvent,
@@ -40,9 +40,11 @@ export function ActivationText({ text }: { text: string }): JSX.Element {
             {piece.text}
           </span>
         ) : (
-          <span className="glow-plain" key={i}>
-            {piece.text}
-          </span>
+          // Plain prose needs no element of its own: the glow paints on its own
+          // glyphs and never outside them, so there is nothing here to defend
+          // against. (There was, when the effect drew a pill: the pill's
+          // horizontal overhang sat on top of the next character and ate it.)
+          <Fragment key={i}>{piece.text}</Fragment>
         )
       )}
     </>

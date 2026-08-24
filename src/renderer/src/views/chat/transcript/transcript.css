@@ -35,7 +35,14 @@
   min-width: 0;
 }
 
+/* The bubble is accent blue and its own surface, so it declares the palette
+   the activation glow (activation.css) should use on it: the default ramp
+   starts in violet, a near-neighbour of the bubble, which left the first half
+   of every lit phrase muddy. These are the same hues lifted clear of the blue
+   — bright enough to carry on their own, since nothing is painted behind the
+   phrase to help them. */
 .tr-user-bubble {
+  --glow-ramp: #c4b5fd, #f0abfc, #e0f2fe, #67e8f9, #22d3ee;
   background: var(--user-bubble);
   color: #fff;
   font-size: 14px;

@@ -57,8 +57,13 @@ export function SwarmCard({ run }: { run: SwarmRun }): JSX.Element {
   const visible = quiet > 0 && !showDone
     ? members.filter((member) => member.status !== 'done')
     : members
-  const pending = pendingItems(run)
-  const counts = withPending(run.counts, pending.length)
+  // `run.pending` and `run.counts.total` both already account for the items
+  // the ramp has not reached — the derivation layer counts progress against
+  // the swarm that was *asked for*. Re-adding them here is what made the
+  // card's meter run over 13 for a 10-item swarm while the live panel, reading
+  // the same run, correctly said 10.
+  const pending = run.pending
+  const counts = run.counts
   const empty = run.members.length === 0 && pending.length === 0
   const note = empty ? run.tool.output.trim() : ''
 

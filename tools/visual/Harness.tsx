@@ -17,6 +17,7 @@ import OrchestrationPanel from '@renderer/views/chat/OrchestrationPanel'
 import TranscriptItemView from '@renderer/views/chat/transcript/TranscriptItemView'
 import { SubAgentCallView } from '@renderer/views/chat/transcript/ToolCallView'
 import { subAgentCall } from '@renderer/views/chat/transcript/toolPresentation'
+import { ScriptCallRow } from '@renderer/views/chat/transcript/OrchestrationBits'
 import { SCENES, type Scene } from './fixtures'
 import { LIVE_SCENE } from './fixtures.live'
 import '@renderer/design/theme.css'
@@ -46,6 +47,9 @@ function SceneView({ scene }: { scene: Scene }): JSX.Element {
                 ) : (
                   <SwarmCard key={row.id} run={row.run} />
                 )
+              }
+              if (row.kind === 'script') {
+                return <ScriptCallRow key={row.id} script={row.script} />
               }
               if (row.kind === 'agent') {
                 const call = subAgentCall(row.member.tool)

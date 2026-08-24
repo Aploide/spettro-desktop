@@ -180,3 +180,24 @@ export function WarningIcon({ size }: IconProps): JSX.Element {
     </Svg>
   )
 }
+
+/** The workflow mark: a root that branches into two, then rejoins — the shape
+ *  of a phase that fans out and a phase that collects. Matches the `flowchart`
+ *  glyph the workflow card wears, so the sidebar button and the card the
+ *  button leads to are recognisably the same thing. */
+export function FlowchartIcon({ size }: IconProps): JSX.Element {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <rect x="6.2" y="1.4" width="3.6" height="3" rx="1" stroke="currentColor" strokeWidth="1.3" />
+      <rect x="1.4" y="11.6" width="3.6" height="3" rx="1" stroke="currentColor" strokeWidth="1.3" />
+      <rect x="11" y="11.6" width="3.6" height="3" rx="1" stroke="currentColor" strokeWidth="1.3" />
+      <path
+        d="M8 4.4v2.4M3.2 11.6V9.2a1 1 0 0 1 1-1h7.6a1 1 0 0 1 1 1v2.4"
+        stroke="currentColor"
+        strokeWidth="1.3"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
+}

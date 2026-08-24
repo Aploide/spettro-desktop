@@ -36,11 +36,22 @@ async function shoot(theme) {
     useContentSize: true,
     webPreferences: { offscreen: true, backgroundThrottling: false }
   })
-  const url = `file://${path.join(DIST, 'index.html')}${SCENE ? `?scene=${SCENE}` : ''}`
+  // A scene id prefixed "studio" targets the studio harness page instead of
+  // the scene gallery; anything after a colon is its mode.
+  const studio = SCENE.startsWith('studio')
+  const page = studio ? 'studio.html' : 'index.html'
+  const query = studio
+    ? SCENE.includes(':')
+      ? `?mode=${SCENE.split(':')[1]}`
+      : ''
+    : SCENE
+      ? `?scene=${SCENE}`
+      : ''
+  const url = `file://${path.join(DIST, page)}${query}`
   await win.loadURL(url)
   // One rAF is not enough: fonts and the CSS transitions on the cards settle
   // a frame or two later, and a screenshot taken before they do is a lie.
-  await new Promise((r) => setTimeout(r, 1200))
+  await new Promise((r) => setTimeout(r, Number(process.env.SHOT_WAIT || 1200)))
   const full = await win.webContents.executeJavaScript(
     'document.documentElement.scrollHeight'
   )

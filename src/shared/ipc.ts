@@ -151,6 +151,11 @@ export interface RendererApi {
   workflowDelete(chatId: string, name: string, scope: WorkflowScope): Promise<boolean>
   workflowValidate(chatId: string, script: string): Promise<WorkflowValidation | null>
   workflowRuns(chatId: string): Promise<WorkflowRunInfo[]>
+  /** Runs a saved workflow in a throwaway chat and returns that chat's id, so
+   *  the studio can mirror its transcript without touching the sidebar. */
+  workflowRun(chatId: string, name: string): Promise<string | null>
+  /** Drops a scratch chat (cancelling anything still running in it). */
+  workflowDiscardRun(scratchChatId: string): Promise<void>
 
   // Updates. The main process checks GitHub on a timer and pushes results in
   // AppStateDTO.update; these are the user-initiated versions.

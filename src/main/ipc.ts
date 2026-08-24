@@ -156,6 +156,8 @@ export function registerIpc(
     workflowDelete: (chatId, name, scope) => model.deleteWorkflow(chatId, name, scope),
     workflowValidate: (chatId, script) => model.validateWorkflow(chatId, script),
     workflowRuns: (chatId) => model.listWorkflowRuns(chatId),
+    workflowRun: async (chatId, name) => model.runWorkflow(chatId, name),
+    workflowDiscardRun: async (scratchChatId) => model.discardScratchChat(scratchChatId),
 
     accountLoginStart: () => model.accountLoginStart(),
     accountLoginPoll: () => model.accountLoginPoll(),

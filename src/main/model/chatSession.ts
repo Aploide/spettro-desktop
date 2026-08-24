@@ -80,6 +80,17 @@ export class ChatSession {
   onItem: ((session: ChatSession, item: TranscriptItem) => void) | null = null
   onMeta: ((session: ChatSession, meta: ChatMetaPatch) => void) | null = null
 
+  /**
+   * A throwaway chat the studio runs a workflow in.
+   *
+   * It is a full ChatSession — it gets an ACP session, streams items, and
+   * renders through the same transcript fold — but it is kept out of the
+   * sidebar and off disk. Testing a script you are still editing means running
+   * it repeatedly and mostly discarding the result; that belongs beside the
+   * editor, not filed among the user's conversations.
+   */
+  isScratch = false
+
   constructor(projectPath: string, title?: string, id?: string, createdAt?: number) {
     this.id = id ?? randomUUID()
     this.projectPath = projectPath

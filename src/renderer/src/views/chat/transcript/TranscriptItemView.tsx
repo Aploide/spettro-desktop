@@ -19,6 +19,7 @@ import { MarkdownText } from './MarkdownText'
 import { Icon, SubAgentCallView, ToolCallView } from './ToolCallView'
 import { subAgentCall } from './toolPresentation'
 import type { MemberCall, TranscriptRow } from './orchestration'
+import { ScriptCallRow } from './OrchestrationBits'
 import { SwarmCard } from './SwarmCard'
 import { WorkflowCard } from './WorkflowCard'
 import './transcript.css'
@@ -44,6 +45,11 @@ export function TranscriptRowView({ row }: { row: TranscriptRow }): JSX.Element 
       )
     case 'agent':
       return <StandaloneAgentRow member={row.member} />
+    case 'script':
+      // A workflow tool call that never started a run: the script is all
+      // there is, so it gets a readable row of its own rather than the raw
+      // JSON blob the generic tool row would make of a whole JS program.
+      return <ScriptCallRow script={row.script} />
   }
 }
 

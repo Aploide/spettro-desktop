@@ -56,3 +56,15 @@ body,
   border-radius: var(--rad-md);
   overflow: hidden;
 }
+
+/* Studio harness: give the modal its real frame so the shot matches the app. */
+.hz-root--studio {
+  padding: 24px;
+}
+.hz-studio-frame {
+  width: 1080px;
+  height: 760px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--rad-md);
+  overflow: hidden;
+}

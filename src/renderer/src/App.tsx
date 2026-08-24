@@ -19,6 +19,7 @@ import PermissionSheet from '@renderer/views/sheets/PermissionSheet'
 import QuestionSheet from '@renderer/views/sheets/QuestionSheet'
 import RemoteAccessView from '@renderer/views/remote/RemoteAccessView'
 import ConnectProvidersView from '@renderer/views/providers/ConnectProvidersView'
+import WorkflowStudio from '@renderer/views/workflows/WorkflowStudio'
 
 export default function App(): JSX.Element {
   const app = useApp()
@@ -30,6 +31,11 @@ export default function App(): JSX.Element {
   // pane the sheet opens on.
   const [settingsPane, setSettingsPane] = useState<SettingsPane | null>(null)
   const [remoteOpen, setRemoteOpen] = useState(false)
+  // The studio is pinned to the chat that opened it, not to whatever is
+  // selected now: it holds an unsaved draft, and having the project shift out
+  // from under an editor mid-edit would be a good way to save into the wrong
+  // repo.
+  const [workflowsChatId, setWorkflowsChatId] = useState<string | null>(null)
 
   // Port of AppModel.providerSetupSkipped: the user chose to continue without
   // finishing provider setup, so the gate doesn't pull them back. The chat
@@ -55,6 +61,7 @@ export default function App(): JSX.Element {
     const onKey = (e: KeyboardEvent): void => {
       if (e.key === 'Escape') {
         if (remoteOpen) setRemoteOpen(false)
+        else if (workflowsChatId) setWorkflowsChatId(null)
         else if (settingsPane) setSettingsPane(null)
         return
       }
@@ -72,11 +79,17 @@ export default function App(): JSX.Element {
       } else if (key === 'r' && e.shiftKey) {
         e.preventDefault()
         setRemoteOpen(true)
+      } else if (key === 'w' && e.shiftKey) {
+        const selected = getState().app?.selectedSessionId ?? null
+        if (selected) {
+          e.preventDefault()
+          setWorkflowsChatId(selected)
+        }
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [remoteOpen, settingsPane])
+  }, [remoteOpen, settingsPane, workflowsChatId])
 
   // The transient banner toast. It re-arms whenever the banner text changes
   // and hides itself; onboarding shows the same banner inline, so the toast
@@ -101,6 +114,19 @@ export default function App(): JSX.Element {
       {renderPhase()}
 
       {settingsPane && <SettingsView initialPane={settingsPane} onClose={() => setSettingsPane(null)} />}
+
+      {workflowsChatId && (
+        <div className="modal-backdrop" role="presentation">
+          <div
+            className="modal-panel modal-panel--workflows"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Workflows"
+          >
+            <WorkflowStudio chatId={workflowsChatId} onClose={() => setWorkflowsChatId(null)} />
+          </div>
+        </div>
+      )}
 
       {remoteOpen && (
         <div className="modal-backdrop" role="presentation">
@@ -175,6 +201,7 @@ export default function App(): JSX.Element {
             <Sidebar
               onOpenSettings={(pane) => setSettingsPane(pane ?? 'account')}
               onOpenRemote={() => setRemoteOpen(true)}
+              onOpenWorkflows={() => selectedId && setWorkflowsChatId(selectedId)}
             />
             <div className="detail">
               {phase.kind !== 'needsProject' && selectedId ? (

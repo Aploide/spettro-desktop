@@ -230,7 +230,8 @@ export class AppModel extends EventEmitter {
       cli: this.cli,
       agentVersion: this.agentVersion,
       selectedSessionId: this.selectedSessionId,
-      sessions: this.sessions.map((s) => s.summary()),
+      // Scratch runs are the studio's business, not the sidebar's.
+      sessions: this.sessions.filter((s) => !s.isScratch).map((s) => s.summary()),
       banner: this.banner,
       installLog: [...this.installLog],
       agentLog: [...this.agentLog],
@@ -340,7 +341,9 @@ export class AppModel extends EventEmitter {
   private persist(): void {
     // Sessions that have never received a prompt (and never failed to
     // connect) are not conversations — don't store them.
-    this.store.save(this.sessions.filter((s) => !s.isPristine).map((s) => s.snapshot()))
+    this.store.save(
+      this.sessions.filter((s) => !s.isPristine && !s.isScratch).map((s) => s.snapshot())
+    )
     this.emitAppState()
   }
 
@@ -1097,6 +1100,54 @@ export class AppModel extends EventEmitter {
     return client.validateWorkflow(acpId, script)
   }
 
+  /**
+   * Runs a saved workflow in a throwaway chat and returns its id.
+   *
+   * The run goes through an ordinary prompt turn rather than some private
+   * channel, because that is what a workflow run actually is: the CLI rewrites
+   * "/workflows run <name>" into a turn that calls the workflow tool
+   * (internal/acp/bridge.go), and everything downstream — the tool calls, the
+   * phase tree, the sub-agents — is machinery the app already renders. A second
+   * path would be a second thing to keep correct.
+   *
+   * What it does not do is run in the user's conversation. Iterating on a
+   * script means running it over and over and throwing most of the results
+   * away, so each run gets a scratch session: same project, same config, no
+   * sidebar entry, never written to disk.
+   */
+  runWorkflow(chatId: string, name: string): string | null {
+    const origin = this.sessionById(chatId)
+    if (!origin) return null
+    const scratch = new ChatSession(origin.projectPath, `Workflow · ${name}`)
+    scratch.isScratch = true
+    // Inherit the originating chat's config so a test run uses the model and
+    // permission level the user is actually working with — a workflow that
+    // only passes under different settings has not been tested.
+    scratch.configOptions = origin.configOptions
+    scratch.commands = origin.commands
+    this.attachSessionCallbacks(scratch)
+    this.sessions.unshift(scratch)
+    this.pushEvent({ type: 'chat-reset', chat: scratch.detail() })
+    // Deliberately not emitAppState(): a scratch chat must not disturb the
+    // sidebar or steal the selection out from under the studio. send() takes
+    // care of attaching a live ACP session on its way through runTurn.
+    this.send(scratch.id, `/workflows run ${name}`, [])
+    return scratch.id
+  }
+
+  /** Drops a scratch chat once the studio is done with it. Anything still
+   *  running is cancelled first, so closing the editor cannot leave a fan-out
+   *  burning tokens against a session nobody is watching. */
+  discardScratchChat(chatId: string): void {
+    const session = this.sessionById(chatId)
+    if (!session || !session.isScratch) return
+    if (session.isBusy) this.cancel(chatId)
+    this.sessions = this.sessions.filter((s) => s.id !== chatId)
+    const acpId = session.acpSessionId
+    if (acpId) this.sessionsByACPID.delete(acpId)
+    this.pushEvent({ type: 'chat-removed', chatId })
+  }
+
   async listWorkflowRuns(chatId: string): Promise<WorkflowRunInfo[]> {
     const client = this.extensions.client
     const acpId = this.workflowSession(chatId)
@@ -1402,7 +1453,9 @@ export class AppModel extends EventEmitter {
     this.extensions.dispose()
     this.subscriptionStore.stop()
     this.updates.shutdown()
-    this.store.save(this.sessions.filter((s) => !s.isPristine).map((s) => s.snapshot()))
+    this.store.save(
+      this.sessions.filter((s) => !s.isPristine && !s.isScratch).map((s) => s.snapshot())
+    )
   }
 }
 

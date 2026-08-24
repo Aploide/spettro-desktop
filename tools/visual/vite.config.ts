@@ -19,6 +19,12 @@ export default defineConfig({
   },
   build: {
     outDir: process.env.VISUAL_OUT ?? resolve(root, '.visual-dist'),
-    emptyOutDir: true
+    emptyOutDir: true,
+    rollupOptions: {
+      input: {
+        index: resolve(__dirname, 'index.html'),
+        studio: resolve(__dirname, 'studio.html')
+      }
+    }
   }
 })

@@ -42,7 +42,7 @@ import type {
 import type { ConnectResult, LocalProbeResult, LoginStatus } from '../../shared/extensions'
 import type { UpdateState } from '../../shared/update'
 import { ExtensionMethod } from '../../shared/extensions'
-import { AcpAgent, AcpConnection } from '../acp'
+import { AcpAgent, AcpConnection, AcpError } from '../acp'
 import { ChatSession, type ConfigValue } from './chatSession'
 import { CLIInstaller } from './cliInstaller'
 import { locateCLI } from './cliLocator'
@@ -1028,6 +1028,9 @@ export class AppModel extends EventEmitter {
   async setConfigValue(chatId: string, configId: string, value: ConfigValue): Promise<void> {
     const session = this.sessionById(chatId)
     if (!session) return
+    // What the agent last told us this option was — the value to fall back to
+    // if it turns out the agent won't take the new one.
+    const previous = session.displayedConfigValues()[configId]
     // Reflect the choice in the UI immediately; the agent is synced below,
     // or when a live session attaches if there isn't one yet.
     session.applyLocalConfigValue(configId, value)
@@ -1047,10 +1050,30 @@ export class AppModel extends EventEmitter {
       this.persist()
     } catch (err) {
       session.appendNotice(`Couldn't change ${configId}: ${errMessage(err)}`, true)
-      // The chip already shows the new value but the agent never took it.
-      // Queue it so the pre-prompt sync retries before the next turn runs —
-      // otherwise the user would prompt against settings they can't see.
-      session.pendingConfigChanges[configId] = value
+      // Two very different failures arrive here, and they want opposite
+      // treatment.
+      //
+      // A *refusal* — the agent answered, and the answer was no (a JSON-RPC
+      // error; kind 'rpc'). Ultra under the "Ask first" permission level is
+      // the canonical case: the CLI will reject it every single time until
+      // Permission changes. Retrying that before the next turn achieves
+      // nothing except another notice, forever, and leaving the optimistic
+      // value on screen is a lie about what the agent is running with — so we
+      // roll the chip back to the value the agent actually reports and drop
+      // the change on the floor.
+      //
+      // A *transport* failure — the agent never answered at all (the process
+      // died, the pipe broke, the reply didn't decode). We have no idea what
+      // its config is now, and the queue is exactly right: the change gets
+      // pushed onto whichever session attaches next, which is what makes a
+      // ConfigBar change survive an agent restart.
+      const refused = err instanceof AcpError && err.kind === 'rpc'
+      if (refused) {
+        if (previous !== undefined) session.applyLocalConfigValue(configId, previous)
+        delete session.pendingConfigChanges[configId]
+      } else {
+        session.pendingConfigChanges[configId] = value
+      }
       this.persist()
     }
   }

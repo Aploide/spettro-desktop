@@ -3,13 +3,59 @@
 // Dispatches a transcript entry to the right renderer: message bubbles for
 // user/assistant/notice, a collapsible panel for streamed reasoning, and a
 // card (or sub-agent card) for tool calls.
+//
+// Since the transcript is folded before it is drawn (orchestration.ts), the
+// unit ChatView actually hands us is a *row*, not an item: a row can be a
+// plain transcript entry, a whole workflow / swarm run that swallowed its
+// members, or a lone sub-agent that swallowed the tools it ran. Keeping that
+// second dispatch here rather than in ChatView is deliberate — ChatView is
+// about layout, and the question "what does this row look like" already has
+// exactly one home.
 
 import { useState } from 'react'
 import type { JSX } from 'react'
 import type { ChatMessage, TranscriptItem } from '@shared/model'
 import { MarkdownText } from './MarkdownText'
-import { Icon, ToolCallView } from './ToolCallView'
+import { Icon, SubAgentCallView, ToolCallView } from './ToolCallView'
+import { subAgentCall } from './toolPresentation'
+import type { MemberCall, TranscriptRow } from './orchestration'
+import { SwarmCard } from './SwarmCard'
+import { WorkflowCard } from './WorkflowCard'
 import './transcript.css'
+
+/**
+ * One row of the folded transcript.
+ *
+ * A run row is the card; the members and nested tool calls it absorbed are
+ * gone from the flat list and only exist inside it. An agent row is a
+ * delegation nobody claimed — a bare `agent` call outside any run — and it
+ * still carries the tools that sub-agent ran, so it renders as the ordinary
+ * sub-agent card with those folded in.
+ */
+export function TranscriptRowView({ row }: { row: TranscriptRow }): JSX.Element {
+  switch (row.kind) {
+    case 'item':
+      return <TranscriptItemView item={row.item} />
+    case 'run':
+      return row.run.kind === 'workflow' ? (
+        <WorkflowCard run={row.run} />
+      ) : (
+        <SwarmCard run={row.run} />
+      )
+    case 'agent':
+      return <StandaloneAgentRow member={row.member} />
+  }
+}
+
+/** A sub-agent that belongs to no run. `groupTranscript` only ever builds a
+ *  member from a call `subAgentCall` recognised, but the parse is re-run here
+ *  for the types, and a null falls back to the generic tool card rather than
+ *  dropping the row. */
+function StandaloneAgentRow({ member }: { member: MemberCall }): JSX.Element {
+  const call = subAgentCall(member.tool)
+  if (call === null) return <ToolCallView tool={member.tool} />
+  return <SubAgentCallView tool={member.tool} call={call} children={member.children} />
+}
 
 export function TranscriptItemView({ item }: { item: TranscriptItem }): JSX.Element {
   if (item.kind === 'tool') return <ToolCallView tool={item.tool} />

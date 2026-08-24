@@ -15,11 +15,52 @@
   background: var(--canvas);
 }
 
+/* Transcript + live panel share one row, so the panel is a column beside the
+   conversation rather than a sheet over it — it can never reach the composer
+   or the terminal drawer, which live below this row. */
+.chat-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
+
 .chat-transcript {
   flex: 1;
   min-height: 0;
+  min-width: 0;
   overflow-y: auto;
   overflow-x: hidden;
+}
+
+/* The live orchestration column (OrchestrationPanel.tsx renders `.orp`
+   inside it, and asks for a definite height to resolve its own height: 100%).
+
+   It stays mounted whether or not there is anything live, and collapses on
+   :empty — the panel keeps a just-finished run around for a few seconds and
+   that settle can only render if its column still exists. Collapsing is a
+   width transition rather than `display: none` so the transcript's centred
+   measure slides into place instead of snapping. */
+.chat-orchestration {
+  flex: none;
+  align-self: stretch;
+  width: clamp(260px, 26vw, 340px);
+  min-width: 0;
+  height: 100%;
+  overflow: hidden;
+  border-left: 1px solid var(--hairline);
+  transition: width 0.22s ease;
+}
+
+.chat-orchestration:empty {
+  width: 0;
+  border-left-color: transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-orchestration {
+    transition: none;
+  }
 }
 
 /* Content column capped at 820px and recentered — readable measure on wide
@@ -41,7 +82,32 @@
 }
 
 .chat-run-ticker {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-sm);
   padding: var(--sp-xs) 0;
+}
+
+/* The offer to reopen a panel the user closed: quiet, but present for as long
+   as something is actually running. */
+.chat-live-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px var(--sp-sm);
+  border-radius: var(--rad-lg);
+  border: 1px solid var(--hairline);
+  background: var(--surface-raised);
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.chat-live-chip:hover {
+  background: color-mix(in srgb, var(--surface-raised) 85%, var(--text-primary));
+  color: var(--text-primary);
 }
 
 .chat-divider {
@@ -545,6 +611,80 @@
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 160px;
+}
+
+/* Ultra: the only chip that is not a preference. Off, it is quieter than a
+   plain boolean — an amber hairline and nothing else — so an armed swarm is
+   unmistakable against it. On, it fills with --mode-yellow and glows, and the
+   glyph fills with it. Locked (Permission is "Ask first") it keeps its shape
+   and loses its colour: unavailable, not absent. */
+.config-chip--ultra {
+  color: var(--mode-yellow);
+  border-color: color-mix(in srgb, var(--mode-yellow) 40%, var(--hairline));
+  background: color-mix(in srgb, var(--mode-yellow) 8%, var(--surface-raised));
+}
+
+.config-chip--ultra:hover {
+  background: color-mix(in srgb, var(--mode-yellow) 16%, var(--surface-raised));
+}
+
+/* The --mode-* palette is declared once and never re-declared for the light
+   scheme, so amber-as-*text* is a dark-mode colour wearing a token's name:
+   #f59e0b reads 8:1 on the dark chip and 2.1:1 on the white one, where the
+   off-state Ultra label goes ghostly. Deepening it toward the text colour
+   inverts with the scheme and keeps it amber rather than brown; the border
+   and the tinted fill still carry the raw palette value, so the chip's colour
+   identity is unchanged. Placed above the --ultra-on and --locked rules on
+   purpose: both of those set their own colour and must still win.
+   (No dark override — dark is where the raw value already works.) */
+@media (prefers-color-scheme: light) {
+  .config-chip--ultra {
+    color: color-mix(in srgb, var(--mode-yellow) 70%, var(--text-primary));
+  }
+}
+
+/* Idle Ultra is amber-on-dark like any other chip; armed is amber, full stop.
+   The first attempt filled it solid amber with a 3px glow ring, which made it
+   half again the visual weight of every neighbour and — because .config-bar is
+   a scroll container — pushed the ring outside the bar, where it was clipped
+   mid-glow. A chip that arms itself by growing out of its own bar looks
+   broken. The second attempt over-corrected into a tint so close to the idle
+   state that the two were hard to tell apart, which is worse: this control
+   changes what a turn does, and "is it on?" must be answerable at a glance.
+   So: the fill inverts, the label goes dark, and the chip stays exactly the
+   size it was. No shadow, nothing outside the border box. */
+.config-chip--ultra-on,
+.config-chip--ultra-on:hover {
+  background: var(--mode-yellow);
+  border-color: var(--mode-yellow);
+  /* Amber is light in both schemes, so the label is dark on it. --canvas is
+     dark in dark mode and near-white in light, which is backwards here;
+     #1a1205 is a fixed near-black that stays legible on amber either way. */
+  color: #1a1205;
+  font-weight: 600;
+}
+
+.config-chip--ultra-on:hover {
+  background: color-mix(in srgb, var(--mode-yellow) 86%, #fff);
+  border-color: color-mix(in srgb, var(--mode-yellow) 86%, #fff);
+}
+
+.config-chip--locked,
+.config-chip--locked:hover {
+  color: var(--text-secondary);
+  border-color: var(--hairline);
+  background: var(--surface-raised);
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.config-chip--ultra-on .config-chip-bolt {
+  filter: drop-shadow(0 0 4px color-mix(in srgb, var(--mode-yellow) 55%, transparent));
+}
+
+.config-chip-lock {
+  opacity: 0.8;
+  margin-left: 1px;
 }
 
 .config-chip-chevron {

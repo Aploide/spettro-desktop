@@ -28,7 +28,14 @@ import {
   type ModelEntry,
   type ModelsList,
   type ProviderEntry,
-  type ProvidersList
+  type ProvidersList,
+  type WorkflowInfo,
+  type WorkflowList,
+  type WorkflowPhaseInfo,
+  type WorkflowRunInfo,
+  type WorkflowScope,
+  type WorkflowSource,
+  type WorkflowValidation
 } from '../../shared/extensions'
 import { arrayValue, boolValue, intValue, objectValue, stringValue } from './parse'
 
@@ -100,6 +107,52 @@ export class SpettroExtensions {
 
   logout(): Promise<AccountStatus> {
     return this.call(ExtensionMethod.accountLogout, {}, decodeAccountStatus)
+  }
+
+  // MARK: Workflows
+  //
+  // Every call carries the chat's ACP session id rather than a path, so the
+  // CLI resolves the project the same way it does for a prompt and a script
+  // can never land in the wrong repo. An unknown session id is an error there,
+  // not a quiet fall back to the process cwd.
+
+  listWorkflows(sessionId: string): Promise<WorkflowList> {
+    return this.call(ExtensionMethod.workflowList, { sessionId }, decodeWorkflowList)
+  }
+
+  readWorkflow(sessionId: string, name: string): Promise<WorkflowSource> {
+    return this.call(ExtensionMethod.workflowRead, { sessionId, name }, decodeWorkflowSource)
+  }
+
+  /** Saves and returns the *parsed* header: the script is the source of truth
+   *  for the phase list, not whatever the editor was showing. */
+  writeWorkflow(
+    sessionId: string,
+    name: string,
+    scope: WorkflowScope,
+    script: string
+  ): Promise<WorkflowInfo> {
+    return this.call(
+      ExtensionMethod.workflowWrite,
+      { sessionId, name, scope, script },
+      decodeWorkflowInfo
+    )
+  }
+
+  deleteWorkflow(sessionId: string, name: string, scope: WorkflowScope): Promise<boolean> {
+    return this.call(
+      ExtensionMethod.workflowDelete,
+      { sessionId, name, scope },
+      (v) => boolValue(objectValue(v)?.['deleted']) ?? false
+    )
+  }
+
+  validateWorkflow(sessionId: string, script: string): Promise<WorkflowValidation> {
+    return this.call(ExtensionMethod.workflowValidate, { sessionId, script }, decodeWorkflowValidation)
+  }
+
+  listWorkflowRuns(sessionId: string, limit = 50): Promise<WorkflowRunInfo[]> {
+    return this.call(ExtensionMethod.workflowRuns, { sessionId, limit }, decodeWorkflowRuns)
   }
 
   // MARK: Providers
@@ -329,4 +382,87 @@ export function decodeLocalProbe(value: JSONValue): LocalProbeResult {
     name: stringValue(obj['name']) ?? endpoint,
     models: decodeModels(obj['models'])
   }
+}
+
+// ---------------------------------------------------------------------------
+// Workflow decoders
+//
+// Lenient in the same way the rest of this file is: an older CLI that predates
+// a field should render with a sensible blank rather than fail the call. The
+// one field worth being careful with is `error`, which is null when absent —
+// "" would read as "checked and fine" for a script nobody checked.
+// ---------------------------------------------------------------------------
+
+function decodeWorkflowPhases(value: JSONValue | undefined): WorkflowPhaseInfo[] {
+  return (arrayValue(value) ?? []).flatMap((entry) => {
+    const obj = objectValue(entry)
+    const title = obj ? stringValue(obj['title']) : null
+    if (title === null) return []
+    return [{ title, detail: stringValue(obj?.['detail'] as JSONValue) ?? '' }]
+  })
+}
+
+function decodeScope(value: JSONValue | undefined): WorkflowScope {
+  return stringValue(value) === 'global' ? 'global' : 'project'
+}
+
+export function decodeWorkflowInfo(value: JSONValue): WorkflowInfo {
+  const obj = objectValue(value) ?? {}
+  const name = stringValue(obj['name']) ?? ''
+  return {
+    name,
+    path: stringValue(obj['path']) ?? '',
+    scope: decodeScope(obj['scope']),
+    description: stringValue(obj['description']) ?? '',
+    whenToUse: stringValue(obj['whenToUse']) ?? '',
+    phases: decodeWorkflowPhases(obj['phases']),
+    error: stringValue(obj['error'])
+  }
+}
+
+export function decodeWorkflowList(value: JSONValue): WorkflowList {
+  const obj = objectValue(value) ?? {}
+  return {
+    workflows: (arrayValue(obj['workflows']) ?? []).map(decodeWorkflowInfo),
+    searchPaths: (arrayValue(obj['searchPaths']) ?? []).flatMap((p) => {
+      const s = stringValue(p)
+      return s === null ? [] : [s]
+    }),
+    cwd: stringValue(obj['cwd']) ?? ''
+  }
+}
+
+export function decodeWorkflowSource(value: JSONValue): WorkflowSource {
+  const obj = objectValue(value) ?? {}
+  return { ...decodeWorkflowInfo(value), script: stringValue(obj['script']) ?? '' }
+}
+
+export function decodeWorkflowValidation(value: JSONValue): WorkflowValidation {
+  const obj = objectValue(value) ?? {}
+  return {
+    // A reply that omits `ok` entirely is not a pass. Defaulting to true would
+    // let a decoding slip read as a clean compile and save a broken script.
+    ok: boolValue(obj['ok']) ?? false,
+    error: stringValue(obj['error']),
+    name: stringValue(obj['name']) ?? '',
+    description: stringValue(obj['description']) ?? '',
+    whenToUse: stringValue(obj['whenToUse']) ?? '',
+    phases: decodeWorkflowPhases(obj['phases'])
+  }
+}
+
+export function decodeWorkflowRuns(value: JSONValue): WorkflowRunInfo[] {
+  const obj = objectValue(value) ?? {}
+  return (arrayValue(obj['runs']) ?? []).flatMap((entry) => {
+    const row = objectValue(entry)
+    const runId = row ? stringValue(row['runId']) : null
+    if (runId === null) return []
+    return [
+      {
+        runId,
+        dir: stringValue(row?.['dir'] as JSONValue) ?? '',
+        modifiedAt: intValue(row?.['modifiedAt'] as JSONValue) ?? 0
+      }
+    ]
+  })
 }

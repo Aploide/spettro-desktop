@@ -3,15 +3,48 @@
 // as a chip with a popover menu (grouped options get section headers);
 // booleans render as a toggle chip. Fully data-driven — whatever the CLI
 // advertises shows up without code changes.
+//
+// Ultra is the one option that gets a look of its own, because it is the one
+// option that changes what a turn *is*: everything else picks a model or a
+// mode, Ultra fans a prompt out across a swarm of parallel sub-agents. Drawn
+// as an anonymous boolean beside "Auto-compact" it reads as a preference, so
+// here it is amber and filled when armed — the most charged thing in the bar.
+//
+// It is also the one option the agent can refuse. A swarm runs many agents at
+// once and per-action approval prompts would flood the client, so the CLI
+// rejects enabling Ultra while Permission is "Ask first"
+// (internal/acp/config_options.go). The chip shows that as an unavailable
+// control with the reason attached rather than hiding itself: a control that
+// disappears when you are not allowed to use it is a control nobody ever
+// learns exists. The special-casing keys off the advertised option ids only —
+// if the CLI stops sending `ultra`, the bar simply stops drawing it.
 
 import { useCallback, useRef, useState } from 'react'
+import type { JSX } from 'react'
 import type { ACPConfigChoice, ACPConfigGroup, ACPConfigOption } from '@shared/acp'
 import type { ChatDetail } from '@shared/model'
 import { call } from '@renderer/state/store'
 import { modeColor } from '@renderer/design/theme'
 import Popover from '@renderer/views/common/Popover'
 
+/** The CLI's option ids (internal/acp/config_options.go). */
+const ULTRA_ID = 'ultra'
+const PERMISSION_ID = 'permission'
+/** The permission level a swarm cannot run under. */
+const ASK_FIRST = 'ask-first'
+
+/** Why the Ultra chip is unavailable — the CLI's own rejection text, so the
+ *  tooltip and the notice the agent sends say the same thing. */
+const ULTRA_LOCKED_REASON =
+  'Ultra requires the Restricted or YOLO permission level — change Permission first'
+
 export default function ConfigBar({ chat }: { chat: ChatDetail }): JSX.Element {
+  // Read the sibling permission select rather than remembering a level of our
+  // own: the two chips sit in the same bar and must never disagree.
+  const permission = chat.configOptions.find((o) => o.id === PERMISSION_ID)
+  const ultraLocked =
+    permission?.kind.type === 'select' && permission.kind.currentValue === ASK_FIRST
+
   return (
     <div className="config-bar">
       {chat.configOptions.map((option) =>
@@ -21,6 +54,14 @@ export default function ConfigBar({ chat }: { chat: ChatDetail }): JSX.Element {
             option={option}
             kind={option.kind}
             onSelect={(value) => void call('setSelectOption', chat.id, option.id, value)}
+          />
+        ) : option.id === ULTRA_ID ? (
+          <UltraChip
+            key={option.id}
+            option={option}
+            isOn={option.kind.currentValue}
+            locked={ultraLocked && !option.kind.currentValue}
+            onToggle={(value) => void call('setBoolOption', chat.id, option.id, value)}
           />
         ) : (
           <BooleanChip
@@ -156,6 +197,58 @@ function BooleanChip({
 }
 
 // ---------------------------------------------------------------------------
+// Ultra chip
+// ---------------------------------------------------------------------------
+
+/**
+ * The Ultra toggle: same capsule as every other chip, amber and filled when
+ * armed so the swarm never runs unannounced.
+ *
+ * Locked is `aria-disabled`, not `disabled`. A `disabled` button in Chromium
+ * swallows the pointer events its own tooltip needs, which would leave the
+ * user with a dead control and no explanation — the entire point of showing
+ * it. So the chip stays focusable and hoverable, carries the reason in its
+ * title, and simply does not fire.
+ *
+ * Turning Ultra *off* is never locked: the gate only exists to stop a swarm
+ * starting under per-action approvals, and a user who somehow arrived at
+ * ultra-on with Permission back on "Ask first" must be able to get out.
+ */
+function UltraChip({
+  option,
+  isOn,
+  locked,
+  onToggle
+}: {
+  option: ACPConfigOption
+  isOn: boolean
+  locked: boolean
+  onToggle: (value: boolean) => void
+}): JSX.Element {
+  const className =
+    'config-chip config-chip--ultra' +
+    (isOn ? ' config-chip--ultra-on' : '') +
+    (locked ? ' config-chip--locked' : '')
+  return (
+    <button
+      type="button"
+      className={className}
+      aria-disabled={locked}
+      aria-pressed={isOn}
+      title={locked ? ULTRA_LOCKED_REASON : (option.description ?? option.name)}
+      onClick={() => {
+        if (locked) return
+        onToggle(!isOn)
+      }}
+    >
+      <BoltIcon filled={isOn} />
+      <span className="config-chip-label">{option.name}</span>
+      {locked && <LockIcon />}
+    </button>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Icons (symbol(for:) port + chrome)
 // ---------------------------------------------------------------------------
 
@@ -239,9 +332,18 @@ function CheckIcon(): JSX.Element {
   )
 }
 
+function LockIcon(): JSX.Element {
+  return (
+    <svg className="config-chip-lock" width="10" height="10" viewBox="0 0 16 16" fill="none" aria-hidden>
+      <rect x="3.5" y="7" width="9" height="7" rx="1.6" stroke="currentColor" strokeWidth="1.4" />
+      <path d="M5.6 7V5.2a2.4 2.4 0 0 1 4.8 0V7" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+    </svg>
+  )
+}
+
 function BoltIcon({ filled }: { filled: boolean }): JSX.Element {
   return (
-    <svg width="13" height="13" viewBox="0 0 16 16" aria-hidden>
+    <svg className="config-chip-bolt" width="13" height="13" viewBox="0 0 16 16" aria-hidden>
       <path
         d="M9.2 1.5 3.5 9h3.4l-.9 5.5L11.8 7H8.4l.8-5.5Z"
         fill={filled ? 'currentColor' : 'none'}

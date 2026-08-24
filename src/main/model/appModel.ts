@@ -39,10 +39,21 @@ import type {
   RemoteHostState,
   SubscriptionState
 } from '../../shared/model'
-import type { ConnectResult, LocalProbeResult, LoginStatus } from '../../shared/extensions'
+import type {
+  ConnectResult,
+  LocalProbeResult,
+  LoginStatus,
+  WorkflowInfo,
+  WorkflowList,
+  WorkflowRunInfo,
+  WorkflowScope,
+  WorkflowSource,
+  WorkflowValidation
+} from '../../shared/extensions'
+import { EMPTY_WORKFLOW_LIST } from '../../shared/extensions'
 import type { UpdateState } from '../../shared/update'
 import { ExtensionMethod } from '../../shared/extensions'
-import { AcpAgent, AcpConnection } from '../acp'
+import { AcpAgent, AcpConnection, AcpError } from '../acp'
 import { ChatSession, type ConfigValue } from './chatSession'
 import { CLIInstaller } from './cliInstaller'
 import { locateCLI } from './cliLocator'
@@ -219,7 +230,8 @@ export class AppModel extends EventEmitter {
       cli: this.cli,
       agentVersion: this.agentVersion,
       selectedSessionId: this.selectedSessionId,
-      sessions: this.sessions.map((s) => s.summary()),
+      // Scratch runs are the studio's business, not the sidebar's.
+      sessions: this.sessions.filter((s) => !s.isScratch).map((s) => s.summary()),
       banner: this.banner,
       installLog: [...this.installLog],
       agentLog: [...this.agentLog],
@@ -329,7 +341,9 @@ export class AppModel extends EventEmitter {
   private persist(): void {
     // Sessions that have never received a prompt (and never failed to
     // connect) are not conversations — don't store them.
-    this.store.save(this.sessions.filter((s) => !s.isPristine).map((s) => s.snapshot()))
+    this.store.save(
+      this.sessions.filter((s) => !s.isPristine && !s.isScratch).map((s) => s.snapshot())
+    )
     this.emitAppState()
   }
 
@@ -1022,12 +1036,135 @@ export class AppModel extends EventEmitter {
   }
 
   // -------------------------------------------------------------------------
+  // Workflows (`_spettro/workflow/*`)
+  //
+  // Scoped by chat rather than globally: a workflow lives in the repo it
+  // automates, so "which workflows exist" is a question about a project, and
+  // the chat is what knows which project. Each call resolves the chat's live
+  // ACP session and lets the CLI derive the folder from it — the app never
+  // sends a path, so a script cannot land in the wrong repo because the two
+  // sides disagreed about the working directory.
+  //
+  // Unlike the account calls these return their result instead of folding it
+  // into app-state. The studio is one screen reading files it is about to
+  // edit; a cached copy in the global snapshot would go stale the moment the
+  // TUI, or the agent itself, wrote one.
+  // -------------------------------------------------------------------------
+
+  /** The chat's live ACP session, or null when the chat is cold. */
+  private workflowSession(chatId: string): string | null {
+    const session = this.sessionById(chatId)
+    if (!session) return null
+    return this.liveACPSessionId(session)
+  }
+
+  async listWorkflows(chatId: string): Promise<WorkflowList> {
+    const client = this.extensions.client
+    const acpId = this.workflowSession(chatId)
+    // A cold chat has no session to scope by. An empty list is the honest
+    // answer — the alternative is guessing at a project.
+    if (!client || !acpId) return EMPTY_WORKFLOW_LIST
+    return client.listWorkflows(acpId)
+  }
+
+  async readWorkflow(chatId: string, name: string): Promise<WorkflowSource | null> {
+    const client = this.extensions.client
+    const acpId = this.workflowSession(chatId)
+    if (!client || !acpId) return null
+    return client.readWorkflow(acpId, name)
+  }
+
+  async writeWorkflow(
+    chatId: string,
+    name: string,
+    scope: WorkflowScope,
+    script: string
+  ): Promise<WorkflowInfo | null> {
+    const client = this.extensions.client
+    const acpId = this.workflowSession(chatId)
+    if (!client || !acpId) return null
+    return client.writeWorkflow(acpId, name, scope, script)
+  }
+
+  async deleteWorkflow(chatId: string, name: string, scope: WorkflowScope): Promise<boolean> {
+    const client = this.extensions.client
+    const acpId = this.workflowSession(chatId)
+    if (!client || !acpId) return false
+    return client.deleteWorkflow(acpId, name, scope)
+  }
+
+  async validateWorkflow(chatId: string, script: string): Promise<WorkflowValidation | null> {
+    const client = this.extensions.client
+    const acpId = this.workflowSession(chatId)
+    if (!client || !acpId) return null
+    return client.validateWorkflow(acpId, script)
+  }
+
+  /**
+   * Runs a saved workflow in a throwaway chat and returns its id.
+   *
+   * The run goes through an ordinary prompt turn rather than some private
+   * channel, because that is what a workflow run actually is: the CLI rewrites
+   * "/workflows run <name>" into a turn that calls the workflow tool
+   * (internal/acp/bridge.go), and everything downstream — the tool calls, the
+   * phase tree, the sub-agents — is machinery the app already renders. A second
+   * path would be a second thing to keep correct.
+   *
+   * What it does not do is run in the user's conversation. Iterating on a
+   * script means running it over and over and throwing most of the results
+   * away, so each run gets a scratch session: same project, same config, no
+   * sidebar entry, never written to disk.
+   */
+  runWorkflow(chatId: string, name: string): string | null {
+    const origin = this.sessionById(chatId)
+    if (!origin) return null
+    const scratch = new ChatSession(origin.projectPath, `Workflow · ${name}`)
+    scratch.isScratch = true
+    // Inherit the originating chat's config so a test run uses the model and
+    // permission level the user is actually working with — a workflow that
+    // only passes under different settings has not been tested.
+    scratch.configOptions = origin.configOptions
+    scratch.commands = origin.commands
+    this.attachSessionCallbacks(scratch)
+    this.sessions.unshift(scratch)
+    this.pushEvent({ type: 'chat-reset', chat: scratch.detail() })
+    // Deliberately not emitAppState(): a scratch chat must not disturb the
+    // sidebar or steal the selection out from under the studio. send() takes
+    // care of attaching a live ACP session on its way through runTurn.
+    this.send(scratch.id, `/workflows run ${name}`, [])
+    return scratch.id
+  }
+
+  /** Drops a scratch chat once the studio is done with it. Anything still
+   *  running is cancelled first, so closing the editor cannot leave a fan-out
+   *  burning tokens against a session nobody is watching. */
+  discardScratchChat(chatId: string): void {
+    const session = this.sessionById(chatId)
+    if (!session || !session.isScratch) return
+    if (session.isBusy) this.cancel(chatId)
+    this.sessions = this.sessions.filter((s) => s.id !== chatId)
+    const acpId = session.acpSessionId
+    if (acpId) this.sessionsByACPID.delete(acpId)
+    this.pushEvent({ type: 'chat-removed', chatId })
+  }
+
+  async listWorkflowRuns(chatId: string): Promise<WorkflowRunInfo[]> {
+    const client = this.extensions.client
+    const acpId = this.workflowSession(chatId)
+    if (!client || !acpId) return []
+    return client.listWorkflowRuns(acpId)
+  }
+
+  // -------------------------------------------------------------------------
   // Config options
   // -------------------------------------------------------------------------
 
   async setConfigValue(chatId: string, configId: string, value: ConfigValue): Promise<void> {
     const session = this.sessionById(chatId)
     if (!session) return
+    // What the agent last told us this option was — the value to fall back to
+    // if it turns out the agent won't take the new one.
+    const previous = session.displayedConfigValues()[configId]
     // Reflect the choice in the UI immediately; the agent is synced below,
     // or when a live session attaches if there isn't one yet.
     session.applyLocalConfigValue(configId, value)
@@ -1047,10 +1184,30 @@ export class AppModel extends EventEmitter {
       this.persist()
     } catch (err) {
       session.appendNotice(`Couldn't change ${configId}: ${errMessage(err)}`, true)
-      // The chip already shows the new value but the agent never took it.
-      // Queue it so the pre-prompt sync retries before the next turn runs —
-      // otherwise the user would prompt against settings they can't see.
-      session.pendingConfigChanges[configId] = value
+      // Two very different failures arrive here, and they want opposite
+      // treatment.
+      //
+      // A *refusal* — the agent answered, and the answer was no (a JSON-RPC
+      // error; kind 'rpc'). Ultra under the "Ask first" permission level is
+      // the canonical case: the CLI will reject it every single time until
+      // Permission changes. Retrying that before the next turn achieves
+      // nothing except another notice, forever, and leaving the optimistic
+      // value on screen is a lie about what the agent is running with — so we
+      // roll the chip back to the value the agent actually reports and drop
+      // the change on the floor.
+      //
+      // A *transport* failure — the agent never answered at all (the process
+      // died, the pipe broke, the reply didn't decode). We have no idea what
+      // its config is now, and the queue is exactly right: the change gets
+      // pushed onto whichever session attaches next, which is what makes a
+      // ConfigBar change survive an agent restart.
+      const refused = err instanceof AcpError && err.kind === 'rpc'
+      if (refused) {
+        if (previous !== undefined) session.applyLocalConfigValue(configId, previous)
+        delete session.pendingConfigChanges[configId]
+      } else {
+        session.pendingConfigChanges[configId] = value
+      }
       this.persist()
     }
   }
@@ -1296,7 +1453,9 @@ export class AppModel extends EventEmitter {
     this.extensions.dispose()
     this.subscriptionStore.stop()
     this.updates.shutdown()
-    this.store.save(this.sessions.filter((s) => !s.isPristine).map((s) => s.snapshot()))
+    this.store.save(
+      this.sessions.filter((s) => !s.isPristine && !s.isScratch).map((s) => s.snapshot())
+    )
   }
 }
 

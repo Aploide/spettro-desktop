@@ -22,6 +22,17 @@ export const ExtensionMethod = {
   modelsList: '_spettro/models/list',
   modelsFavorite: '_spettro/models/favorite',
 
+  // Workflow authoring (CLI extensions v4). Core ACP can carry a workflow
+  // *run* — it becomes tool calls — but has no vocabulary for writing one,
+  // checking whether it compiles, or keeping it. See the CLI's
+  // internal/acp/ext_workflow.go.
+  workflowList: '_spettro/workflow/list',
+  workflowRead: '_spettro/workflow/read',
+  workflowWrite: '_spettro/workflow/write',
+  workflowDelete: '_spettro/workflow/delete',
+  workflowValidate: '_spettro/workflow/validate',
+  workflowRuns: '_spettro/workflow/runs',
+
   /** Agent → client: pushed when account state changes (notably as a
    *  device-flow login advances). */
   accountUpdate: '_spettro/account/update'
@@ -260,3 +271,67 @@ export const EMPTY_EXTENSIONS: ExtensionsState = {
   busy: false,
   error: null
 }
+
+// ---------------------------------------------------------------------------
+// Workflows
+// ---------------------------------------------------------------------------
+
+/** A phase a workflow's `meta` declares, before anything has run. */
+export interface WorkflowPhaseInfo {
+  title: string
+  detail: string
+}
+
+/**
+ * A saved workflow script.
+ *
+ * `error` is set when the file exists but does not compile. That is
+ * deliberately not the same as the call failing: a broken script is still
+ * listable, still readable and still the thing you were about to edit, and a
+ * listing that hides it just moves the discovery to whoever runs it next.
+ */
+export interface WorkflowInfo {
+  name: string
+  path: string
+  /** 'project' — `<repo>/.spettro/workflows` — or 'global' — `~/.spettro/…`. */
+  scope: WorkflowScope
+  description: string
+  whenToUse: string
+  phases: WorkflowPhaseInfo[]
+  error: string | null
+}
+
+export type WorkflowScope = 'project' | 'global'
+
+export interface WorkflowList {
+  workflows: WorkflowInfo[]
+  /** Where the CLI looks, project first — also where it would save. Shown so
+   *  a project with no workflow folder yet can still be offered one. */
+  searchPaths: string[]
+  cwd: string
+}
+
+export interface WorkflowSource extends WorkflowInfo {
+  script: string
+}
+
+/** The editor's live feedback. `ok: false` is an ordinary answer — an editor
+ *  validates on every keystroke and most keystrokes leave a script mid-edit. */
+export interface WorkflowValidation {
+  ok: boolean
+  error: string | null
+  name: string
+  description: string
+  whenToUse: string
+  phases: WorkflowPhaseInfo[]
+}
+
+/** A past run's transcript directory — what makes resume possible. */
+export interface WorkflowRunInfo {
+  runId: string
+  dir: string
+  /** ms since epoch. */
+  modifiedAt: number
+}
+
+export const EMPTY_WORKFLOW_LIST: WorkflowList = { workflows: [], searchPaths: [], cwd: '' }

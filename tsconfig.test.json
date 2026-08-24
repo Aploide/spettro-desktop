@@ -1,0 +1,32 @@
+{
+  // The tests deliberately reach across both process boundaries — a fold in
+  // the renderer, an upsert in the main process, a decoder on the seam — so
+  // this config spans both source trees rather than mirroring the app's
+  // main/renderer split. It is not `composite`: nothing builds from it, it
+  // exists only so `npm run typecheck` fails when a test stops compiling
+  // against the code it is testing.
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx",
+    "types": ["node"],
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "forceConsistentCasingInFileNames": true,
+    "baseUrl": ".",
+    "paths": {
+      "@shared/*": ["src/shared/*"],
+      "@renderer/*": ["src/renderer/src/*"],
+      "@main/*": ["src/main/*"]
+    }
+  },
+  // Only the tests are listed. TypeScript pulls in whatever they import, and
+  // the app's own sources are already covered by the other two configs — so
+  // this checks the tests against the code without re-reporting the code.
+  "include": ["tests/**/*", "src/preload/index.d.ts", "vitest.config.ts"]
+}

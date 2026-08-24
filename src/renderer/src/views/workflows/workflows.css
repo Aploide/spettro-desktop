@@ -1,0 +1,482 @@
+/* Workflow studio. Every colour is a design token or a color-mix over one, so
+   the screen follows the light/dark override in theme.css rather than needing
+   a second set of rules. */
+
+.wfs {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: var(--canvas);
+  color: var(--text-primary);
+}
+
+.wfs-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-sm);
+  padding: var(--sp-md) var(--sp-lg);
+  border-bottom: 1px solid var(--hairline);
+  flex: 0 0 auto;
+}
+
+.wfs-head h2 {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0;
+  letter-spacing: -0.01em;
+}
+
+.wfs-cwd {
+  font-size: 11px;
+  color: var(--text-secondary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  max-width: 46ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wfs-spacer {
+  flex: 1 1 auto;
+}
+
+.wfs-busy {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.wfs-body {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* ---------------------------------------------------------------- list */
+
+.wfs-list {
+  flex: 0 0 244px;
+  width: 244px;
+  border-right: 1px solid var(--hairline);
+  overflow-y: auto;
+  padding: var(--sp-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.wfs-new {
+  border: 1px dashed var(--hairline);
+  background: transparent;
+  color: var(--text-secondary);
+  border-radius: var(--rad-sm);
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  text-align: left;
+  margin-bottom: var(--sp-xs);
+}
+
+.wfs-new:hover {
+  color: var(--text-primary);
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+}
+
+.wfs-row {
+  display: flex;
+  align-items: flex-start;
+  border-radius: var(--rad-sm);
+}
+
+.wfs-row:hover {
+  background: color-mix(in srgb, var(--text-primary) 6%, transparent);
+}
+
+.wfs-row--active {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+.wfs-row--draft {
+  padding: 8px 10px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
+.wfs-row-open {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: auto auto auto 1fr;
+  gap: 2px 6px;
+  align-items: center;
+  background: none;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  padding: 8px 10px;
+  cursor: pointer;
+}
+
+.wfs-row-name {
+  font-size: 12px;
+  font-weight: 600;
+  grid-column: 1;
+}
+
+.wfs-row-desc,
+.wfs-row-phases {
+  grid-column: 1 / -1;
+  font-size: 11px;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wfs-row-phases {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  opacity: 0.75;
+}
+
+.wfs-row-delete {
+  flex: 0 0 auto;
+  background: none;
+  border: 0;
+  color: var(--text-secondary);
+  padding: 8px;
+  cursor: pointer;
+  opacity: 0;
+}
+
+.wfs-row:hover .wfs-row-delete {
+  opacity: 1;
+}
+
+.wfs-row-delete:hover {
+  color: var(--diff-removed);
+}
+
+.wfs-pill {
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text-primary) 12%, transparent);
+  color: var(--text-secondary);
+}
+
+.wfs-pill--bad {
+  background: color-mix(in srgb, var(--diff-removed) 22%, transparent);
+  color: var(--diff-removed);
+}
+
+.wfs-list-empty {
+  font-size: 11px;
+  color: var(--text-secondary);
+  padding: var(--sp-sm) 10px;
+  margin: 0;
+}
+
+/* ---------------------------------------------------------------- main */
+
+.wfs-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: var(--sp-md) var(--sp-lg) var(--sp-lg);
+  gap: var(--sp-sm);
+  overflow-y: auto;
+}
+
+.wfs-main--empty {
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  color: var(--text-secondary);
+  gap: var(--sp-md);
+}
+
+.wfs-main--empty h3 {
+  margin: 0;
+  font-size: 15px;
+  color: var(--text-primary);
+}
+
+.wfs-main--empty p {
+  margin: 0;
+  max-width: 52ch;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.wfs-paths code {
+  font-size: 11px;
+  background: var(--surface-raised);
+  padding: 2px 5px;
+  border-radius: 4px;
+}
+
+.wfs-editor-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-sm);
+  flex: 0 0 auto;
+}
+
+.wfs-editor-name {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.wfs-scope {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.wfs-scope select {
+  font: inherit;
+  font-size: 11px;
+  color: var(--text-primary);
+  background: var(--surface-raised);
+  border: 1px solid var(--hairline);
+  border-radius: var(--rad-sm);
+  padding: 3px 6px;
+}
+
+.wfs-btn {
+  font: inherit;
+  font-size: 12px;
+  padding: 5px 12px;
+  border-radius: var(--rad-sm);
+  border: 1px solid var(--hairline);
+  background: var(--surface-raised);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.wfs-btn:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+}
+
+.wfs-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.wfs-btn--primary {
+  background: var(--accent);
+  border-color: transparent;
+  color: #fff;
+  font-weight: 600;
+}
+
+.wfs-error {
+  flex: 0 0 auto;
+  font-size: 12px;
+  padding: 8px 10px;
+  border-radius: var(--rad-sm);
+  background: color-mix(in srgb, var(--diff-removed) 14%, transparent);
+  color: var(--diff-removed);
+}
+
+/* ---------------------------------------------------------------- editor */
+
+.wfs-editor {
+  flex: 1 1 auto;
+  min-height: 260px;
+  display: flex;
+  border: 1px solid var(--hairline);
+  border-radius: var(--rad-md);
+  background: var(--surface-raised);
+  overflow: hidden;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.wfs-gutter {
+  flex: 0 0 auto;
+  padding: 10px 8px 10px 12px;
+  text-align: right;
+  color: color-mix(in srgb, var(--text-secondary) 65%, transparent);
+  background: color-mix(in srgb, var(--text-primary) 4%, transparent);
+  overflow: hidden;
+  user-select: none;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The stack is the positioning context for the mirror; both children fill it
+   completely so a scroll offset applied to one lands identically on the other. */
+.wfs-code-stack {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* Every metric that decides where a glyph lands is declared once, here, and
+   worn by both the mirror and the input. Splitting them into two rule sets is
+   how a mirror drifts a pixel at a time until the colours sit under the wrong
+   characters. */
+.wfs-code {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  padding: 10px 12px;
+  border: 0;
+  outline: none;
+  resize: none;
+  background: transparent;
+  font: inherit;
+  font-family: inherit;
+  font-size: inherit;
+  line-height: inherit;
+  letter-spacing: normal;
+  tab-size: 2;
+  white-space: pre;
+  overflow: auto;
+}
+
+.wfs-code-mirror {
+  pointer-events: none;
+  color: var(--text-primary);
+  /* The mirror must not paint its own scrollbars: the input owns scrolling and
+     a second set would both overlap and disagree. */
+  scrollbar-width: none;
+  overflow: hidden;
+}
+
+.wfs-code-input {
+  color: transparent;
+  caret-color: var(--accent);
+}
+
+/* Transparent glyphs make a selection an invisible smear unless the selected
+   text is painted back in. */
+.wfs-code-input::selection {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--accent) 40%, transparent);
+}
+
+/* Syntax colours.
+   Hue carries meaning rather than decoration: the workflow runtime's own
+   globals — agent, parallel, pipeline, phase — are the one thing this view can
+   usefully say something semantic about, so they get the accent and everything
+   else stays quiet around them. Derived from the --mode-* palette so the
+   editor belongs to the same app as the cards it writes. */
+.tok--keyword {
+  color: var(--mode-magenta);
+}
+.tok--string {
+  color: var(--mode-green);
+}
+.tok--number {
+  color: var(--mode-yellow);
+}
+.tok--comment {
+  color: var(--text-secondary);
+  font-style: italic;
+}
+.tok--builtin {
+  color: var(--mode-cyan);
+  font-weight: 600;
+}
+.tok--property {
+  color: var(--mode-blue);
+}
+.tok--punct {
+  color: var(--text-secondary);
+}
+.tok--plain {
+  color: var(--text-primary);
+}
+
+/* The --mode-* set is tuned for a dark surface; on the light editor the two
+   lightest of them wash out entirely. Deepened toward the text colour, which
+   keeps the hue and restores the contrast. */
+@media (prefers-color-scheme: light) {
+  .tok--keyword {
+    color: color-mix(in srgb, var(--mode-magenta) 55%, var(--text-primary));
+  }
+  .tok--string {
+    color: color-mix(in srgb, var(--mode-green) 45%, var(--text-primary));
+  }
+  .tok--number {
+    color: color-mix(in srgb, var(--mode-yellow) 55%, var(--text-primary));
+  }
+  .tok--builtin {
+    color: color-mix(in srgb, var(--mode-cyan) 60%, var(--text-primary));
+  }
+  .tok--property {
+    color: color-mix(in srgb, var(--mode-blue) 60%, var(--text-primary));
+  }
+}
+
+/* ---------------------------------------------------------------- verdict */
+
+.wfs-verdict {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-sm);
+  font-size: 11px;
+  color: var(--text-secondary);
+  padding: 6px 2px;
+  min-height: 24px;
+}
+
+.wfs-verdict-name {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.wfs-verdict-phases {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  opacity: 0.8;
+}
+
+.wfs-verdict--bad {
+  color: var(--diff-removed);
+}
+
+/* ---------------------------------------------------------------- run */
+
+.wfs-run {
+  flex: 0 0 auto;
+  border: 1px solid var(--hairline);
+  border-radius: var(--rad-md);
+  overflow: hidden;
+}
+
+.wfs-run-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-sm);
+  padding: 8px var(--sp-md);
+  border-bottom: 1px solid var(--hairline);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.wfs-run-body {
+  padding: var(--sp-md);
+  max-height: 420px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-sm);
+}

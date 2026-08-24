@@ -1,0 +1,335 @@
+/* Styles for the shared orchestration primitives (OrchestrationBits.tsx):
+   the progress meter, the status glyph, the counts label and the sub-agent
+   member row.
+
+   Only the pieces the cards and the side panel have in common live here, so
+   that a run looks the same wherever it is shown. Everything is expressed in
+   theme.css tokens — a workflow card is a dense, information-heavy surface,
+   and hardcoding a colour that only reads in dark mode is how it becomes
+   unreadable in light. */
+
+:root {
+  /* The muted remainder of a meter — the work not started yet. */
+  --orch-track: color-mix(in srgb, var(--text-secondary) 22%, transparent);
+}
+
+/* ------------------------------------------------------------------------- */
+/* Progress meter                                                             */
+/* ------------------------------------------------------------------------- */
+
+.orch-meter {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  width: 110px;
+  max-width: 100%;
+  vertical-align: middle;
+}
+
+.orch-meter-track {
+  display: flex;
+  width: 100%;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--orch-track);
+  overflow: hidden;
+}
+
+.orch-meter-done,
+.orch-meter-failed {
+  height: 100%;
+  flex: none;
+  transition: width 0.25s ease-out;
+}
+
+.orch-meter-done {
+  background: var(--diff-added);
+}
+
+.orch-meter-failed {
+  background: var(--diff-removed);
+}
+
+/* ------------------------------------------------------------------------- */
+/* Status glyph                                                               */
+/* ------------------------------------------------------------------------- */
+
+.orch-glyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+}
+
+.orch-glyph--done {
+  color: var(--diff-added);
+}
+
+.orch-glyph--failed {
+  color: var(--diff-removed);
+}
+
+/* ------------------------------------------------------------------------- */
+/* Counts label                                                               */
+/* ------------------------------------------------------------------------- */
+
+.orch-counts {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.orch-counts-term {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+}
+
+.orch-counts-failed {
+  color: var(--diff-removed);
+}
+
+.orch-counts-sep {
+  color: var(--tr-tertiary);
+}
+
+/* ------------------------------------------------------------------------- */
+/* Pills — small inline badges (replayed, worktree, …)                        */
+/* ------------------------------------------------------------------------- */
+
+.orch-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex: none;
+  padding: 1px 5px;
+  border-radius: 999px;
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  background: color-mix(in srgb, var(--text-secondary) 14%, transparent);
+  color: var(--text-secondary);
+}
+
+.orch-pill--replayed {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: color-mix(in srgb, var(--accent) 80%, var(--text-primary));
+}
+
+/* ------------------------------------------------------------------------- */
+/* Member row                                                                 */
+/* ------------------------------------------------------------------------- */
+
+.orch-member {
+  width: 100%;
+  border-radius: var(--rad-sm);
+  min-width: 0;
+}
+
+.orch-member:hover,
+.orch-member--expanded {
+  background: color-mix(in srgb, var(--text-secondary) 7%, transparent);
+}
+
+.orch-member-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 3px var(--sp-sm) 3px 6px;
+  background: none;
+  border: none;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+  outline: none;
+  min-width: 0;
+}
+
+.orch-member-name {
+  font-size: 12px;
+  font-weight: 600;
+  flex: none;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.orch-member-name--faint {
+  opacity: 0.62;
+}
+
+.orch-member-detail {
+  font-family: 'SF Mono', SFMono-Regular, ui-monospace, 'Cascadia Mono', 'Segoe UI Mono',
+    'JetBrains Mono', Menlo, Consolas, monospace;
+  font-size: 11.5px;
+  color: var(--tr-tertiary);
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.orch-member-tools {
+  flex: none;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--text-secondary) 14%, transparent);
+  border-radius: 999px;
+  padding: 0 5px;
+  line-height: 15px;
+}
+
+.orch-member-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-xs);
+  padding: 0 var(--sp-sm) var(--sp-sm) 22px;
+  min-width: 0;
+}
+
+.orch-member-summary {
+  border-top: 1px solid var(--hairline);
+  padding-top: var(--sp-sm);
+  font-size: 12px;
+  min-width: 0;
+}
+
+/* ------------------------------------------------------------------------- */
+/* Nested tool calls — a sub-agent's own work, under its row                  */
+/* ------------------------------------------------------------------------- */
+
+.orch-nested {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  margin-bottom: var(--sp-sm);
+  border-left: 1px solid var(--hairline);
+  padding-left: var(--sp-xs);
+}
+
+.orch-nested:last-child {
+  margin-bottom: 0;
+}
+
+/* ------------------------------------------------------------------------- */
+/* Machine output — a returned value, a structured report, a script           */
+/* ------------------------------------------------------------------------- */
+
+/* Output the agent did not write for a human (JSON from a schema'd call, a
+   script's return value) is shown as code and given a hard height ceiling:
+   the value matters, but a 300-line dump inside a card turns the transcript
+   into a scrollbar. */
+.orch-code {
+  margin: 0;
+  padding: var(--sp-sm);
+  border-radius: var(--rad-sm);
+  background: color-mix(in srgb, var(--text-secondary) 8%, transparent);
+  border: 1px solid var(--hairline);
+  font-family: 'SF Mono', SFMono-Regular, ui-monospace, 'Cascadia Mono', 'Segoe UI Mono',
+    'JetBrains Mono', Menlo, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+  white-space: pre;
+  overflow: auto;
+  max-height: 260px;
+  min-width: 0;
+}
+
+/* ------------------------------------------------------------------------- */
+/* A workflow that never started                                              */
+/* ------------------------------------------------------------------------- */
+
+/* Deliberately quieter than a run card. This is a workflow that produced
+   nothing — giving it the card's full framing would make a non-event look
+   like the run it failed to become. */
+.orch-script {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--hairline);
+  border-radius: var(--rad-md);
+  background: var(--surface-raised);
+}
+
+.orch-script--failed {
+  border-color: color-mix(in srgb, var(--diff-removed) 38%, var(--hairline));
+  background: color-mix(in srgb, var(--diff-removed) 7%, var(--surface-raised));
+}
+
+.orch-script-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-sm);
+  width: 100%;
+  padding: 6px var(--sp-sm);
+  background: none;
+  border: none;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  outline: none;
+  min-width: 0;
+}
+
+.orch-script-icon {
+  display: inline-flex;
+  flex: none;
+  color: var(--accent);
+}
+
+.orch-script-title {
+  flex: none;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+
+.orch-script-name {
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+/* The reason takes the leftover width and is clamped to one line: a failure
+   the reader has to expand something to see is a failure the row hid. */
+.orch-script-reason {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11.5px;
+  color: color-mix(in srgb, var(--diff-removed) 65%, var(--text-secondary));
+}
+
+.orch-script-spacer {
+  flex: 0 1 auto;
+}
+
+.orch-script-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-xs);
+  padding: 0 var(--sp-sm) var(--sp-sm);
+  min-width: 0;
+}
+
+.orch-script-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: var(--tr-tertiary);
+}

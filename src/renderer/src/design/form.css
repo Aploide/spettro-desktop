@@ -81,6 +81,12 @@
   width: 560px;
   height: 620px;
 }
+/* The studio is a workbench, not a dialog: it holds a file list, an editor and
+   a live run at once, so it takes the window rather than a fixed card. */
+.modal-panel--workflows {
+  width: 1080px;
+  height: 760px;
+}
 .modal-panel--local {
   width: 480px;
   height: 420px;

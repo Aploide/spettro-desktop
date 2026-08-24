@@ -105,6 +105,21 @@ export class ExtensionStores {
     }
   }
 
+  /**
+   * The typed extension client, or null when no agent is attached.
+   *
+   * Everything else on this class caches its result into the app-state
+   * snapshot, because account/provider/model state is global and every screen
+   * reads the same copy. Workflows are neither: they belong to a project, they
+   * are read and written on demand, and the answer is a file the user is about
+   * to edit. Caching that here would put a stale script in front of an editor.
+   * So the workflow calls go straight through — the store lends its client
+   * rather than owning the state.
+   */
+  get client(): SpettroExtensions | null {
+    return this.calls
+  }
+
   /** Stops the login poller. Called on shutdown. */
   dispose(): void {
     this.stopLoginLoop()

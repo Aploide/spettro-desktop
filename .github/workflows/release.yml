@@ -9,12 +9,40 @@ permissions:
   contents: write
 
 jobs:
+  # Nothing ships that has not been typechecked and tested. A release is built
+  # from a tag, which is exactly the moment nobody is watching a CI run — so
+  # the gate belongs here and not only on the pull request that preceded it.
+  # It is one job, not the CI matrix: the packaging jobs below already prove
+  # the build on each platform, and what this adds is the suite.
+  verify:
+    name: Typecheck + test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
   # Windows x64 and arm64 come out of one job on purpose. node-pty ships N-API
   # prebuilds for both, so arm64 cross-packages from an x64 runner with no
   # toolchain at all — and a single electron-builder invocation writes one
   # latest.yml describing every installer, which two separate jobs would
   # overwrite each other's copy of.
   windows:
+    needs: verify
     runs-on: windows-latest
     steps:
       - name: Checkout
@@ -54,6 +82,7 @@ jobs:
   # natively — hence one job per runner architecture rather than the single
   # cross-packaging job Windows gets.
   linux:
+    needs: verify
     strategy:
       fail-fast: false
       matrix:

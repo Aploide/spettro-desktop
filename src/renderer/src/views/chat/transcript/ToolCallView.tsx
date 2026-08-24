@@ -23,6 +23,7 @@ import {
 import { MarkdownText } from './MarkdownText'
 import { SpettroSpinner } from './RunTicker'
 import './transcript.css'
+import './orchestration.css'
 
 export function ToolCallView({ tool }: { tool: ToolCallItem }): JSX.Element {
   const call = subAgentCall(tool)
@@ -34,7 +35,7 @@ export function ToolCallView({ tool }: { tool: ToolCallItem }): JSX.Element {
 // The standard row
 // ---------------------------------------------------------------------------
 
-function ToolRow({ tool }: { tool: ToolCallItem }): JSX.Element {
+export function ToolRow({ tool }: { tool: ToolCallItem }): JSX.Element {
   const [expanded, setExpanded] = useState(false)
   const hasDetail = tool.output !== '' || tool.diffs.length > 0
   const stat = diffStat(tool)
@@ -76,7 +77,11 @@ function ToolRow({ tool }: { tool: ToolCallItem }): JSX.Element {
   )
 }
 
-function StatusIndicator({ status }: { status: ToolCallItem['status'] }): JSX.Element | null {
+export function StatusIndicator({
+  status
+}: {
+  status: ToolCallItem['status']
+}): JSX.Element | null {
   switch (status) {
     case 'pending':
     case 'in_progress':
@@ -160,18 +165,26 @@ function TruncationNote({ count }: { count: number }): JSX.Element {
  * has spun up, who it is, what it was asked to do, and — once it reports
  * back — its summary rendered as markdown.
  */
-function SubAgentCallView({
+export function SubAgentCallView({
   tool,
-  call
+  call,
+  children
 }: {
   tool: ToolCallItem
   call: SubAgentCall
+  /** The sub-agent's own tool calls, when the caller has folded them in
+   *  (ChatView does the grouping); they render above the summary. */
+  children?: ToolCallItem[]
 }): JSX.Element {
   const [expanded, setExpanded] = useState(false)
   const result = subAgentResult(tool)
   const isRunning = tool.status === 'pending' || tool.status === 'in_progress'
   const failed = tool.status === 'failed' || result?.status === 'error'
   const hasSummary = result !== null && result.summary !== ''
+  const nested = children ?? []
+  // Without children this is exactly the old `hasSummary` gate, so a plain
+  // delegation card behaves as it always did.
+  const hasBody = hasSummary || nested.length > 0
 
   return (
     <div className="tr-agent">
@@ -180,7 +193,7 @@ function SubAgentCallView({
         type="button"
         title={tool.title}
         onClick={() => {
-          if (hasSummary) setExpanded((e) => !e)
+          if (hasBody) setExpanded((e) => !e)
         }}
       >
         <span className="tr-agent-icon">
@@ -207,15 +220,22 @@ function SubAgentCallView({
         ) : (
           <span className="tr-status-dot" />
         )}
-        {hasSummary && (
+        {hasBody && (
           <span className={`tr-chevron${expanded ? ' tr-chevron--open' : ''}`}>
             <Icon name="chevron.right" size={8} />
           </span>
         )}
       </button>
-      {expanded && hasSummary && (
+      {expanded && hasBody && (
         <div className="tr-agent-summary">
-          <MarkdownText source={result.summary} />
+          {nested.length > 0 && (
+            <div className="orch-nested">
+              {nested.map((child) => (
+                <ToolRow key={child.id} tool={child} />
+              ))}
+            </div>
+          )}
+          {hasSummary && <MarkdownText source={result.summary} />}
         </div>
       )}
     </div>
@@ -243,6 +263,12 @@ export type IconName =
   | 'chevron.down'
   | 'info.circle.fill'
   | 'exclamationmark.triangle.fill'
+  | 'flowchart'
+  | 'bolt'
+  | 'checkmark.circle.fill'
+  | 'arrow.triangle.branch'
+  | 'arrow.counterclockwise'
+  | 'sidebar.right'
 
 const STROKE_ICONS: Record<string, ReactNode> = {
   'doc.text': (
@@ -320,10 +346,56 @@ const STROKE_ICONS: Record<string, ReactNode> = {
     </>
   ),
   'chevron.right': <path d="M5.5 3l5 5-5 5" strokeWidth="2.4" />,
-  'chevron.down': <path d="M3 5.5l5 5 5-5" strokeWidth="2.4" />
+  'chevron.down': <path d="M3 5.5l5 5 5-5" strokeWidth="2.4" />,
+  // A workflow is a plan drawn before the run: one root fanning into phases.
+  // A root that fans out into two: the shape of a phase that dispatches and a
+  // phase that collects. Drawn on a wider, flatter grid than the first attempt
+  // — squat 5x3 nodes with a full-width bus — because the earlier 4.4x3.2
+  // boxes with a 1-unit radius rendered as three rounded blobs the moment the
+  // glyph was used above ~20px.
+  flowchart: (
+    <>
+      <rect x="5.5" y="1.4" width="5" height="3" rx="0.8" />
+      <rect x="1.1" y="11.6" width="5" height="3" rx="0.8" />
+      <rect x="9.9" y="11.6" width="5" height="3" rx="0.8" />
+      <path d="M8 4.4v3.2" />
+      <path d="M3.6 11.6V7.6h8.8v4" />
+    </>
+  ),
+  // Ultra: the fan-out that hits all at once.
+  bolt: <path d="M9.3 1.5L3.6 9.3h3.5l-.4 5.2 5.7-7.8H8.9z" />,
+  // Worktree isolation: each member on its own branch, merged back after.
+  'arrow.triangle.branch': (
+    <>
+      <circle cx="4.4" cy="3.4" r="1.8" />
+      <circle cx="4.4" cy="12.6" r="1.8" />
+      <circle cx="11.6" cy="3.4" r="1.8" />
+      <path d="M4.4 5.2v5.6" />
+      <path d="M11.6 5.2v1.5a3.4 3.4 0 0 1-3.4 3.4H4.4" />
+    </>
+  ),
+  // Replayed from the resume journal rather than re-run.
+  'arrow.counterclockwise': (
+    <>
+      <path d="M2.7 9.4A5.5 5.5 0 1 0 4.1 4.1" />
+      <path d="M7.1 3.9L4.1 4.1 4.4 1.1" />
+    </>
+  ),
+  'sidebar.right': (
+    <>
+      <rect x="1.5" y="2.5" width="13" height="11" rx="1.5" />
+      <path d="M10.3 2.5v11" />
+    </>
+  )
 }
 
 const FILLED_ICONS: Record<string, ReactNode> = {
+  'checkmark.circle.fill': (
+    <>
+      <circle cx="8" cy="8" r="7" fill="currentColor" stroke="none" />
+      <path d="M4.9 8.2l2.1 2.2 4.1-4.6" stroke="var(--canvas)" strokeWidth="1.7" />
+    </>
+  ),
   'xmark.circle.fill': (
     <>
       <circle cx="8" cy="8" r="7" fill="currentColor" stroke="none" />
@@ -369,7 +441,7 @@ export function Icon({
       viewBox="0 0 16 16"
       fill="none"
       stroke={filled ? 'none' : 'currentColor'}
-      strokeWidth="1.5"
+      strokeWidth={strokeFor(size)}
       strokeLinecap="round"
       strokeLinejoin="round"
       aria-hidden="true"
@@ -377,4 +449,19 @@ export function Icon({
       {children}
     </svg>
   )
+}
+
+/**
+ * Stroke width in viewBox units for a given rendered size.
+ *
+ * These glyphs live at 8–14px, where a flat 1.5 is right. The same 1.5 on a
+ * 40px empty-state icon is a 3.75px stroke — heavy enough that the shapes
+ * close up and the icon reads as a blob rather than a diagram. Past the row
+ * sizes the stroke thins toward a constant *rendered* weight, so a glyph looks
+ * like itself at any size; below that nothing changes, because every icon in
+ * the transcript was drawn against 1.5 and should stay exactly as it is.
+ */
+function strokeFor(size: number): number {
+  if (size <= 16) return 1.5
+  return Math.max(0.9, (1.5 * 16) / size)
 }

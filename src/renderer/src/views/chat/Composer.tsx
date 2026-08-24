@@ -3,6 +3,7 @@
 // the send/stop + terminal buttons.
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { ActivationTextarea } from './ActivationGlow'
 import type { ACPCommand } from '@shared/acp'
 import type { ChatDetail } from '@shared/model'
 import { call, useApp } from '@renderer/state/store'
@@ -211,14 +212,17 @@ export default function Composer({ chat, terminalVisible, onToggleTerminal }: Co
           </div>
         )}
 
-        <textarea
-          ref={textareaRef}
+        {/* Not a plain textarea: a phrase like "ultracode" or "use a workflow"
+            arms multi-agent orchestration for the turn, and the input has to
+            say so while it is being typed rather than after the fact. */}
+        <ActivationTextarea
+          textareaRef={textareaRef}
           className="composer-input"
           rows={2}
           value={draft}
           placeholder={placeholder}
-          onChange={(e) => {
-            setDraft(e.target.value)
+          onChange={(next) => {
+            setDraft(next)
             setCommandIndex(0)
           }}
           onKeyDown={onKeyDown}

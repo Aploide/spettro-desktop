@@ -20,6 +20,7 @@ import {
   ChevronRightIcon,
   ClearIcon,
   DownloadIcon,
+  FlowchartIcon,
   FolderFillIcon,
   FolderPlusIcon,
   GearIcon,
@@ -33,6 +34,10 @@ interface Props {
   /** The pane argument lets the update prompt open Settings on Updates. */
   onOpenSettings: (pane?: SettingsPane) => void
   onOpenRemote: () => void
+  /** Opens the workflow studio on the selected chat's project. Disabled with
+   *  no chat selected: a workflow belongs to a repo, and without a chat there
+   *  is no repo to belong to. */
+  onOpenWorkflows: () => void
 }
 
 interface ProjectGroup {
@@ -51,7 +56,7 @@ function pinnedFirst(sessions: ChatSummary[]): ChatSummary[] {
   return [...sessions].sort((a, b) => Number(b.isPinned) - Number(a.isPinned))
 }
 
-export default function Sidebar({ onOpenSettings, onOpenRemote }: Props): JSX.Element {
+export default function Sidebar({ onOpenSettings, onOpenRemote, onOpenWorkflows }: Props): JSX.Element {
   const app = useApp()
   const [searchText, setSearchText] = useState('')
   const [menu, setMenu] = useState<MenuState | null>(null)
@@ -174,6 +179,14 @@ export default function Sidebar({ onOpenSettings, onOpenRemote }: Props): JSX.El
           onClick={onOpenRemote}
         >
           <PhoneIcon size={16} active={app?.remote?.enabled ?? false} />
+        </button>
+        <button
+          className="icon-btn"
+          title={selectedId ? 'Workflows' : 'Open a chat to work on its workflows'}
+          disabled={!selectedId}
+          onClick={onOpenWorkflows}
+        >
+          <FlowchartIcon size={16} />
         </button>
         <button className="icon-btn" title="Settings" onClick={() => onOpenSettings()}>
           <GearIcon size={16} />

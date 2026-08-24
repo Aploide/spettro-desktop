@@ -1,0 +1,162 @@
+{
+ "": null,
+ "ULTRACODE and ultracode twice": [
+  [
+   0,
+   9
+  ],
+  [
+   14,
+   23
+  ]
+ ],
+ "add a workflow_dispatch trigger": null,
+ "agents are useful": null,
+ "an ultracoded word must not light up": null,
+ "can you create an orchestration workflow": [
+  [
+   8,
+   40
+  ]
+ ],
+ "check .github/workflows for the CI config": null,
+ "do this with workflows": [
+  [
+   8,
+   22
+  ]
+ ],
+ "fan it out over agents": [
+  [
+   0,
+   22
+  ]
+ ],
+ "fan this out across sub-agents": [
+  [
+   0,
+   30
+  ]
+ ],
+ "hello": null,
+ "multi agent pipeline": [
+  [
+   0,
+   20
+  ]
+ ],
+ "multi-agent orchestration please": [
+  [
+   0,
+   25
+  ]
+ ],
+ "now ultracode": [
+  [
+   4,
+   13
+  ]
+ ],
+ "orchestrate this with subagents": [
+  [
+   0,
+   31
+  ]
+ ],
+ "our deploy workflow is broken": null,
+ "please ultracode this refactor": [
+  [
+   7,
+   16
+  ]
+ ],
+ "reach for the workflow tool here": [
+  [
+   14,
+   27
+  ]
+ ],
+ "run it via workflows": [
+  [
+   7,
+   20
+  ]
+ ],
+ "run the workflow again": null,
+ "set up a workflow": [
+  [
+   0,
+   17
+  ]
+ ],
+ "the workflow failed last night": null,
+ "this is a normal message": null,
+ "ultracode": [
+  [
+   0,
+   9
+  ]
+ ],
+ "ultracode now": [
+  [
+   0,
+   9
+  ]
+ ],
+ "ultracode, then use a workflow": [
+  [
+   0,
+   9
+  ],
+  [
+   16,
+   30
+  ]
+ ],
+ "ultracode: go": [
+  [
+   0,
+   9
+  ]
+ ],
+ "ultracode: review the changes and use a workflow for the port": [
+  [
+   0,
+   9
+  ],
+  [
+   34,
+   48
+  ]
+ ],
+ "use a workflow and then ultracode": [
+  [
+   0,
+   14
+  ],
+  [
+   24,
+   33
+  ]
+ ],
+ "use a workflow to modernise these handlers": [
+  [
+   0,
+   14
+  ]
+ ],
+ "use a workflow tool for this": [
+  [
+   0,
+   19
+  ]
+ ],
+ "use the workflow": null,
+ "what does this workflow do": null,
+ "write a multi-agent workflow for this": [
+  [
+   0,
+   28
+  ]
+ ]
+}

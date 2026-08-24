@@ -1,12 +1,26 @@
 // Port of Platforms/macOS/Views/ChatView.swift (doc 22): the detail column —
 // header, scrolling transcript, composer, config bar, terminal drawer.
+//
+// Two things here are not in the Swift original, and both exist because a
+// workflow or an Ultra swarm is not one tool call but a hundred. The
+// transcript is folded first (`groupTranscript`), so a run renders as the one
+// card that owns its members instead of a wall of interleaved rows; and while
+// a run is in flight the column can split, docking a live panel on the right.
+//
+// The panel is a *column*, not an overlay: it shares the row with the
+// transcript and stops above the divider, so it can never sit on top of the
+// composer or the terminal drawer, and the transcript's centred measure
+// simply narrows around it.
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { transcriptItemId } from '@shared/model'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import type { JSX } from 'react'
 import { call, ensureChatLoaded, useChat } from '@renderer/state/store'
 import TerminalDrawer from '@renderer/views/terminal/TerminalDrawer'
-import TranscriptItemView from './transcript/TranscriptItemView'
+import { TranscriptRowView } from './transcript/TranscriptItemView'
+import { activeRuns, groupTranscript } from './transcript/orchestration'
 import { RunTicker } from './transcript/RunTicker'
+import { Icon } from './transcript/ToolCallView'
+import OrchestrationPanel from './OrchestrationPanel'
 import ChatHeader, { projectName } from './ChatHeader'
 import AppIcon from '@renderer/views/shell/AppIcon'
 import Composer from './Composer'
@@ -14,6 +28,13 @@ import './chat.css'
 
 /** UserDefaults key `spettro.terminalDrawerVisible` — global, not per project. */
 const TERMINAL_VISIBLE_KEY = 'spettro.terminalDrawerVisible'
+
+/** UserDefaults key `spettro.orchestrationPanelVisible` — global, like the
+ *  terminal drawer. Unlike the drawer it defaults to *shown*: the panel costs
+ *  nothing until a run starts (it collapses itself to zero width when there is
+ *  nothing live), so the discoverable default is the one that eventually
+ *  reveals the feature. */
+const PANEL_VISIBLE_KEY = 'spettro.orchestrationPanelVisible'
 
 /** How close to the bottom (px) still counts as "pinned to the tail". */
 const PIN_THRESHOLD = 64
@@ -25,6 +46,9 @@ export default function ChatView({ chatId }: { chatId: string }): JSX.Element {
   const [terminalVisible, setTerminalVisible] = useState(
     () => localStorage.getItem(TERMINAL_VISIBLE_KEY) === '1'
   )
+  const [panelVisible, setPanelVisible] = useState(
+    () => localStorage.getItem(PANEL_VISIBLE_KEY) !== '0'
+  )
 
   useEffect(() => {
     void ensureChatLoaded(chatId)
@@ -34,6 +58,17 @@ export default function ChatView({ chatId }: { chatId: string }): JSX.Element {
   useEffect(() => {
     localStorage.setItem(TERMINAL_VISIBLE_KEY, terminalVisible ? '1' : '0')
   }, [terminalVisible])
+
+  useEffect(() => {
+    localStorage.setItem(PANEL_VISIBLE_KEY, panelVisible ? '1' : '0')
+  }, [panelVisible])
+
+  // The fold is pure and depends only on the items array, so it is safe to
+  // memo on identity: the store replaces `items` whenever anything in the
+  // transcript changes, and never mutates it in place.
+  const items = chat?.items
+  const rows = useMemo(() => (items ? groupTranscript(items) : []), [items])
+  const live = useMemo(() => activeRuns(rows), [rows])
 
   const scrollToBottom = useCallback(() => {
     const el = scrollRef.current
@@ -52,6 +87,12 @@ export default function ChatView({ chatId }: { chatId: string }): JSX.Element {
   // the same cheap signal ChatView.swift uses: the last message's text length,
   // falling back to the item count. Unlike the Mac app we release the pin
   // while the user has scrolled up, and re-engage it when they return.
+  //
+  // These deliberately watch `chat.items`, not `rows`. Folding *shrinks* the
+  // rendered row count while a fan-out streams — twenty members and their
+  // tool calls all land inside one card — so a row-count signal would go
+  // quiet at exactly the moment the transcript is growing fastest, and the
+  // tail would slide out from under a pinned reader.
   const itemCount = chat?.items.length ?? 0
   const lastItem = chat?.items[itemCount - 1]
   const lastItemText = lastItem?.kind === 'message' ? lastItem.message.text.length : itemCount
@@ -67,23 +108,39 @@ export default function ChatView({ chatId }: { chatId: string }): JSX.Element {
 
   if (!chat) return <div className="chat-view" />
 
+  const showReopen = !panelVisible && live.length > 0
+
   return (
     <div className="chat-view">
       <ChatHeader chat={chat} />
 
-      <div className="chat-transcript" ref={scrollRef} onScroll={onScroll}>
-        <div className="chat-transcript-inner">
-          {chat.items.length === 0 && <WelcomeBanner projectPath={chat.projectPath} />}
-          {chat.items.map((item) => (
-            <TranscriptItemView item={item} key={transcriptItemId(item)} />
-          ))}
-          {chat.isBusy && (
-            <div className="chat-run-ticker">
-              <RunTicker chat={chat} />
-            </div>
-          )}
-          <div className="chat-bottom-anchor" />
+      <div className="chat-body">
+        <div className="chat-transcript" ref={scrollRef} onScroll={onScroll}>
+          <div className="chat-transcript-inner">
+            {chat.items.length === 0 && <WelcomeBanner projectPath={chat.projectPath} />}
+            {rows.map((row) => (
+              <TranscriptRowView row={row} key={row.id} />
+            ))}
+            {(chat.isBusy || showReopen) && (
+              <div className="chat-run-ticker">
+                <RunTicker chat={chat} />
+                {showReopen && (
+                  <ReopenPanelChip count={live.length} onShow={() => setPanelVisible(true)} />
+                )}
+              </div>
+            )}
+            <div className="chat-bottom-anchor" />
+          </div>
         </div>
+
+        {/* Kept mounted and collapsed by :empty rather than unmounted: the
+            panel holds a just-finished run for a beat before letting it go,
+            and that settle only renders if the column is still there. */}
+        <aside className="chat-orchestration">
+          {panelVisible && (
+            <OrchestrationPanel runs={live} onClose={() => setPanelVisible(false)} />
+          )}
+        </aside>
       </div>
 
       <div className="chat-divider" />
@@ -100,6 +157,31 @@ export default function ChatView({ chatId }: { chatId: string }): JSX.Element {
         onClose={() => setTerminalVisible(false)}
       />
     </div>
+  )
+}
+
+/**
+ * The way back in after the user has hidden the panel.
+ *
+ * Hiding it is a setting, so a new run must not override it — but a fan-out
+ * the user cannot see is worse than a column they closed. This sits with the
+ * run ticker at the tail of the transcript, where the eye already is while
+ * something is running, and says how many runs are live so the offer is worth
+ * taking.
+ */
+function ReopenPanelChip({ count, onShow }: { count: number; onShow: () => void }): JSX.Element {
+  return (
+    <button
+      className="chat-live-chip"
+      type="button"
+      onClick={onShow}
+      title="Show the live orchestration panel"
+    >
+      <Icon name="sidebar.right" size={12} />
+      <span>
+        {count} run{count === 1 ? '' : 's'} live
+      </span>
+    </button>
   )
 }
 

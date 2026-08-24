@@ -1,0 +1,155 @@
+/* The activation shimmer. Port of the TUI's glow.go: a slow drift through
+   violet → magenta → cyan with a specular band sweeping across it. The
+   terminal has to compute this per character cell; a browser can hand the
+   whole job to one animated gradient, which is both cheaper and smoother. */
+
+.glow-wrap {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* The mirror sits exactly under the input and must never take a click or a
+   caret. It is given the input's own class by the component, so every metric
+   that affects where a line wraps is shared rather than duplicated. */
+.glow-mirror {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  color: var(--text-primary);
+}
+
+/* With a mirror behind it the input's own glyphs would double every stroke, so
+   they go transparent — but only then, and the caret stays visible.
+   Written as `textarea.glow-input` deliberately: the class it is layered on
+   top of (.composer-input, .wfs-code) sets a colour with exactly the same
+   single-class specificity, so which one wins would otherwise come down to
+   stylesheet order — which is decided by the bundler, not by this file. It
+   lost, and the result was every character drawn twice, a pixel apart. */
+textarea.glow-input {
+  color: transparent;
+  caret-color: var(--text-primary);
+  position: relative;
+  background: transparent;
+}
+
+/* Transparent text would make a selection an invisible smear, so selected
+   glyphs are painted back in. */
+textarea.glow-input::selection {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+.glow {
+  /* The ramp is repeated so the gradient can slide a full period and land
+     exactly where it started — a seam mid-word is the one artefact that would
+     read as a bug rather than an effect. */
+  background-image: linear-gradient(
+    100deg,
+    #7c3aed,
+    #a855f7,
+    #e879f9,
+    #38bdf8,
+    #22d3ee,
+    #7c3aed,
+    #a855f7,
+    #e879f9,
+    #38bdf8,
+    #22d3ee
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  font-weight: 600;
+  border-radius: 4px;
+  animation: glow-drift 7s linear infinite;
+  position: relative;
+  /* Own stacking context, so the backing pill below can sit behind the glyphs
+     without falling behind whatever the phrase happens to be written on. */
+  isolation: isolate;
+}
+
+/* The backing pill.
+   glow.go paints a near-black tint behind the lit cells and says why: a
+   foreground-only effect disappears against the surrounding prose. Here it
+   does more than that — the gradient runs violet to cyan, and a user bubble is
+   accent blue, so without something dark behind it the first half of every lit
+   phrase vanished into the bubble it was written on. The pill makes the effect
+   independent of its background, which is the only way one treatment can work
+   in both the composer and a sent message. */
+.glow::before {
+  content: '';
+  position: absolute;
+  inset: -1px -3px;
+  z-index: -1;
+  border-radius: 4px;
+  background: color-mix(in srgb, #0b0b0d 82%, #a855f7);
+  box-shadow: 0 0 12px color-mix(in srgb, #38bdf8 22%, transparent);
+}
+
+/* The prose between the lit phrases.
+   `.glow` is positioned, so it and everything inside it paint in the
+   positioned layer — above plain inline siblings, whatever the DOM order. The
+   pill's few pixels of horizontal overhang therefore landed on top of the next
+   character and ate it: "ultracode: review" rendered as "ultracode review",
+   with the colon hidden under the glow. Positioning the prose too puts both in
+   the same layer, where document order decides and the character after a lit
+   phrase is drawn last, on top. */
+.glow-plain {
+  position: relative;
+}
+
+/* Unhurried on purpose. This sits under the cursor while someone is typing,
+   and anything fast enough to notice as motion is fast enough to distract —
+   the same reasoning as the TUI's 7s drift. */
+@keyframes glow-drift {
+  to {
+    background-position: -200% 0;
+  }
+}
+
+/* The specular sweep, as a second pass over the same word. 3.2s to match
+   ultracodeSweepFrames, offset from the drift so the two never beat together
+   into a visible pulse. */
+.glow::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: linear-gradient(
+    100deg,
+    transparent 35%,
+    color-mix(in srgb, #ffffff 28%, transparent) 50%,
+    transparent 65%
+  );
+  background-size: 260% 100%;
+  animation: glow-sweep 3.2s linear infinite;
+}
+
+.glow {
+  position: relative;
+}
+
+@keyframes glow-sweep {
+  from {
+    background-position: 130% 0;
+  }
+  to {
+    background-position: -130% 0;
+  }
+}
+
+/* Someone who has asked not to see motion still gets the colour — the point of
+   the effect is that the phrase is special, and that survives being still. */
+@media (prefers-reduced-motion: reduce) {
+  .glow,
+  .glow::after {
+    animation: none;
+  }
+}

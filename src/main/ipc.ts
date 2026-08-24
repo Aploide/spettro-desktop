@@ -149,6 +149,16 @@ export function registerIpc(
     // are handed straight to the CLI: never logged, never persisted here.
     refreshExtensions: () => model.refreshExtensions(),
     skipProviderSetup: async () => model.skipProviderSetup(),
+    workflowList: (chatId) => model.listWorkflows(chatId),
+    workflowRead: (chatId, name) => model.readWorkflow(chatId, name),
+    workflowWrite: (chatId, name, scope, script) =>
+      model.writeWorkflow(chatId, name, scope, script),
+    workflowDelete: (chatId, name, scope) => model.deleteWorkflow(chatId, name, scope),
+    workflowValidate: (chatId, script) => model.validateWorkflow(chatId, script),
+    workflowRuns: (chatId) => model.listWorkflowRuns(chatId),
+    workflowRun: async (chatId, name) => model.runWorkflow(chatId, name),
+    workflowDiscardRun: async (scratchChatId) => model.discardScratchChat(scratchChatId),
+
     accountLoginStart: () => model.accountLoginStart(),
     accountLoginPoll: () => model.accountLoginPoll(),
     accountLoginCancel: () => model.accountLoginCancel(),

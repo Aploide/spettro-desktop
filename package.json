@@ -13,12 +13,14 @@
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
-    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
+    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.test.json",
     "rebuild:native": "electron-builder install-app-deps",
     "pack:linux": "electron-vite build && electron-builder --linux --x64 --arm64",
     "pack:win": "electron-vite build && electron-builder --win --x64 --arm64",
     "pack": "electron-vite build && electron-builder",
-    "visual": "vite build -c tools/visual/vite.config.ts && electron --no-sandbox tools/visual/capture.cjs .visual-dist .visual-shots"
+    "visual": "vite build -c tools/visual/vite.config.ts && electron --no-sandbox tools/visual/capture.cjs .visual-dist .visual-shots",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.10.0",
@@ -30,6 +32,8 @@
     "ws": "^8.18.0"
   },
   "devDependencies": {
+    "@testing-library/dom": "^10.4.1",
+    "@testing-library/react": "^16.3.2",
     "@types/node": "^22.10.0",
     "@types/qrcode": "^1.5.5",
     "@types/react": "^18.3.12",
@@ -39,10 +43,12 @@
     "electron": "^43.2.0",
     "electron-builder": "^26.15.3",
     "electron-vite": "^5.0.0",
+    "jsdom": "^30.0.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "typescript": "^5.7.2",
-    "vite": "^7.3.6"
+    "vite": "^7.3.6",
+    "vitest": "^4.1.11"
   },
   "allowScripts": {
     "electron@43.2.0": true,

@@ -361,17 +361,54 @@ export function parseRenderedWorkflow(output: string, failed: boolean): Rendered
       break
     }
 
-    // Everything from the first phase header on is the tree.
-    const phases: string[] = []
-    let treeStart = end
+    // The head and the tree are blank-line-separated blocks, so the tree is
+    // found as a block rather than by hunting for the first glyph anywhere in
+    // the output. A description is free prose the script author wrote, and
+    // prose that happens to contain a line starting with "▸" would otherwise
+    // invent a phase out of nothing *and* truncate the description at that
+    // line. Matching a whole block — every line of it either a phase header
+    // or an indented member row — costs nothing and cannot be fooled by one
+    // stray character.
+    const blocks: { start: number; lines: string[] }[] = []
+    let current: { start: number; lines: string[] } | null = null
     for (let i = 0; i < end; i++) {
-      const line = lines[i]
-      if (!line.startsWith('▸ ') && !line.startsWith('○ ')) continue
-      if (treeStart === end) treeStart = i
-      const rest = line.slice(2)
-      const dash = rest.lastIndexOf(' — ')
-      const title = dash >= 0 ? rest.slice(0, dash) : rest
-      phases.push(title === '(no phase)' ? '' : title)
+      if (lines[i].trim() === '') {
+        current = null
+        continue
+      }
+      if (current === null) {
+        current = { start: i, lines: [] }
+        blocks.push(current)
+      }
+      current.lines.push(lines[i])
+    }
+
+    const isPhaseHeader = (line: string): boolean =>
+      line.startsWith('▸ ') || line.startsWith('○ ')
+    // Member rows are indented under their phase; the glyph set is the one
+    // acpWorkflow.render writes.
+    const isMemberRow = (line: string): boolean => /^\s+[✓▶✗] /.test(line)
+    const isTreeBlock = (block: { lines: string[] }): boolean =>
+      block.lines.length > 0 &&
+      block.lines.some(isPhaseHeader) &&
+      block.lines.every((line) => isPhaseHeader(line) || isMemberRow(line))
+
+    // The last qualifying block, not the first: the tree is always the final
+    // thing before the log, and taking the last one means an earlier
+    // false positive loses to the real thing.
+    let treeStart = end
+    const phases: string[] = []
+    for (let b = blocks.length - 1; b >= 0; b--) {
+      if (!isTreeBlock(blocks[b])) continue
+      treeStart = blocks[b].start
+      for (const line of blocks[b].lines) {
+        if (!isPhaseHeader(line)) continue
+        const rest = line.slice(2)
+        const dash = rest.lastIndexOf(' — ')
+        const title = dash >= 0 ? rest.slice(0, dash) : rest
+        phases.push(title === '(no phase)' ? '' : title)
+      }
+      break
     }
 
     // The head is one or two blank-line-separated blocks: the finish summary

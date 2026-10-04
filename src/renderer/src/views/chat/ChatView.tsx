@@ -43,6 +43,9 @@ export default function ChatView({ chatId }: { chatId: string }): JSX.Element {
   const chat = useChat(chatId)
   const scrollRef = useRef<HTMLDivElement>(null)
   const pinnedRef = useRef(true)
+  const manualPauseRef = useRef(false)
+  const scrollTowardLatestRef = useRef(false)
+  const touchYRef = useRef<number | null>(null)
   const [showJumpToLatest, setShowJumpToLatest] = useState(false)
   const [promptSeed, setPromptSeed] = useState('')
   const [terminalVisible, setTerminalVisible] = useState(
@@ -78,6 +81,8 @@ export default function ChatView({ chatId }: { chatId: string }): JSX.Element {
   }, [])
 
   const jumpToLatest = useCallback(() => {
+    manualPauseRef.current = false
+    scrollTowardLatestRef.current = false
     pinnedRef.current = true
     setShowJumpToLatest(false)
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })
@@ -87,7 +92,10 @@ export default function ChatView({ chatId }: { chatId: string }): JSX.Element {
   // view defers one run-loop turn; useLayoutEffect after render is the analog).
   const loaded = chat != null
   useLayoutEffect(() => {
+    manualPauseRef.current = false
+    scrollTowardLatestRef.current = false
     pinnedRef.current = true
+    setShowJumpToLatest(false)
     scrollToBottom()
   }, [chatId, loaded, scrollToBottom])
 
@@ -112,6 +120,15 @@ export default function ChatView({ chatId }: { chatId: string }): JSX.Element {
     const el = scrollRef.current
     if (!el) return
     const isAtLatest = el.scrollHeight - el.scrollTop - el.clientHeight < PIN_THRESHOLD
+    if (manualPauseRef.current && !(scrollTowardLatestRef.current && isAtLatest)) {
+      pinnedRef.current = false
+      setShowJumpToLatest(true)
+      return
+    }
+    if (isAtLatest) {
+      manualPauseRef.current = false
+      scrollTowardLatestRef.current = false
+    }
     pinnedRef.current = isAtLatest
     setShowJumpToLatest(!isAtLatest)
   }, [])
@@ -121,10 +138,25 @@ export default function ChatView({ chatId }: { chatId: string }): JSX.Element {
   // must not pull the conversation out from under someone who is reading.
   const pauseFollowing = useCallback((deltaY: number) => {
     if (deltaY <= 0) {
+      manualPauseRef.current = true
+      scrollTowardLatestRef.current = false
       pinnedRef.current = false
       setShowJumpToLatest(true)
+    } else {
+      scrollTowardLatestRef.current = true
     }
   }, [])
+
+  const onTouchStart = (event: React.TouchEvent<HTMLDivElement>): void => {
+    touchYRef.current = event.touches[0]?.clientY ?? null
+  }
+
+  const onTouchMove = (event: React.TouchEvent<HTMLDivElement>): void => {
+    const nextY = event.touches[0]?.clientY
+    if (nextY === undefined || touchYRef.current === null) return
+    pauseFollowing(touchYRef.current - nextY)
+    touchYRef.current = nextY
+  }
 
   if (!chat) return <div className="chat-view" />
 
@@ -140,7 +172,11 @@ export default function ChatView({ chatId }: { chatId: string }): JSX.Element {
           ref={scrollRef}
           onScroll={onScroll}
           onWheel={(event) => pauseFollowing(event.deltaY)}
-          onTouchMove={() => pauseFollowing(-1)}
+          onTouchStart={onTouchStart}
+          onTouchMove={onTouchMove}
+          onTouchEnd={() => {
+            touchYRef.current = null
+          }}
           tabIndex={0}
           aria-label="Conversation"
         >

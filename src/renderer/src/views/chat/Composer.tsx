@@ -29,9 +29,15 @@ interface ComposerProps {
   chat: ChatDetail
   terminalVisible: boolean
   onToggleTerminal: () => void
+  promptSeed: string
 }
 
-export default function Composer({ chat, terminalVisible, onToggleTerminal }: ComposerProps): JSX.Element {
+export default function Composer({
+  chat,
+  terminalVisible,
+  onToggleTerminal,
+  promptSeed
+}: ComposerProps): JSX.Element {
   const app = useApp()
   const [draft, setDraft] = useState('')
   const [attachments, setAttachments] = useState<PendingAttachment[]>([])
@@ -53,6 +59,12 @@ export default function Composer({ chat, terminalVisible, onToggleTerminal }: Co
   useEffect(() => {
     textareaRef.current?.focus()
   }, [chat.id])
+
+  useEffect(() => {
+    if (promptSeed === '') return
+    setDraft(promptSeed)
+    textareaRef.current?.focus()
+  }, [promptSeed])
 
   // Auto-grow: 2–12 lines (lineLimit(2...12) on the vertical TextField).
   useLayoutEffect(() => {

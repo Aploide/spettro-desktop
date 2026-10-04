@@ -44,6 +44,7 @@ export default function ChatView({ chatId }: { chatId: string }): JSX.Element {
   const scrollRef = useRef<HTMLDivElement>(null)
   const pinnedRef = useRef(true)
   const [showJumpToLatest, setShowJumpToLatest] = useState(false)
+  const [promptSeed, setPromptSeed] = useState('')
   const [terminalVisible, setTerminalVisible] = useState(
     () => localStorage.getItem(TERMINAL_VISIBLE_KEY) === '1'
   )
@@ -144,7 +145,9 @@ export default function ChatView({ chatId }: { chatId: string }): JSX.Element {
           aria-label="Conversation"
         >
           <div className="chat-transcript-inner">
-            {chat.items.length === 0 && <WelcomeBanner projectPath={chat.projectPath} />}
+            {chat.items.length === 0 && (
+              <WelcomeBanner projectPath={chat.projectPath} onPrompt={setPromptSeed} />
+            )}
             {rows.map((row) => (
               <TranscriptRowView row={row} key={row.id} />
             ))}
@@ -187,6 +190,7 @@ export default function ChatView({ chatId }: { chatId: string }): JSX.Element {
         chat={chat}
         terminalVisible={terminalVisible}
         onToggleTerminal={() => setTerminalVisible((v) => !v)}
+        promptSeed={promptSeed}
       />
 
       <TerminalDrawer
@@ -224,12 +228,29 @@ function ReopenPanelChip({ count, onShow }: { count: number; onShow: () => void 
 }
 
 /** Empty-state banner shown until the first prompt is sent (doc 22). */
-function WelcomeBanner({ projectPath }: { projectPath: string }): JSX.Element {
+function WelcomeBanner({
+  projectPath,
+  onPrompt
+}: {
+  projectPath: string
+  onPrompt: (prompt: string) => void
+}): JSX.Element {
   return (
     <div className="chat-welcome">
       <AppIcon size={104} />
       <div className="chat-welcome-title">How can I help?</div>
       <div className="chat-welcome-sub">Working in {projectName(projectPath)}</div>
+      <div className="chat-welcome-prompts" aria-label="Suggested prompts">
+        <button type="button" onClick={() => onPrompt('Explain this project in simple terms')}>
+          Explain this project
+        </button>
+        <button type="button" onClick={() => onPrompt('Help me find and fix a problem')}>
+          Fix a problem
+        </button>
+        <button type="button" onClick={() => onPrompt('Help me add a new feature')}>
+          Add a feature
+        </button>
+      </div>
     </div>
   )
 }

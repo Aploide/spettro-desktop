@@ -26,11 +26,42 @@
 }
 
 .chat-transcript {
+  position: relative;
   flex: 1;
   min-height: 0;
   min-width: 0;
   overflow-y: auto;
   overflow-x: hidden;
+}
+
+.chat-jump-latest {
+  position: absolute;
+  z-index: 3;
+  left: 50%;
+  bottom: var(--sp-md);
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 13px;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--hairline));
+  border-radius: 999px;
+  background: var(--surface-raised);
+  color: var(--text-primary);
+  box-shadow: 0 4px 18px rgb(0 0 0 / 18%);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 550;
+  cursor: pointer;
+  transform: translateX(-50%);
+}
+
+.chat-jump-latest:hover {
+  background: color-mix(in srgb, var(--surface-raised) 88%, var(--accent));
+}
+
+.chat-jump-latest:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 /* The live orchestration column (OrchestrationPanel.tsx renders `.orp`

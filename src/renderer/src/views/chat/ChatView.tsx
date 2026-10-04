@@ -43,6 +43,7 @@ export default function ChatView({ chatId }: { chatId: string }): JSX.Element {
   const chat = useChat(chatId)
   const scrollRef = useRef<HTMLDivElement>(null)
   const pinnedRef = useRef(true)
+  const [showJumpToLatest, setShowJumpToLatest] = useState(false)
   const [terminalVisible, setTerminalVisible] = useState(
     () => localStorage.getItem(TERMINAL_VISIBLE_KEY) === '1'
   )
@@ -75,6 +76,12 @@ export default function ChatView({ chatId }: { chatId: string }): JSX.Element {
     if (el) el.scrollTop = el.scrollHeight
   }, [])
 
+  const jumpToLatest = useCallback(() => {
+    pinnedRef.current = true
+    setShowJumpToLatest(false)
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })
+  }, [])
+
   // On appear / chat switch: jump to the bottom without animation (the Swift
   // view defers one run-loop turn; useLayoutEffect after render is the analog).
   const loaded = chat != null
@@ -103,7 +110,19 @@ export default function ChatView({ chatId }: { chatId: string }): JSX.Element {
   const onScroll = useCallback(() => {
     const el = scrollRef.current
     if (!el) return
-    pinnedRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < PIN_THRESHOLD
+    const isAtLatest = el.scrollHeight - el.scrollTop - el.clientHeight < PIN_THRESHOLD
+    pinnedRef.current = isAtLatest
+    setShowJumpToLatest(!isAtLatest)
+  }, [])
+
+  // A deliberate upward gesture opts out of follow mode immediately, even
+  // when the reader is still within the tail threshold. New streamed tokens
+  // must not pull the conversation out from under someone who is reading.
+  const pauseFollowing = useCallback((deltaY: number) => {
+    if (deltaY <= 0) {
+      pinnedRef.current = false
+      setShowJumpToLatest(true)
+    }
   }, [])
 
   if (!chat) return <div className="chat-view" />
@@ -115,7 +134,15 @@ export default function ChatView({ chatId }: { chatId: string }): JSX.Element {
       <ChatHeader chat={chat} />
 
       <div className="chat-body">
-        <div className="chat-transcript" ref={scrollRef} onScroll={onScroll}>
+        <div
+          className="chat-transcript"
+          ref={scrollRef}
+          onScroll={onScroll}
+          onWheel={(event) => pauseFollowing(event.deltaY)}
+          onTouchMove={() => pauseFollowing(-1)}
+          tabIndex={0}
+          aria-label="Conversation"
+        >
           <div className="chat-transcript-inner">
             {chat.items.length === 0 && <WelcomeBanner projectPath={chat.projectPath} />}
             {rows.map((row) => (
@@ -132,6 +159,17 @@ export default function ChatView({ chatId }: { chatId: string }): JSX.Element {
             <div className="chat-bottom-anchor" />
           </div>
         </div>
+        {chat.isBusy && showJumpToLatest && (
+          <button
+            type="button"
+            className="chat-jump-latest"
+            onClick={jumpToLatest}
+            aria-label="Jump to latest message"
+          >
+            <Icon name="chevron.down" size={13} />
+            <span>Latest message</span>
+          </button>
+        )}
 
         {/* Kept mounted and collapsed by :empty rather than unmounted: the
             panel holds a just-finished run for a beat before letting it go,

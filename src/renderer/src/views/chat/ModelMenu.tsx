@@ -18,6 +18,7 @@ import type { ACPConfigChoice, ACPConfigOption } from '@shared/acp'
 import type { ModelEntry } from '@shared/extensions'
 import type { ChatDetail } from '@shared/model'
 import { call, useApp } from '@renderer/state/store'
+import { openSettings } from '@renderer/state/shell'
 import { Icon } from '@renderer/design/icons'
 import Popover from '@renderer/views/common/Popover'
 import ModelPickerView from '@renderer/views/providers/ModelPickerView'
@@ -164,9 +165,13 @@ export default function ModelMenu({ chat }: { chat: ChatDetail }): JSX.Element |
               void call('setSelectOption', chat.id, MODEL_ID, value)
             }
           }}
+          connect={app?.noModel === true}
           onManage={() => {
             close()
-            setManage(true)
+            // With nothing connected there is nothing to manage yet: the
+            // same connect step every other "Connect…" opens.
+            if (app?.noModel) openSettings('models')
+            else setManage(true)
           }}
         />
       </Popover>
@@ -195,13 +200,16 @@ export function ModelMenuPanel({
   option,
   catalog,
   onPick,
-  onManage
+  onManage,
+  connect = false
 }: {
   panelRef?: RefObject<HTMLDivElement>
   option: ACPConfigOption
   catalog: ModelEntry[]
   onPick: (value: string) => void
   onManage: () => void
+  /** Nothing is connected: the footer leads there instead. */
+  connect?: boolean
 }): JSX.Element {
   const [query, setQuery] = useState('')
   const [active, setActive] = useState(0)
@@ -236,6 +244,20 @@ export function ModelMenuPanel({
     }
   }
 
+  // Nothing to choose from at all: no search over an empty list, just the
+  // one thing to do.
+  if (!sections.some((s) => s.rows.length > 0) && query === '') {
+    return (
+      <div className="model-menu-panel" role="dialog" aria-label="Choose a model" ref={panelRef}>
+        <div className="model-menu-empty model-menu-empty--none">No models yet. Connect one to start.</div>
+        <button type="button" className="model-menu-connect" autoFocus onClick={onManage}>
+          <Icon name="key" size={13} />
+          <span>Connect a model…</span>
+        </button>
+      </div>
+    )
+  }
+
   let index = -1
   return (
     <div className="model-menu-panel" role="dialog" aria-label="Choose a model" ref={panelRef}>
@@ -255,7 +277,7 @@ export function ModelMenuPanel({
       <div className="model-menu-list" id="model-menu-list" role="listbox" ref={listRef}>
         {flat.length === 0 && (
           <div className="model-menu-empty">
-            {query.trim() === '' ? 'No models yet — connect a provider first.' : `No model matches “${query.trim()}”.`}
+            {query.trim() === '' ? 'No models yet.' : `No model matches “${query.trim()}”.`}
           </div>
         )}
         {sections.map((section) => (
@@ -287,7 +309,7 @@ export function ModelMenuPanel({
         ))}
       </div>
       <button type="button" className="model-menu-manage" onClick={onManage}>
-        Manage models…
+        {connect ? 'Connect a model…' : 'Manage models…'}
       </button>
     </div>
   )

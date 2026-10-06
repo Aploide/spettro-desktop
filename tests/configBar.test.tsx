@@ -193,14 +193,14 @@ describe('the settings popover', () => {
 
   it('labels workflow size tiers in agents, read from the tier’s own description', () => {
     open([size('large')])
-    expect(segments()).toEqual(['~5 agents', '~10 agents', '~30 agents', 'No limit'])
+    expect(segments()).toEqual(['~5 helpers', '~10 helpers', '~30 helpers', 'No limit'])
     const on = screen.getByRole('radio', { checked: true })
-    expect(on.textContent).toBe('Large~30 agents')
+    expect(on.textContent).toBe('Large~30 helpers')
   })
 
   it('falls back to the known tiers when the CLI gives no descriptions', () => {
     open([size('medium', false)])
-    expect(segments()).toEqual(['~5 agents', '~10 agents', '~30 agents', 'No limit'])
+    expect(segments()).toEqual(['~5 helpers', '~10 helpers', '~30 helpers', 'No limit'])
   })
 
   it('sets the size through the ordinary select path', () => {

@@ -7,7 +7,7 @@
 
 import { describe, expect, it, vi, beforeEach, beforeAll } from 'vitest'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
-import ThinkingSlider from '@renderer/views/chat/ThinkingSlider'
+import ThinkingSlider, { ThinkingChip } from '@renderer/views/chat/ThinkingSlider'
 import type { ChatDetail } from '@shared/model'
 import type { ACPConfigOption } from '@shared/acp'
 
@@ -127,6 +127,19 @@ describe('the slider', () => {
     render(<ThinkingSlider chat={chat(options({ thinking: 'off', ultra: false }))} />)
     expect(slider().getAttribute('aria-valuetext')).toBe('Off')
     expect(screen.getByText('Off')).toBeTruthy()
+  })
+
+  it('rests Off short of Low, and the chip names what is off', () => {
+    const { container } = render(<ThinkingSlider chat={chat(options({ thinking: 'off', ultra: false }))} />)
+    // Not on the Low tick (0%): the label and the thumb agree.
+    expect(container.querySelector<HTMLElement>('.thinking-thumb')?.style.left).toBe('-12px')
+    expect(container.querySelector('.thinking-label--current')).toBeNull()
+    cleanup()
+    render(<ThinkingChip chat={chat(options({ thinking: 'off', ultra: false }))} />)
+    expect(screen.getByTestId('thinking-chip').textContent).toContain('Thinking off')
+    cleanup()
+    render(<ThinkingChip chat={chat(options({ thinking: 'high', ultra: false }))} />)
+    expect(screen.getByTestId('thinking-chip').textContent).toContain('High')
   })
 
   it('steps with the arrow keys and jumps with Home', async () => {

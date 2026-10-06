@@ -28,6 +28,9 @@ import { ScriptCallRow } from './OrchestrationBits'
 import { WorkflowCard } from './WorkflowCard'
 import { CopyButton, useTranscriptActions } from './TranscriptActions'
 import Disclosure from '@renderer/views/common/Disclosure'
+import { humanizeError } from '@shared/humanize'
+import { useApp } from '@renderer/state/store'
+import { errorActionRunner } from '@renderer/views/shell/actions'
 import './transcript.css'
 
 /**
@@ -252,6 +255,7 @@ function ReasoningView({ message }: { message: ChatMessage }): JSX.Element {
 
 function NoticeView({ message, isError }: { message: ChatMessage; isError: boolean }): JSX.Element {
   const { retry, retryNoticeId } = useTranscriptActions()
+  const app = useApp()
   if (!isError) {
     return (
       <div className="tr-notice" role="note">
@@ -260,7 +264,18 @@ function NoticeView({ message, isError }: { message: ChatMessage; isError: boole
       </div>
     )
   }
-  const canRetry = retry !== undefined && retryNoticeId === message.id
+  // The error's own next step, when resending can't be it: with no model
+  // connected, Try again only repeats the failure (and stacks another copy
+  // of the message), so the card offers the fix instead. Once a model is
+  // connected the fix is done, and Try again is the next step again.
+  const human = humanizeError(message.detail ?? message.text)
+  const fixKind = human.action?.kind ?? 'none'
+  const fixed = fixKind === 'connect' && app?.noModel === false
+  const fix =
+    !fixed && (fixKind === 'connect' || fixKind === 'models' || fixKind === 'update' || fixKind === 'reinstall')
+      ? errorActionRunner(fixKind)
+      : null
+  const canRetry = fix === null && retry !== undefined && retryNoticeId === message.id
   return (
     <div className="tr-error" role="alert">
       <span className="tr-error-icon">
@@ -275,6 +290,11 @@ function NoticeView({ message, isError }: { message: ChatMessage; isError: boole
           </Disclosure>
         )}
       </span>
+      {fix !== null && human.action !== null && (
+        <button type="button" className="tr-error-retry" onClick={fix}>
+          <span>{human.action.label}…</span>
+        </button>
+      )}
       {canRetry && (
         <button type="button" className="tr-error-retry" onClick={retry}>
           <Icon name="arrow.clockwise" size={12} />

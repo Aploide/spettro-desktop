@@ -13,6 +13,9 @@ export type ContextMenuEntry =
       label: string
       destructive?: boolean
       disabled?: boolean
+      /** A line under the label: what the entry does, or — when it is
+       *  disabled — what would make it available. */
+      detail?: string
       /** Two-step entries: the first activation swaps the label for this one
        *  and keeps the menu open; only the second runs the action. A
        *  lightweight guard for actions that can't be taken back. */
@@ -142,6 +145,7 @@ export default function ContextMenu({ x, y, entries, onClose, label, above }: Pr
             }}
           >
             {armed === i && entry.confirmLabel ? entry.confirmLabel : entry.label}
+            {entry.detail && <span className="ctx-item-detail">{entry.detail}</span>}
           </button>
         )
       )}

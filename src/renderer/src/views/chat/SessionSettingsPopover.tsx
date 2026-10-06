@@ -54,6 +54,25 @@ const PERMISSION_GLOSS: Record<string, string> = {
   yolo: 'Act without asking'
 }
 
+/** What each level means for someone who doesn't know what a tool call or a
+ *  path request is. The CLI describes them in its own terms ("Automatically
+ *  approve all tool, path, and command requests"); a level this app doesn't
+ *  know keeps that. */
+const PERMISSION_DESCRIPTIONS: Record<string, string> = {
+  'ask-first': 'Spettro asks you before it changes a file or runs anything — safest, slowest',
+  restricted: 'Spettro works in your project on its own and asks before anything risky',
+  yolo: 'Spettro does everything without asking — fastest, least safe'
+}
+
+export function permissionDescription(choice: ACPConfigChoice): string | undefined {
+  return PERMISSION_DESCRIPTIONS[choice.value] ?? choice.description
+}
+
+/** Workflow size, said as what it is to the user: how many helpers Ultra
+ *  brings in. The CLI's ("How many agents a workflow run plans around")
+ *  needs to know what an agent and a workflow run are. */
+export const WORKFLOW_SIZE_DESCRIPTION = 'How big Ultra’s team of helpers can get — a guideline, not a cap'
+
 export function permissionName(choice: ACPConfigChoice): string {
   return PERMISSION_NAMES[choice.value] ?? choice.name
 }
@@ -69,18 +88,18 @@ export function permissionGloss(choice: ACPConfigChoice): string | null {
 const WORKFLOW_SIZE_AGENTS: Record<string, number> = { small: 5, medium: 10, large: 30 }
 
 /**
- * "~10 agents" / "No limit" for a workflow size tier. Read from the tier's own
+ * "~10 helpers" / "No limit" for a workflow size tier. Read from the tier's own
  * description ("~10 agents per run · fan-outs up to ~20 wide") so it follows
  * the CLI if a tier is retuned; the table is only the fallback.
  */
 export function workflowSizeHint(choice: ACPConfigChoice): string {
   const described = /~(\d+) agents\b/.exec(choice.description ?? '')
-  if (described) return `~${described[1]} agents`
+  if (described) return `~${described[1]} helpers`
   if (choice.value === 'unbounded' || /no agent guideline/.test(choice.description ?? '')) {
     return 'No limit'
   }
   const known = WORKFLOW_SIZE_AGENTS[choice.value]
-  return known !== undefined ? `~${known} agents` : ''
+  return known !== undefined ? `~${known} helpers` : ''
 }
 
 /** The options the popover shows, in the order it shows them. */
@@ -237,6 +256,7 @@ export function SessionSettingsPanel({
             option={option}
             name={option.id === PERMISSION_ID ? permissionName : (c) => c.name}
             gloss={option.id === PERMISSION_ID ? (c) => PERMISSION_GLOSS[c.value] ?? '' : undefined}
+            describe={option.id === PERMISSION_ID ? permissionDescription : undefined}
             onSet={(v) => set(option, v)}
           />
         )
@@ -251,11 +271,13 @@ function ChoiceSection({
   option,
   name,
   gloss,
+  describe = (choice) => choice.description,
   onSet
 }: {
   option: ACPConfigOption
   name: (choice: ACPConfigChoice) => string
   gloss?: (choice: ACPConfigChoice) => string
+  describe?: (choice: ACPConfigChoice) => string | undefined
   onSet: (value: string) => void
 }): JSX.Element {
   const current = option.kind.type === 'select' ? option.kind.currentValue : null
@@ -283,8 +305,8 @@ function ChoiceSection({
                   {name(choice)}
                   {short && <span className="session-settings-gloss"> · {short}</span>}
                 </span>
-                {choice.description && (
-                  <span className="session-settings-description">{choice.description}</span>
+                {describe(choice) && (
+                  <span className="session-settings-description">{describe(choice)}</span>
                 )}
               </span>
             </button>
@@ -330,9 +352,7 @@ function SizeSection({
           )
         })}
       </div>
-      {option.description && (
-        <div className="session-settings-description">{option.description}</div>
-      )}
+      <div className="session-settings-description">{WORKFLOW_SIZE_DESCRIPTION}</div>
     </section>
   )
 }

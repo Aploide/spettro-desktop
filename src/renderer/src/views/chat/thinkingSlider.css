@@ -183,8 +183,12 @@
   outline-offset: 2px;
 }
 
-/* Off (set somewhere else — it is not a stop): a hollow thumb at the start. */
+/* Off (set somewhere else — it is not a stop): a smaller hollow thumb
+   short of the Low tick, so position and label agree. */
 .thinking-slider--off .thinking-thumb {
+  width: 12px;
+  height: 12px;
+  margin: -6px 0 0 -6px;
   background: var(--surface-raised);
   box-shadow: inset 0 0 0 1.5px var(--text-tertiary);
 }

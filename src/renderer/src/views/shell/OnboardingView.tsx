@@ -17,7 +17,7 @@
 //
 // A machine that already has the CLI starts on step 2 with step 1 ticked.
 
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { InstallState } from '@shared/model'
 import { call, quietCall, useApp } from '@renderer/state/store'
 import Disclosure, { CopyButton } from '@renderer/views/common/Disclosure'
@@ -49,7 +49,7 @@ export default function SetupAssistant({ step, onSkip }: { step: Step; onSkip?: 
           <AppIcon size={80} />
           <StepIndicator step={step} />
         </header>
-        {step === 'install' ? <InstallStep /> : <ConnectStep onSkip={onSkip} />}
+        {step === 'install' ? <InstallStep /> : <ConnectChooser onSkip={onSkip} />}
       </div>
     </div>
   )
@@ -103,19 +103,40 @@ const STAGE_TEXT: Record<InstallState['stage'], string> = {
   failed: ''
 }
 
+/** How long one installer phase may last before the screen stops promising
+ *  "a few seconds". */
+export const INSTALL_SLOW_MS = 15_000
+
+/** True once the install has sat in the same phase for `afterMs`. */
+function useStalled(active: boolean, stage: InstallState['stage'], afterMs: number): boolean {
+  const [stalled, setStalled] = useState(false)
+  useEffect(() => {
+    setStalled(false)
+    if (!active) return
+    const id = setTimeout(() => setStalled(true), afterMs)
+    return () => clearTimeout(id)
+  }, [active, stage, afterMs])
+  return stalled
+}
+
 function InstallStep(): JSX.Element {
   const app = useApp()
   const install = app?.install ?? { stage: 'idle', failure: null }
   const installing = app?.phase.kind === 'installing'
   const failed = !installing && install.stage === 'failed'
+  const slow = useStalled(installing, install.stage, INSTALL_SLOW_MS)
 
   if (installing) {
     const progress = STAGE_PROGRESS[install.stage]
     return (
       <div className="setup-body">
         <h1 className="setup-title">Installing Spettro…</h1>
-        <div className="setup-sub">This takes a few seconds.</div>
-        <div className="setup-progress">
+        <div className="setup-sub">
+          {slow
+            ? 'This is taking longer than usual. Check your internet connection, or cancel and try again.'
+            : 'This takes a few seconds.'}
+        </div>
+        <div className={`setup-progress${slow ? ' setup-progress--slow' : ''}`}>
           <div
             className="setup-progress-track"
             role="progressbar"
@@ -292,10 +313,20 @@ function Advanced({ banner, bannerNonce }: { banner: string | null; bannerNonce:
 
 // ---------------------------------------------------------------- connect
 
-function ConnectStep({ onSkip }: { onSkip?: () => void }): JSX.Element {
-  const [showSignIn, setShowSignIn] = useState(false)
-  const [showLocal, setShowLocal] = useState(false)
-  const [showKeys, setShowKeys] = useState(false)
+/**
+ * The one way to connect a model, wherever it is asked for: the setup's
+ * second step, and Settings › Models & Providers while nothing is connected
+ * (which every "Connect…" leads to — the bar over the composer, an error
+ * card, the model menu). It used to be drawn three ways, and from the
+ * composer it took two clicks and a second sheet stacked on Settings.
+ * `inPane` sizes it for a settings pane rather than the setup window.
+ */
+export function ConnectChooser({ onSkip, inPane = false }: { onSkip?: () => void; inPane?: boolean }): JSX.Element {
+  // Each way in replaces the chooser, with Back — never a sheet stacked over
+  // it (two icons, two windows, an Escape that closes only one).
+  const [way, setWay] = useState<'choose' | 'signin' | 'local' | 'keys'>('choose')
+  const back = useCallback(() => setWay('choose'), [])
+  const connected = useCallback(() => void quietCall('refreshExtensions'), [])
 
   // The provider list comes from the engine; fetched once on the way in.
   useEffect(() => {
@@ -303,8 +334,12 @@ function ConnectStep({ onSkip }: { onSkip?: () => void }): JSX.Element {
   }, [])
 
   return (
-    <div className="setup-body">
-      {showKeys ? (
+    <div className={`setup-body${inPane ? ' setup-body--pane' : ''}`}>
+      {way === 'signin' ? (
+        <SignInView inline onClose={back} onComplete={connected} />
+      ) : way === 'local' ? (
+        <AddLocalEndpointView inline onClose={back} onAdded={connected} />
+      ) : way === 'keys' ? (
         <>
           <h1 className="setup-title">Use your own API key</h1>
           <div className="setup-sub">
@@ -313,11 +348,11 @@ function ConnectStep({ onSkip }: { onSkip?: () => void }): JSX.Element {
           </div>
           <div className="setup-keys form-scroll">
             <div className="form-card">
-              <ProviderKeyList activate onConnected={() => void quietCall('refreshExtensions')} />
+              <ProviderKeyList activate onConnected={connected} />
             </div>
           </div>
           <div className="setup-actions">
-            <button type="button" className="btn" onClick={() => setShowKeys(false)}>
+            <button type="button" className="btn" onClick={back}>
               Back
             </button>
           </div>
@@ -334,14 +369,14 @@ function ConnectStep({ onSkip }: { onSkip?: () => void }): JSX.Element {
               type="button"
               className="btn btn--prominent btn--large setup-primary"
               autoFocus
-              onClick={() => setShowSignIn(true)}
+              onClick={() => setWay('signin')}
             >
               Sign in to Spettro
             </button>
             <span className="setup-recommended">Recommended</span>
           </div>
           <div className="setup-alternatives">
-            <button type="button" className="setup-alt" onClick={() => setShowKeys(true)}>
+            <button type="button" className="setup-alt" onClick={() => setWay('keys')}>
               <Icon name="key" size={15} />
               <span className="setup-alt-texts">
                 <span className="setup-alt-title">Use my own API key</span>
@@ -349,7 +384,7 @@ function ConnectStep({ onSkip }: { onSkip?: () => void }): JSX.Element {
               </span>
               <Icon name="chevron.right" size={9} />
             </button>
-            <button type="button" className="setup-alt" onClick={() => setShowLocal(true)}>
+            <button type="button" className="setup-alt" onClick={() => setWay('local')}>
               <Icon name="desktopcomputer" size={15} />
               <span className="setup-alt-texts">
                 <span className="setup-alt-title">Use a model on this computer</span>
@@ -360,7 +395,7 @@ function ConnectStep({ onSkip }: { onSkip?: () => void }): JSX.Element {
           </div>
         </>
       )}
-      {onSkip && (
+      {onSkip && way === 'choose' && (
         <button
           type="button"
           className="link setup-skip"
@@ -369,20 +404,6 @@ function ConnectStep({ onSkip }: { onSkip?: () => void }): JSX.Element {
         >
           Continue without a model
         </button>
-      )}
-
-      {showSignIn && (
-        <SignInView
-          stacked
-          onClose={() => setShowSignIn(false)}
-          onComplete={() => void quietCall('refreshExtensions')}
-        />
-      )}
-      {showLocal && (
-        <AddLocalEndpointView
-          onClose={() => setShowLocal(false)}
-          onAdded={() => void quietCall('refreshExtensions')}
-        />
       )}
     </div>
   )

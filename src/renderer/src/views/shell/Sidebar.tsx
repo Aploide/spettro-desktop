@@ -111,6 +111,9 @@ export default function Sidebar({ onOpenWorkflows }: Props): JSX.Element {
   const footerEntries: ContextMenuEntry[] = [
     {
       label: 'Workflows…',
+      // Saved recipes for Ultra's team of helpers; they belong to a project,
+      // which a session is what picks.
+      detail: selectedId ? 'Saved step-by-step plans for big tasks' : 'Open a session to see its saved workflows',
       disabled: !selectedId,
       action: onOpenWorkflows
     },

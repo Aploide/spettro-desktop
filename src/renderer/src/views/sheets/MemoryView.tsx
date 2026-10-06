@@ -170,8 +170,8 @@ export default function MemoryView({ projectPath }: { projectPath: string | null
         value={text}
         placeholder={
           effectiveScope === 'user'
-            ? 'For example: I prefer small, focused commits.'
-            : 'For example: This repo uses pnpm, not npm.'
+            ? 'For example: Call me Anna. I run a bakery and I’m new to code.'
+            : 'For example: Keep the website’s colours cream and brown.'
         }
         onChange={(e) => setText(e.target.value)}
         spellCheck={false}

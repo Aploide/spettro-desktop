@@ -123,6 +123,28 @@
   flex: none;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: var(--sp-md);
+}
+
+/* The price, under the button that might lead to paying. */
+.signin-plans {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+/* In place of the connect chooser rather than over it: the setup column's
+   title and centred flow, no icon of its own (the page has one). */
+.signin--inline {
+  flex: none;
+  width: 100%;
+  padding: 0;
+  gap: var(--sp-md);
+  align-items: center;
+}
+
+.signin--inline .signin-content {
+  width: 100%;
+  min-height: 120px;
+  padding-top: var(--sp-sm);
 }

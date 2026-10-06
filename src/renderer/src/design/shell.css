@@ -979,6 +979,18 @@
   background: none;
 }
 
+/* Said under a label, never only in a tooltip: a disabled item's reason
+   has to be readable without hovering it. */
+.ctx-item-detail {
+  display: block;
+  max-width: 240px;
+  margin-top: 1px;
+  font-size: var(--fs-xs);
+  line-height: 1.35;
+  color: var(--text-tertiary);
+  white-space: normal;
+}
+
 .ctx-item--destructive {
   color: var(--danger);
 }
@@ -1109,6 +1121,30 @@
   width: 340px;
   padding: var(--sp-xs);
   gap: 1px;
+}
+
+/* "New project folder…": the menu becomes a name field. */
+.project-new {
+  padding: var(--sp-md);
+  gap: var(--sp-sm);
+}
+
+.project-new-label {
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+
+.project-new-hint {
+  font-size: var(--fs-sm);
+  line-height: 1.4;
+  color: var(--text-secondary);
+}
+
+.project-new-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--sp-sm);
+  margin-top: var(--sp-xs);
 }
 
 .project-menu-caption {
@@ -1569,6 +1605,36 @@
   transition: width 0.45s ease-out;
 }
 
+/* Stalled in one phase: a sheen runs along the fill so the bar visibly
+   lives while the words say it is slow. */
+.setup-progress--slow .setup-progress-fill {
+  background: linear-gradient(
+      90deg,
+      transparent 0%,
+      color-mix(in srgb, var(--accent-contrast) 45%, transparent) 50%,
+      transparent 100%
+    )
+    no-repeat,
+    var(--accent);
+  background-size: 40% 100%, auto;
+  animation: setup-progress-sheen 1.6s ease-in-out infinite;
+}
+
+@keyframes setup-progress-sheen {
+  from {
+    background-position: -60% 0, 0 0;
+  }
+  to {
+    background-position: 160% 0, 0 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .setup-progress--slow .setup-progress-fill {
+    animation: none;
+  }
+}
+
 .setup-progress-text {
   font-size: var(--fs-sm);
   color: var(--text-secondary);
@@ -1697,12 +1763,6 @@
   background: transparent;
 }
 
-.setup-body .modal-backdrop {
-  /* Sheets opened from setup (sign in, local models) are not part of its
-     centred column. */
-  text-align: left;
-}
-
 .setup-skip {
   margin-top: var(--sp-lg);
   color: var(--text-secondary);
@@ -1794,4 +1854,18 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* The connect step inside Settings › Models & Providers: the same chooser
+   as setup, sized for a pane instead of a window. */
+.setup-body--pane {
+  padding: var(--sp-xl) var(--sp-lg) var(--sp-lg);
+}
+
+.setup-body--pane .setup-title {
+  font-size: var(--fs-lg);
+}
+
+.setup-body--pane .setup-sub {
+  font-size: var(--fs-md);
 }

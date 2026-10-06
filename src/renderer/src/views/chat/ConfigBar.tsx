@@ -56,6 +56,19 @@ export function nextMode(options: ACPConfigOption[]): string | null {
   return values[(at + 1) % values.length]
 }
 
+/**
+ * What each mode does, in words a non-developer can choose between. The CLI
+ * describes its modes by the agent that runs them ("Planning orchestrator
+ * (delegates all discovery to explore worker)"), which is accurate and means
+ * nothing to the person picking one; a mode this app does not know keeps the
+ * CLI's own text.
+ */
+export const MODE_COPY: Record<string, string> = {
+  plan: 'Think it through and propose a plan before changing anything',
+  coding: 'Make the changes for you',
+  ask: 'Answer questions without changing any files'
+}
+
 // ---------------------------------------------------------------------------
 // Select chip (SelectMenu port)
 // ---------------------------------------------------------------------------
@@ -94,6 +107,9 @@ export function SelectChip({
   const tint = isMode && kind.currentValue ? modeColor(kind.currentValue) : undefined
   const current = currentChoice(kind)
   const currentHint = current && hint ? hint(current) : ''
+  const describe = (choice: ACPConfigChoice): string | undefined =>
+    (isMode ? MODE_COPY[choice.value] : undefined) ?? choice.description
+  const currentText = (current && describe(current)) ?? option.description ?? option.name
 
   return (
     <div className="chip-wrap">
@@ -101,11 +117,7 @@ export function SelectChip({
         ref={anchorRef}
         type="button"
         className={'config-chip' + (tint ? ' config-chip--tinted' : '')}
-        title={
-          isMode
-            ? `${option.description ?? option.name} (Shift+Tab switches)`
-            : option.description ?? option.name
-        }
+        title={isMode ? `${currentText} (Shift+Tab switches)` : option.description ?? option.name}
         style={tint ? ({ '--chip-tint': tint } as CSSProperties) : undefined}
         aria-haspopup="menu"
         aria-expanded={open}
@@ -149,8 +161,8 @@ export function SelectChip({
                       <span className="config-menu-hint">{hint(choice)}</span>
                     )}
                   </span>
-                  {choice.description && (
-                    <span className="config-menu-description">{choice.description}</span>
+                  {describe(choice) && (
+                    <span className="config-menu-description">{describe(choice)}</span>
                   )}
                 </span>
               </button>

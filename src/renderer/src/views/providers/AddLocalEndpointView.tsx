@@ -31,12 +31,23 @@ export const LOCAL_PRESETS: { name: string; url: string }[] = [
 
 type PresetState = 'checking' | 'absent' | LocalProbeResult
 
+/** Where to get a model server, for someone who has none: LM Studio first,
+ *  because it is an ordinary app with a window and a model catalogue. */
+const GET_SERVER: { name: string; url: string; note: string }[] = [
+  { name: 'LM Studio', url: 'https://lmstudio.ai', note: 'easiest' },
+  { name: 'Ollama', url: 'https://ollama.com', note: '' }
+]
+
 export default function AddLocalEndpointView({
   onClose,
-  onAdded
+  onAdded,
+  inline = false
 }: {
   onClose: () => void
   onAdded?: () => void
+  /** In place of the connect chooser (setup, Settings › Models while nothing
+   *  is connected), like "Use my own API key", instead of a sheet over it. */
+  inline?: boolean
 }): JSX.Element {
   const [presets, setPresets] = useState<Record<string, PresetState>>({})
   const [endpoint, setEndpoint] = useState('')
@@ -111,6 +122,164 @@ export default function AddLocalEndpointView({
     }
   }
 
+  const content = (
+    <>
+      <div className="local-found" aria-live="polite">
+        {checking && found.length === 0 ? (
+          <div className="local-status">
+            <Spinner size={14} />
+            <span>Looking for a model server…</span>
+          </div>
+        ) : found.length === 0 ? (
+          <div className="local-status local-status--empty">
+            <span className="local-status-icon">
+              <DesktopIcon size={16} />
+            </span>
+            <span>
+              No model server is running. Open LM Studio, Ollama or llama.cpp, then check again.
+            </span>
+            <button className="btn btn--small" onClick={scan}>
+              Check Again
+            </button>
+          </div>
+        ) : (
+          found.map(({ preset, result }) => (
+            <div className="local-server" key={preset.url}>
+              <span className={`local-server-icon${result.models.length > 0 ? ' local-server-icon--ok' : ''}`}>
+                {result.models.length > 0 ? <CheckSealIcon size={16} /> : <WarningTriangleIcon size={15} />}
+              </span>
+              <span className="local-server-texts">
+                <span className="local-server-name">
+                  {preset.name}
+                  {result.models.length > 0 && (
+                    <span className="local-server-count">
+                      {' '}
+                      · {result.models.length} {result.models.length === 1 ? 'model' : 'models'}
+                    </span>
+                  )}
+                </span>
+                <span className="local-server-sub">
+                  {result.models.length > 0
+                    ? modelPreview(result)
+                    : `${preset.name} is running but has no models. Download one first, then check again.`}
+                </span>
+              </span>
+              {result.models.length > 0 ? (
+                <button
+                  className="btn btn--small btn--prominent"
+                  disabled={isWorking}
+                  onClick={() => void add(preset.url, null, preset.name)}
+                >
+                  Add
+                </button>
+              ) : (
+                <button className="btn btn--small" onClick={scan}>
+                  Check Again
+                </button>
+              )}
+            </div>
+          ))
+        )}
+        {!checking && found.length === 0 && (
+          <div className="local-get">
+            <span>Don&rsquo;t have one?</span>
+            {GET_SERVER.map((server) => (
+              <button
+                key={server.url}
+                type="button"
+                className="link"
+                onClick={() => void quietCall('openExternal', server.url)}
+              >
+                Get {server.name}
+                {server.note && ` (${server.note})`} →
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* An address and a key are for people who run their own server. */}
+      <Disclosure label="Advanced: a different address" openLabel="Advanced: a different address" defaultOpen={false}>
+        <div className="local-fields">
+          <input
+            className="input input--mono"
+            type="text"
+            placeholder="http://localhost:1234"
+            aria-label="Server address"
+            value={endpoint}
+            spellCheck={false}
+            onChange={(e) => {
+              setEndpoint(e.target.value)
+              setProbe(null)
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && trimmed !== '') {
+                e.stopPropagation()
+                void testCustom()
+              }
+            }}
+          />
+          <input
+            className="input"
+            type="password"
+            placeholder="API key (only if your server asks for one)"
+            aria-label="Server API key"
+            value={apiKey}
+            onChange={(e) => setApiKey(e.target.value)}
+          />
+          {probe && (
+            <div className="probe-card">
+              <span className="probe-head">
+                <span className="probe-ok">
+                  <CheckSealIcon size={14} />
+                </span>
+                {probe.name} — {probe.models.length} {probe.models.length === 1 ? 'model' : 'models'}
+              </span>
+              {probe.models.length > 0 ? (
+                <span className="probe-models">{modelPreview(probe)}</span>
+              ) : (
+                <span className="probe-models">It&rsquo;s running but has no models. Download one first.</span>
+              )}
+            </div>
+          )}
+          <div className="local-custom-actions">
+            <button
+              className="btn btn--small"
+              disabled={isWorking || trimmed === ''}
+              onClick={() =>
+                void (probe === null
+                  ? testCustom()
+                  : add(trimmed, apiKey === '' ? null : apiKey, probe.name))
+              }
+            >
+              {probe === null ? 'Check Address' : 'Add This Server'}
+            </button>
+          </div>
+        </div>
+      </Disclosure>
+
+      {error !== null && <span className="form-error">{error}</span>}
+    </>
+  )
+
+  if (inline) {
+    return (
+      <div className="local local--inline">
+        <h1 className="setup-title">Use a model on this computer</h1>
+        <div className="setup-sub">
+          Spettro works with LM Studio, Ollama and llama.cpp. Your messages stay on this computer.
+        </div>
+        <div className="local-inline-body">{content}</div>
+        <div className="setup-actions">
+          {isWorking && <Spinner size={16} />}
+          <button type="button" className="btn" onClick={onClose}>
+            Back
+          </button>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="modal-backdrop modal-backdrop--stacked" role="presentation">
       <div className="modal-panel modal-panel--local" role="dialog" aria-modal="true" aria-label="Use a model on this computer">
@@ -122,124 +291,7 @@ export default function AddLocalEndpointView({
             </span>
           </header>
 
-          <div className="local-found" aria-live="polite">
-            {checking && found.length === 0 ? (
-              <div className="local-status">
-                <Spinner size={14} />
-                <span>Looking for a model server…</span>
-              </div>
-            ) : found.length === 0 ? (
-              <div className="local-status local-status--empty">
-                <span className="local-status-icon">
-                  <DesktopIcon size={16} />
-                </span>
-                <span>
-                  No model server is running. Open LM Studio, Ollama or llama.cpp, then check again.
-                </span>
-                <button className="btn btn--small" onClick={scan}>
-                  Check Again
-                </button>
-              </div>
-            ) : (
-              found.map(({ preset, result }) => (
-                <div className="local-server" key={preset.url}>
-                  <span className={`local-server-icon${result.models.length > 0 ? ' local-server-icon--ok' : ''}`}>
-                    {result.models.length > 0 ? <CheckSealIcon size={16} /> : <WarningTriangleIcon size={15} />}
-                  </span>
-                  <span className="local-server-texts">
-                    <span className="local-server-name">
-                      {preset.name}
-                      {result.models.length > 0 && (
-                        <span className="local-server-count">
-                          {' '}
-                          · {result.models.length} {result.models.length === 1 ? 'model' : 'models'}
-                        </span>
-                      )}
-                    </span>
-                    <span className="local-server-sub">
-                      {result.models.length > 0
-                        ? modelPreview(result)
-                        : `${preset.name} is running but has no models. Download one first, then check again.`}
-                    </span>
-                  </span>
-                  {result.models.length > 0 ? (
-                    <button
-                      className="btn btn--small btn--prominent"
-                      disabled={isWorking}
-                      onClick={() => void add(preset.url, null, preset.name)}
-                    >
-                      Add
-                    </button>
-                  ) : (
-                    <button className="btn btn--small" onClick={scan}>
-                      Check Again
-                    </button>
-                  )}
-                </div>
-              ))
-            )}
-          </div>
-
-          <Disclosure label="Use a different address" openLabel="Use a different address" defaultOpen={false}>
-            <div className="local-fields">
-              <input
-                className="input input--mono"
-                type="text"
-                placeholder="http://localhost:1234"
-                aria-label="Server address"
-                value={endpoint}
-                spellCheck={false}
-                onChange={(e) => {
-                  setEndpoint(e.target.value)
-                  setProbe(null)
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && trimmed !== '') {
-                    e.stopPropagation()
-                    void testCustom()
-                  }
-                }}
-              />
-              <input
-                className="input"
-                type="password"
-                placeholder="API key (only if your server asks for one)"
-                aria-label="Server API key"
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-              />
-              {probe && (
-                <div className="probe-card">
-                  <span className="probe-head">
-                    <span className="probe-ok">
-                      <CheckSealIcon size={14} />
-                    </span>
-                    {probe.name} — {probe.models.length} {probe.models.length === 1 ? 'model' : 'models'}
-                  </span>
-                  {probe.models.length > 0 ? (
-                    <span className="probe-models">{modelPreview(probe)}</span>
-                  ) : (
-                    <span className="probe-models">It&rsquo;s running but has no models. Download one first.</span>
-                  )}
-                </div>
-              )}
-              <div className="local-custom-actions">
-                <button
-                  className="btn btn--small"
-                  disabled={isWorking || trimmed === ''}
-                  onClick={() =>
-                    void (probe === null
-                      ? testCustom()
-                      : add(trimmed, apiKey === '' ? null : apiKey, probe.name))
-                  }
-                >
-                  {probe === null ? 'Check Address' : 'Add This Server'}
-                </button>
-              </div>
-            </div>
-          </Disclosure>
-
-          {error !== null && <span className="form-error">{error}</span>}
+          {content}
 
           <footer className="local-footer">
             {isWorking && <Spinner size={16} />}

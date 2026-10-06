@@ -793,13 +793,6 @@
   font-weight: 500;
 }
 
-.command-hint {
-  flex: none;
-  font-family: var(--font-mono);
-  font-size: var(--fs-sm);
-  color: var(--text-tertiary);
-}
-
 .command-description {
   margin-left: auto;
   padding-left: var(--sp-md);
@@ -1311,6 +1304,34 @@
   color: var(--text-primary);
 }
 
+/* Nothing connected: the menu is one sentence and the way to fix it. */
+.model-menu-empty--none {
+  padding: var(--sp-md) var(--sp-md) var(--sp-sm);
+}
+
+.model-menu-connect {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-sm);
+  margin: 0 6px 6px;
+  padding: 8px var(--sp-sm);
+  border: none;
+  border-radius: var(--rad-sm);
+  background: var(--accent);
+  color: var(--accent-contrast);
+  font: inherit;
+  font-size: var(--fs-md);
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+}
+
+.model-menu-connect:hover,
+.model-menu-connect:focus-visible {
+  filter: brightness(1.08);
+  outline: none;
+}
+
 /* ------------------------------------------------------------------ */
 /* Session settings popover                                            */
 /* ------------------------------------------------------------------ */
@@ -1583,6 +1604,27 @@
 
 .no-model-action:hover {
   filter: brightness(1.08);
+}
+
+/* A send was held back: the bar takes the eye once, then stays put. */
+.no-model-bar--nudged {
+  border-color: color-mix(in srgb, var(--warning) 70%, transparent);
+  animation: no-model-nudge 520ms ease-out 1;
+}
+
+@keyframes no-model-nudge {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--warning) 45%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 8px transparent;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .no-model-bar--nudged {
+    animation: none;
+  }
 }
 
 /* ------------------------------------------------------- reconnecting */

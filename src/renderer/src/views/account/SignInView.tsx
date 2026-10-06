@@ -38,9 +38,18 @@ interface Props {
   onClose: () => void
   /** Presented from another sheet (Settings, Connect Providers). */
   stacked?: boolean
+  /** Drawn in place of the connect chooser (setup's step 2, Settings ›
+   *  Models while nothing is connected) instead of as a sheet over it: one
+   *  page under one icon, with Back where Cancel was. */
+  inline?: boolean
 }
 
-export default function SignInView({ onComplete, onClose, stacked = false }: Props): JSX.Element {
+/** What signing in gets you, for someone who has never heard of a plan: the
+ *  account is how models come without keys, and it can be made from here. */
+const BLURB =
+  'Sign in, or create a Spettro account. Plans include the models and credits — no API keys to set up.'
+
+export default function SignInView({ onComplete, onClose, stacked = false, inline = false }: Props): JSX.Element {
   const app = useApp()
   const account = app?.extensions?.account
   const pushed = account?.login ?? null
@@ -150,6 +159,93 @@ export default function SignInView({ onComplete, onClose, stacked = false }: Pro
     copyTimer.current = setTimeout(() => setDidCopy(false), 2000)
   }
 
+  const content = isComplete ? (
+    <div className="signin-state">
+      <CheckSealIcon size={32} />
+      <span className="signin-muted">Signed in — loading your plan…</span>
+    </div>
+  ) : state === 'idle' || state === 'cancelled' || state === 'unknown' ? (
+    <div className="signin-state">
+      <p className="signin-muted signin-detail">
+        Spettro will open your web browser so you can sign in. Come back here when you&rsquo;re
+        done.
+      </p>
+      <button className="btn btn--prominent btn--large" autoFocus onClick={() => void start()}>
+        Continue in Browser
+      </button>
+      {/* What it costs, beside the button that might cost something. */}
+      <button className="link signin-plans" onClick={() => void quietCall('openExternal', pricingUrl)}>
+        See plans and prices
+      </button>
+    </div>
+  ) : state === 'error' || state === 'expired' ? (
+    <div className="signin-state">
+      <span className="signin-warning">
+        <WarnIcon size={28} />
+      </span>
+      <span className="signin-strong">
+        {state === 'expired' ? 'That sign-in link expired.' : 'Couldn’t sign in.'}
+      </span>
+      {(login?.error ?? failure) && (
+        <span className="signin-muted signin-detail">{message(login?.error ?? failure)}</span>
+      )}
+      <button className="btn btn--prominent" onClick={() => void start()}>
+        Try Again
+      </button>
+    </div>
+  ) : state === 'pending' ? (
+    <div className="signin-waiting">
+      <div className="signin-waiting-head">
+        <Spinner size={16} />
+        <span className="signin-strong">Waiting for you to sign in…</span>
+      </div>
+      <p className="signin-muted signin-detail">
+        Finish signing in in your browser. This window updates on its own.
+      </p>
+      {browserUrl && (
+        <Disclosure label="Having trouble?" openLabel="Having trouble?">
+          <p className="signin-muted signin-detail">
+            If no browser window opened, open this link yourself:
+          </p>
+          <div className="signin-url">
+            <span className="signin-url-text mono">{browserUrl}</span>
+            <button className="btn btn--small" onClick={() => copy(browserUrl)}>
+              {didCopy ? 'Copied' : 'Copy'}
+            </button>
+          </div>
+          <button
+            className="btn btn--small"
+            onClick={() => void quietCall('openExternal', browserUrl)}
+          >
+            Open in Browser
+          </button>
+        </Disclosure>
+      )}
+    </div>
+  ) : (
+    <div className="signin-state">
+      <Spinner size={20} />
+      <span className="signin-muted">Starting sign-in…</span>
+    </div>
+  )
+
+  if (inline) {
+    return (
+      <div className="signin signin--inline">
+        <h1 className="setup-title">Sign in to Spettro</h1>
+        <div className="setup-sub">{BLURB}</div>
+        <div className="signin-content">{content}</div>
+        {!isComplete && (
+          <div className="setup-actions">
+            <button type="button" className="btn" onClick={cancel}>
+              Back
+            </button>
+          </div>
+        )}
+      </div>
+    )
+  }
+
   return (
     <div className={`modal-backdrop${stacked ? ' modal-backdrop--stacked' : ''}`} role="presentation">
       <div className="modal-panel modal-panel--signin" role="dialog" aria-modal="true" aria-label="Sign in to Spettro">
@@ -157,89 +253,18 @@ export default function SignInView({ onComplete, onClose, stacked = false }: Pro
           <header className="signin-header">
             <AppIcon size={72} />
             <h2 className="signin-title">Sign in to Spettro</h2>
-            <p className="signin-blurb">
-              Use your subscription&rsquo;s models without configuring any API keys.
-            </p>
+            <p className="signin-blurb">{BLURB}</p>
           </header>
 
-          <div className="signin-content">
-            {isComplete ? (
-              <div className="signin-state">
-                <CheckSealIcon size={32} />
-                <span className="signin-muted">Signed in — loading your plan…</span>
-              </div>
-            ) : state === 'idle' || state === 'cancelled' || state === 'unknown' ? (
-              <div className="signin-state">
-                <p className="signin-muted signin-detail">
-                  Spettro will open your web browser so you can sign in. Come back here when you&rsquo;re
-                  done.
-                </p>
-                <button className="btn btn--prominent btn--large" autoFocus onClick={() => void start()}>
-                  Continue in Browser
-                </button>
-              </div>
-            ) : state === 'error' || state === 'expired' ? (
-              <div className="signin-state">
-                <span className="signin-warning">
-                  <WarnIcon size={28} />
-                </span>
-                <span className="signin-strong">
-                  {state === 'expired' ? 'That sign-in link expired.' : 'Couldn’t sign in.'}
-                </span>
-                {(login?.error ?? failure) && (
-                  <span className="signin-muted signin-detail">{message(login?.error ?? failure)}</span>
-                )}
-                <button className="btn btn--prominent" onClick={() => void start()}>
-                  Try Again
-                </button>
-              </div>
-            ) : state === 'pending' ? (
-              <div className="signin-waiting">
-                <div className="signin-waiting-head">
-                  <Spinner size={16} />
-                  <span className="signin-strong">Waiting for you to sign in…</span>
-                </div>
-                <p className="signin-muted signin-detail">
-                  Finish signing in in your browser. This window updates on its own.
-                </p>
-                {browserUrl && (
-                  <Disclosure label="Having trouble?" openLabel="Having trouble?">
-                    <p className="signin-muted signin-detail">
-                      If no browser window opened, open this link yourself:
-                    </p>
-                    <div className="signin-url">
-                      <span className="signin-url-text mono">{browserUrl}</span>
-                      <button className="btn btn--small" onClick={() => copy(browserUrl)}>
-                        {didCopy ? 'Copied' : 'Copy'}
-                      </button>
-                    </div>
-                    <button
-                      className="btn btn--small"
-                      onClick={() => void quietCall('openExternal', browserUrl)}
-                    >
-                      Open in Browser
-                    </button>
-                  </Disclosure>
-                )}
-              </div>
-            ) : (
-              <div className="signin-state">
-                <Spinner size={20} />
-                <span className="signin-muted">Starting sign-in…</span>
-              </div>
-            )}
-          </div>
+          <div className="signin-content">{content}</div>
 
-          <footer className="signin-footer">
-            <button className="link" onClick={() => void quietCall('openExternal', pricingUrl)}>
-              See plans
-            </button>
-            {!isComplete && (
+          {!isComplete && (
+            <footer className="signin-footer">
               <button className="btn" onClick={cancel}>
                 Cancel
               </button>
-            )}
-          </footer>
+            </footer>
+          )}
         </div>
       </div>
     </div>

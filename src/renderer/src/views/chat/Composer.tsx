@@ -39,6 +39,7 @@ import ModelMenu from './ModelMenu'
 import MentionMenu from './MentionMenu'
 import TodoList from './TodoList'
 import { MODE_ID } from './SessionSettingsPopover'
+import { commandDescription, orderCommands, takesArguments } from './commandCopy'
 import { insertMention, liveMentions, mentionAt, projectFiles, rankFiles } from './mentions'
 
 // ImageAttachment.swift downsampling constants: longest edge kept after
@@ -130,6 +131,8 @@ export default function Composer({ chat, promptSeed, dock, onSubmit }: ComposerP
     [chat.id]
   )
   const [attachments, setAttachments] = useState<PendingAttachment[]>([])
+  // A send was held back because no model is connected: the bar says so.
+  const [noModelNudged, setNoModelNudged] = useState(false)
   const [mentions, setMentions] = useState<string[]>([])
   const [commandIndex, setCommandIndex] = useState(0)
   const [focused, setFocused] = useState(false)
@@ -268,7 +271,7 @@ export default function Composer({ chat, promptSeed, dock, onSubmit }: ComposerP
     // ones with a hint complete to "/name " so the user can type arguments.
     if (paletteVisible && matching[commandIndex]) {
       const command = matching[commandIndex]
-      if (command.inputHint) {
+      if (takesArguments(command)) {
         setDraft('/' + command.name + ' ')
         putCaret(command.name.length + 2)
         return
@@ -277,6 +280,15 @@ export default function Composer({ chat, promptSeed, dock, onSubmit }: ComposerP
     }
     const trimmed = text.trim()
     if (!((trimmed.length > 0 || attachments.length > 0) && ready)) return
+    // Nothing can answer a message yet. Sending it anyway made a chat named
+    // after it that failed at once, with a Try again that failed the same
+    // way; instead the message stays in the field and the one fix opens.
+    // Slash commands still go: they are answered by Spettro itself.
+    if (app?.noModel && !trimmed.startsWith('/')) {
+      setNoModelNudged(true)
+      openSettings('models')
+      return
+    }
     const toSend = attachments.map((a) => ({ data: a.data, mimeType: a.mimeType }))
     const mentioned = liveMentions(trimmed, mentions)
     if (onSubmit) {
@@ -411,7 +423,7 @@ export default function Composer({ chat, promptSeed, dock, onSubmit }: ComposerP
   return (
     <div className="composer-outer">
       <div className="composer-column">
-        {app?.noModel && <NoModelBar />}
+        {app?.noModel && <NoModelBar nudged={noModelNudged} />}
         {dock}
         {!onSubmit && <TodoList plan={chat.plan} busy={chat.isBusy} folded={waitingOnUser} />}
 
@@ -446,9 +458,8 @@ export default function Composer({ chat, promptSeed, dock, onSubmit }: ComposerP
                   }}
                 >
                   <span className="command-name">/{command.name}</span>
-                  {command.inputHint && <span className="command-hint">{command.inputHint}</span>}
-                  {command.description && (
-                    <span className="command-description">{command.description}</span>
+                  {commandDescription(command) && (
+                    <span className="command-description">{commandDescription(command)}</span>
                   )}
                 </button>
               ))}
@@ -607,11 +618,19 @@ export default function Composer({ chat, promptSeed, dock, onSubmit }: ComposerP
 
 /** Nothing can run a prompt — no provider, no local model, not signed in.
  *  Said before the first message fails, with the way to fix it. */
-function NoModelBar(): JSX.Element {
+function NoModelBar({ nudged }: { nudged: boolean }): JSX.Element {
   return (
-    <div className="no-model-bar" role="status" data-testid="no-model-bar">
+    <div
+      className={`no-model-bar${nudged ? ' no-model-bar--nudged' : ''}`}
+      role="status"
+      data-testid="no-model-bar"
+    >
       <Icon name="key" size={13} />
-      <span className="no-model-text">Connect a model to start.</span>
+      <span className="no-model-text">
+        {nudged
+          ? 'Connect a model to send this — your message will wait here.'
+          : 'Connect a model to start.'}
+      </span>
       <button type="button" className="no-model-action" onClick={() => openSettings('models')}>
         Connect…
       </button>
@@ -656,11 +675,11 @@ function matchingCommands(draft: string, commands: ACPCommand[]): ACPCommand[] {
     if (commands.some((c) => '/' + c.name.toLowerCase() === word)) return []
   }
   const q = (draft.split(' ', 1)[0] || '/').toLowerCase()
-  const matches = commands.filter(
+  const matches = orderCommands(commands).filter(
     (c) =>
       q === '/' ||
       ('/' + c.name.toLowerCase()).startsWith(q) ||
-      (c.description ?? '').toLowerCase().includes(q.slice(1))
+      (commandDescription(c) ?? '').toLowerCase().includes(q.slice(1))
   )
   return matches.slice(0, 8)
 }

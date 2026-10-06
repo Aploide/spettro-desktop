@@ -426,3 +426,33 @@
 .local-footer {
   justify-content: flex-end;
 }
+
+/* No server yet: where to get one, under the empty state. */
+.local-get {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--sp-xs) var(--sp-md);
+  padding: 0 var(--sp-xs);
+  font-size: var(--fs-md);
+  color: var(--text-secondary);
+}
+
+/* In place of the connect chooser, like the API-key list: the setup's
+   centred title, the server list left-aligned under it. */
+.local--inline {
+  flex: none;
+  width: 100%;
+  padding: 0;
+  text-align: center;
+  gap: var(--sp-md);
+  align-items: center;
+}
+
+.local-inline-body {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-lg);
+  text-align: left;
+}

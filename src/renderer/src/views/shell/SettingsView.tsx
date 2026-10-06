@@ -27,7 +27,7 @@ import { diagnosticsText, humanizeError } from '@shared/humanize'
 import type { Appearance, CLISessionEntry } from '@shared/model'
 import { SHORTCUTS, shortcutText } from '@shared/shortcuts'
 import { call, quietCall, useApp, useStore } from '@renderer/state/store'
-import { openSettings, type SettingsPane } from '@renderer/state/shell'
+import { closeSettings, openSettings, type SettingsPane } from '@renderer/state/shell'
 import { mayClose } from '@renderer/views/common/closeGuard'
 import { CopyButton } from '@renderer/views/common/Disclosure'
 import MemoryView from '@renderer/views/sheets/MemoryView'
@@ -41,12 +41,13 @@ import SignInView from '@renderer/views/account/SignInView'
 import { badgePlan, WarningTriangleIcon } from '@renderer/views/providers/icons'
 import {
   choicesOf,
-  permissionGloss,
+  permissionDescription,
   permissionName,
   PERMISSION_ID
 } from '@renderer/views/chat/SessionSettingsPopover'
 import { Icon, type IconName } from '@renderer/design/icons'
 import AppIcon from './AppIcon'
+import { ConnectChooser } from './OnboardingView'
 import PlanBadge from './PlanBadge'
 import Spinner from './Spinner'
 import UpdatesPane from './UpdatesPane'
@@ -248,7 +249,7 @@ function GeneralPane(): JSX.Element {
                   choices={choicesOf(permission).map((c) => ({
                     value: c.value,
                     label: PERMISSION_SHORT[c.value] ?? permissionName(c),
-                    title: permissionGloss(c) ?? c.description ?? undefined
+                    title: permissionDescription(c)
                   }))}
                   onChange={(value) => void call('setDefaultOption', PERMISSION_ID, value)}
                 />
@@ -482,6 +483,16 @@ function ModelsPane({ onManage, onBrowseModels }: { onManage: () => void; onBrow
     ...providers.local.map((l) => ({ name: l.name, detail: `${shortHost(l.endpoint)} · ${l.modelCount} models` }))
   ]
 
+  // Nothing connected: the chooser itself, right here, rather than a warning
+  // and a button that stacks a second sheet over this one.
+  if (entries.length === 0 && !ext.unsupported) {
+    return (
+      <div className="form-scroll">
+        <ConnectChooser inPane />
+      </div>
+    )
+  }
+
   return (
     <div className="form-scroll">
       {ext.unsupported && <UnsupportedCLINotice />}
@@ -568,7 +579,7 @@ function PermissionsPane(): JSX.Element {
                 <span className="form-choice-texts">
                   <span className="form-choice-name">{permissionName(c)}</span>
                   <span className="form-choice-detail">
-                    {[permissionGloss(c), c.description].filter(Boolean).join(' — ')}
+                    {permissionDescription(c)}
                   </span>
                 </span>
               </label>
@@ -653,6 +664,19 @@ function AdvancedPane(): JSX.Element {
             <button className="btn" onClick={() => void chooseExecutable()}>
               Use a Different Copy…
             </button>
+            {/* Not running (the wrong file was chosen, or none is found):
+                the way back to the copy Spettro installs itself. */}
+            {!running && !reconnecting && (
+              <button
+                className="btn btn--prominent"
+                onClick={() => {
+                  closeSettings()
+                  void call('installCLI')
+                }}
+              >
+                Install Spettro
+              </button>
+            )}
           </div>
           {showPathEditor && (
             <div className="form-row form-row--stack">

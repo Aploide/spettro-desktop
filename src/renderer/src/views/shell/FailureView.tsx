@@ -5,7 +5,7 @@
 // Diagnostics for a bug report — available, never the first thing read.
 
 import { humanizeError } from '@shared/humanize'
-import { call, useApp } from '@renderer/state/store'
+import { call, quietCall, useApp } from '@renderer/state/store'
 import { openSettings } from '@renderer/state/shell'
 import { DiagnosticsDisclosure } from '@renderer/views/common/Disclosure'
 import { WarningIcon } from './icons'
@@ -24,7 +24,10 @@ export default function FailureView({ message, onOpenSettings }: Props): JSX.Ele
   // other failure is worth one more start before anything else.
   const primary =
     kind === 'reinstall'
-      ? { label: 'Reinstall Spettro', run: () => void call('installCLI') }
+      ? {
+          label: human.action?.label === 'Install Spettro' ? 'Install Spettro' : 'Reinstall Spettro',
+          run: () => void call('installCLI')
+        }
       : kind === 'update'
         ? { label: 'Check for Updates', run: () => openSettings('updates') }
         : { label: 'Try Again', run: () => void call('retryBootstrap') }
@@ -37,9 +40,17 @@ export default function FailureView({ message, onOpenSettings }: Props): JSX.Ele
       <div className="failure-title">{human.known ? human.title : 'Spettro couldn’t start'}</div>
       <div className="failure-message">{human.detail}</div>
       <div className="failure-buttons">
-        <button className="btn" onClick={onOpenSettings}>
-          Open Settings
-        </button>
+        {kind === 'reinstall' ? (
+          // The engine is the wrong file or a broken one: the other way out
+          // is a different file, chosen right here.
+          <button className="btn" onClick={() => void chooseAnotherFile()}>
+            Choose Another File…
+          </button>
+        ) : (
+          <button className="btn" onClick={onOpenSettings}>
+            Open Settings
+          </button>
+        )}
         <button className="btn btn--prominent" onClick={primary.run}>
           {primary.label}
         </button>
@@ -49,4 +60,10 @@ export default function FailureView({ message, onOpenSettings }: Props): JSX.Ele
       </div>
     </div>
   )
+}
+
+/** A native file picker for the engine; cancelling it changes nothing. */
+async function chooseAnotherFile(): Promise<void> {
+  const path = await quietCall('pickExecutable')
+  if (path) await call('useExplicitCLIPath', path)
 }

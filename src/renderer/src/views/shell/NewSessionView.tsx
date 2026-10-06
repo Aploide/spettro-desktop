@@ -9,14 +9,17 @@
 // the chosen folder and hands it the message, and the column becomes that
 // chat. Nothing is created by looking at this screen or changing the folder.
 
-import { useCallback, useState } from 'react'
-import { call, useApp } from '@renderer/state/store'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { humanizeError } from '@shared/humanize'
+import { PROJECTS_FOLDER } from '@shared/model'
+import { call, quietCall, useApp } from '@renderer/state/store'
 import { setNewSessionPath, useShell } from '@renderer/state/shell'
 import { Icon } from '@renderer/design/icons'
 import Composer, { draftChat, type PromptSeed, type SubmitAttachment } from '@renderer/views/chat/Composer'
 import { ReconnectingPill, SidebarReopenButton, useDismiss } from '@renderer/views/chat/ChatHeader'
 import StarterPrompts from '@renderer/views/chat/StarterPrompts'
 import { basename, isBroadFolder } from './util'
+import '@renderer/design/form.css'
 
 export default function NewSessionView(): JSX.Element {
   const app = useApp()
@@ -26,16 +29,33 @@ export default function NewSessionView(): JSX.Element {
   const missing = (app?.missingProjects ?? []).includes(path)
   const broad = path !== '' && isBroadFolder(path, homePath)
 
-  // Folders the user has already said "Continue" for, this run.
+  // Folders the user has said "Continue" for — remembered in prefs, so the
+  // question is asked once per folder, not after every new session and every
+  // launch. The local list makes the click take effect before main answers.
   const [acknowledged, setAcknowledged] = useState<string[]>([])
+  const approved = app?.approvedBroadFolders ?? []
   const [nudge, setNudge] = useState(0)
   const [promptSeed, setPromptSeed] = useState<PromptSeed | null>(null)
-  const needsConfirm = broad && !acknowledged.includes(path)
+  const needsConfirm = broad && !acknowledged.includes(path) && !approved.includes(path)
+  // A held-back send moves the focus to the answer it waits on, so Enter
+  // twice never just "does nothing".
+  const answerRef = useRef<HTMLButtonElement>(null)
+  useEffect(() => {
+    if (nudge > 0) answerRef.current?.focus()
+  }, [nudge])
+  const approve = (): void => {
+    setAcknowledged((a) => [...a, path])
+    void call('approveBroadFolder', path)
+  }
 
   const choose = useCallback((next: string): void => {
     setNewSessionPath(next)
     void call('rememberProject', next)
   }, [])
+
+  // The folder menu, opened from its chip or, at "New Project…" on the
+  // home-folder warning, straight on its name field.
+  const [menu, setMenu] = useState<FolderMenu>('closed')
 
   const pickFolder = useCallback(async (): Promise<void> => {
     const picked = await call('pickFolder')
@@ -73,6 +93,8 @@ export default function NewSessionView(): JSX.Element {
             missing={missing}
             recents={app?.recentProjects ?? []}
             missingProjects={app?.missingProjects ?? []}
+            menu={menu}
+            onMenu={setMenu}
             onChoose={choose}
             onPickFolder={() => void pickFolder()}
           />
@@ -80,29 +102,42 @@ export default function NewSessionView(): JSX.Element {
         {missing ? (
           <FolderNotice key={`m${nudge}`} nudged={nudge > 0} tone="danger">
             <span className="new-session-notice-text">
+              {nudge > 0 && <strong>Choose where Spettro should work first. </strong>}
               {basename(path)} can&rsquo;t be found. It may have been moved or deleted.
             </span>
-            <button type="button" className="btn btn--small" onClick={() => void pickFolder()}>
+            <button ref={answerRef} type="button" className="btn btn--small" onClick={() => void pickFolder()}>
               Choose Folder…
             </button>
           </FolderNotice>
         ) : needsConfirm ? (
           <FolderNotice key={`b${nudge}`} nudged={nudge > 0} tone="warning">
             <span className="new-session-notice-text">
+              {nudge > 0 && <strong>Choose where Spettro should work first. </strong>}
               {path.replace(/[/\\]+$/, '') === homePath.replace(/[/\\]+$/, '')
                 ? 'Spettro will be able to read everything in your home folder.'
                 : 'Spettro will be able to read everything on this computer.'}{' '}
               Choose a project folder instead?
             </span>
-            <button type="button" className="btn btn--small" onClick={() => setAcknowledged((a) => [...a, path])}>
+            <button type="button" className="btn btn--small" onClick={approve}>
               Continue
             </button>
-            <button type="button" className="btn btn--small btn--prominent" onClick={() => void pickFolder()}>
+            <button type="button" className="btn btn--small" onClick={() => setMenu('new')}>
+              New Project…
+            </button>
+            <button
+              ref={answerRef}
+              type="button"
+              className="btn btn--small btn--prominent"
+              onClick={() => void pickFolder()}
+            >
               Choose Folder…
             </button>
           </FolderNotice>
         ) : null}
-        <StarterPrompts onPrompt={(text) => setPromptSeed({ text, nonce: Date.now() })} />
+        <StarterPrompts
+          fresh={broad}
+          onPrompt={(text) => setPromptSeed({ text, nonce: Date.now() })}
+        />
       </div>
     </div>
   )
@@ -130,14 +165,18 @@ function FolderNotice({
 
 // ------------------------------------------------------------ folder chip
 
-/** "Working in ▸ acme-web". Opens the recents, each removable, plus Choose
- *  folder…; a recent that no longer exists is greyed with "Folder not found"
- *  rather than failing when clicked. */
+type FolderMenu = 'closed' | 'list' | 'new'
+
+/** "Working in ▸ acme-web". Opens the recents, each removable, plus New
+ *  project folder… and Choose folder…; a recent that no longer exists is
+ *  greyed with "Folder not found" rather than failing when clicked. */
 function ProjectChip({
   path,
   missing,
   recents,
   missingProjects,
+  menu,
+  onMenu,
   onChoose,
   onPickFolder
 }: {
@@ -145,11 +184,13 @@ function ProjectChip({
   missing: boolean
   recents: string[]
   missingProjects: string[]
+  menu: FolderMenu
+  onMenu: (menu: FolderMenu) => void
   onChoose: (path: string) => void
   onPickFolder: () => void
 }): JSX.Element {
-  const [open, setOpen] = useState(false)
-  const close = useCallback(() => setOpen(false), [])
+  const open = menu !== 'closed'
+  const close = useCallback(() => onMenu('closed'), [onMenu])
   const ref = useDismiss(open, close)
   // The current folder is always offered, even before it is a recent.
   const rows = recents.includes(path) || path === '' ? recents : [path, ...recents]
@@ -162,7 +203,7 @@ function ProjectChip({
         aria-haspopup="menu"
         aria-expanded={open}
         title={path}
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => onMenu(open ? 'closed' : 'list')}
         data-testid="project-chip"
       >
         <span className="project-chip-caption">Working in</span>
@@ -170,7 +211,16 @@ function ProjectChip({
         <span className="project-chip-name">{path ? basename(path) : 'Choose a folder'}</span>
         <Icon name="chevron.down" size={9} />
       </button>
-      {open && (
+      {menu === 'new' && (
+        <NewProjectForm
+          onCancel={close}
+          onCreated={(created) => {
+            close()
+            setNewSessionPath(created)
+          }}
+        />
+      )}
+      {menu === 'list' && (
         <div className="popover project-menu" role="menu" aria-label="Project folder">
           {rows.length > 0 && <div className="project-menu-caption">Recent folders</div>}
           {rows.map((p) => {
@@ -219,6 +269,17 @@ function ProjectChip({
             type="button"
             role="menuitem"
             className="project-menu-choose project-menu-pick"
+            onClick={() => onMenu('new')}
+          >
+            <span className="project-menu-check">
+              <Icon name="plus" size={12} />
+            </span>
+            <span className="project-menu-name">New project folder…</span>
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            className="project-menu-choose project-menu-pick"
             onClick={() => {
               close()
               onPickFolder()
@@ -232,5 +293,75 @@ function ProjectChip({
         </div>
       )}
     </div>
+  )
+}
+
+/** "New project folder…": a name, and Spettro makes the folder in
+ *  ~/Spettro Projects — for someone with an idea and no code yet. */
+function NewProjectForm({
+  onCancel,
+  onCreated
+}: {
+  onCancel: () => void
+  onCreated: (path: string) => void
+}): JSX.Element {
+  const [name, setName] = useState('')
+  const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const create = async (): Promise<void> => {
+    if (name.trim() === '' || busy) return
+    setBusy(true)
+    setError(null)
+    try {
+      onCreated(await quietCall('createProjectFolder', name))
+    } catch (err) {
+      setError(humanizeError(err).detail)
+      setBusy(false)
+    }
+  }
+  return (
+    <form
+      className="popover project-menu project-new"
+      aria-label="New project folder"
+      onSubmit={(e) => {
+        e.preventDefault()
+        void create()
+      }}
+      onKeyDown={(e) => {
+        if (e.key === 'Escape') {
+          e.stopPropagation()
+          onCancel()
+        }
+      }}
+    >
+      <label className="project-new-label" htmlFor="project-new-name">
+        Name your project
+      </label>
+      <input
+        id="project-new-name"
+        className="input"
+        type="text"
+        autoFocus
+        placeholder="Bakery website"
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+      />
+      <span className="project-new-hint">
+        Spettro makes a folder for it in your home folder, under {PROJECTS_FOLDER}.
+      </span>
+      {error && (
+        <span className="form-error" role="alert">
+          {error}
+        </span>
+      )}
+      <span className="project-new-actions">
+        <button type="button" className="btn btn--small" onClick={onCancel}>
+          Cancel
+        </button>
+        <button type="submit" className="btn btn--small btn--prominent" disabled={name.trim() === '' || busy}>
+          Create
+        </button>
+      </span>
+    </form>
   )
 }

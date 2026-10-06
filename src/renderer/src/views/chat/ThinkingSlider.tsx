@@ -40,6 +40,9 @@ import {
 import './thinkingSlider.css'
 
 const OFF_CAPTION = 'Thinking is off — the model answers straight away'
+/** Where the thumb rests while thinking is off: left of the Low tick, in
+ *  the rail's inset. */
+const OFF_THUMB = '-12px'
 const PAUSED_CAPTION = 'Ultra is saved, but workflows don’t run under Ask first'
 /** How long a move's preview outlives its calls when the options never come
  *  round to it (the CLI refused, and rolled the option back). */
@@ -285,7 +288,9 @@ export default function ThinkingSlider({
               style={{ left: `${frac(i) * 100}%` }}
             />
           ))}
-          <span className="thinking-thumb" style={{ left: `${frac(shown) * 100}%` }}>
+          {/* Off is not a stop: its hollow thumb waits short of Low, so the
+              slider never looks as if it were on Low while saying Off. */}
+          <span className="thinking-thumb" style={{ left: shown < 0 ? OFF_THUMB : `${frac(shown) * 100}%` }}>
             {showPaused && <PauseGlyph />}
           </span>
         </div>
@@ -675,7 +680,8 @@ export function ThinkingChip({ chat }: { chat: ChatDetail }): JSX.Element | null
           <Icon name={lit ? 'flame' : 'brain'} size={13} />
         )}
         <span className="config-chip-label">
-          {state.label}
+          {/* A bare "Off" in a toolbar reads as something broken. */}
+          {state.index < 0 ? 'Thinking off' : state.label}
           {state.paused && <span className="config-chip-hint"> · Paused</span>}
         </span>
         <svg className="config-chip-chevron" width="9" height="9" viewBox="0 0 16 16" fill="none" aria-hidden>

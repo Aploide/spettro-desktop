@@ -243,6 +243,7 @@ export default function ConnectProvidersView({ onClose }: Props): JSX.Element {
               <div className="form-card">
                 <ProviderKeyList />
               </div>
+              <div className="form-footer">Spettro checks a key, then stores it encrypted on this computer.</div>
             </section>
           </div>
         </div>
@@ -449,19 +450,16 @@ function ProviderRow({
               </button>
             )}
           </div>
-          <span className="prov-hint">
-            {keyPage ? (
-              <>
-                Don&rsquo;t have one?{' '}
-                <button className="link" onClick={() => void quietCall('openExternal', keyPage)}>
-                  Get a {provider.name} key
-                </button>
-                . Spettro checks it, then stores it encrypted on this computer.
-              </>
-            ) : (
-              <>Spettro checks the key, then stores it encrypted on this computer.</>
-            )}
-          </span>
+          {/* Where to get a key. How it is kept is said once, by whatever
+              holds this list, not under every row. */}
+          {keyPage && (
+            <span className="prov-hint">
+              Don&rsquo;t have one?{' '}
+              <button className="link" onClick={() => void quietCall('openExternal', keyPage)}>
+                Get an API key from {provider.name} →
+              </button>
+            </span>
+          )}
           {error !== null && error !== '' && <span className="form-error">{error}</span>}
         </div>
       )}

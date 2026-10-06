@@ -610,12 +610,12 @@ describe('arriving at Ultra, frame by frame', () => {
       expect(slider().getAttribute('aria-valuetext')).toBe('Ultra')
       expect(lit()).toBe(true)
       expect(meteors.size).toBe(1)
-      // Before impact (≈680ms from Low) fill and thumb wait at Low; after
+      // Before impact (≈420ms from Low) fill and thumb wait at Low; after
       // it, they are on Ultra.
-      if (elapsed < 600) {
+      if (elapsed < 380) {
         expect(fillAt()).toBe('0')
         expect(thumbLeft()).toBe('0%')
-      } else if (elapsed > 750) {
+      } else if (elapsed > 480) {
         expect(fillAt()).toBe('1')
         expect(thumbLeft()).toBe('100%')
       }

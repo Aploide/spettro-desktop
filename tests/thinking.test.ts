@@ -203,11 +203,12 @@ describe('the meteor', () => {
     expect(run(7)).not.toEqual(run(8))
   })
 
-  it('runs about a second from Low, shorter from Max, and lands before it cools', () => {
+  it('is quick — well under a second from Low, shorter from Max — and lands before it cools', () => {
     const low = meteorTiming(0, 1)
     const max = meteorTiming(0.8, 1)
-    expect(low.totalMs).toBeGreaterThanOrEqual(900)
-    expect(low.totalMs).toBeLessThanOrEqual(1200)
+    expect(low.totalMs).toBeGreaterThanOrEqual(600)
+    expect(low.totalMs).toBeLessThanOrEqual(850)
+    expect(max.totalMs).toBeLessThanOrEqual(600)
     expect(max.totalMs).toBeLessThan(low.totalMs)
     for (const t of [low, max]) {
       expect(t.lands).toBeGreaterThan(0.3)

@@ -93,7 +93,7 @@ export interface MeteorTiming {
 }
 
 /** After impact: the flash, the embers and the cooling into the thumb. */
-const AFTER = 0.46
+const AFTER = 0.32
 /** The bar height the sizes below were tuned in. */
 const TUNED_HEIGHT = 16
 /** Pull on the sparks, in px/s² in a bar that height: just enough that they
@@ -117,7 +117,7 @@ export function meteorTiming(fromFrac: number, toFrac: number): MeteorTiming {
   // and trails a tail of its own from the first frame.
   const startFrac = Math.max(0, Math.min(1, fromFrac))
   const span = Math.abs(toFrac - startFrac)
-  const flight = 0.3 + 0.38 * span
+  const flight = 0.16 + 0.26 * span
   const total = flight + AFTER
   return {
     startFrac,
@@ -378,11 +378,15 @@ export function drawMeteor(
   const fromLow = Math.abs(run.fillX - (dir > 0 ? run.railLeft : run.railRight)) < 1
   const barEnd = dir > 0 ? run.railLeft - h / 2 : run.railRight + h / 2
   const tailEnd = x - dir * length
+  // Set out from further along, the burn always reaches a little way back
+  // over the accent fill and fades in there, so the accent warms into fire
+  // instead of meeting it at a hard edge where the thumb stood.
+  const blend = Math.max(2 * h, 28)
   const barFrom = fromLow
     ? barEnd
     : dir > 0
-      ? Math.max(barEnd, Math.min(run.fillX, tailEnd))
-      : Math.min(barEnd, Math.max(run.fillX, tailEnd))
+      ? Math.max(barEnd, Math.min(run.fillX - blend, tailEnd))
+      : Math.min(barEnd, Math.max(run.fillX + blend, tailEnd))
   if (barAlpha > 0 && Math.abs(x - barFrom) > 0.5) {
     const len = Math.abs(x - barFrom)
     // Distance back from the head to where the streak is over the fill, and
@@ -390,7 +394,7 @@ export function drawMeteor(
     // of it: its cooled tail fades into that rather than ending in a seam.
     const ahead = dir > 0 ? x - run.fillX : run.fillX - x
     const over = landed ? 0 : fromLow ? len : Math.max(0, ahead)
-    const fadeIn = landed ? len * 0.7 : Math.min(len - over, length * 0.5)
+    const fadeIn = landed ? len * 0.7 : Math.min(len - over, Math.max(blend, length * 0.5))
     const hot = add ? palette.core : palette.spark
     const ramp: Array<[number, RGB]> = [
       [0, hot],

@@ -42,8 +42,8 @@ variant with its "switch permission" line. `chrome:thinking` lays out the
 thinking slider in every state (High, Ultra lit, Ultra paused with its
 "Switch to Restricted?" prompt, Extra high, Off, a model that doesn't reason)
 and its chip; `chrome:meteor` freezes the meteor at twelve points of its run,
-from Max and from Low: the flight, the impact (from Max at about 0.45, from Low
-at about 0.6) and the cooling into the lit thumb. The meteor is a pure function
+from Max and from Low: the flight, the impact (from Max at about 0.4, from Low
+at about 0.57) and the cooling into the lit thumb. The meteor is a pure function
 of its progress and a fixed seed, so `chrome:meteor&meteorProgress=0.3`
 (optionally `&meteorFrom=<stop>`, 0 for Low) is the same frame every time. It
 flies inside the slider's 16px bar, which clips it: `SHOT_SCALE=3` renders any

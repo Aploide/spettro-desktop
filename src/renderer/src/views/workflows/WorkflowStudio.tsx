@@ -147,6 +147,9 @@ export default function WorkflowStudio({
 
   const open = useCallback(
     async (info: WorkflowInfo) => {
+      // Opening another one replaces the draft: unsaved edits are asked about
+      // first, exactly as closing would.
+      if (!(await mayClose('workflows'))) return
       setError(null)
       setBusy(`Opening ${info.name}…`)
       try {
@@ -161,7 +164,8 @@ export default function WorkflowStudio({
     [chatId]
   )
 
-  const newDraft = useCallback(() => {
+  const newDraft = useCallback(async () => {
+    if (!(await mayClose('workflows'))) return
     setError(null)
     setDraft({ name: '', scope: 'project', script: STARTER_SCRIPT, dirty: true })
   }, [])
@@ -310,12 +314,12 @@ export default function WorkflowStudio({
           list={list}
           draft={draft}
           onOpen={open}
-          onNew={newDraft}
+          onNew={() => void newDraft()}
           onDelete={remove}
         />
 
         {draft === null ? (
-          <EmptyState searchPaths={list.searchPaths} onNew={newDraft} />
+          <EmptyState searchPaths={list.searchPaths} onNew={() => void newDraft()} />
         ) : (
           <section className="wfs-main">
             <EditorHeader

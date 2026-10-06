@@ -22,6 +22,7 @@ import { EMPTY_EXTENSIONS, connectedCount, shortHost } from '@shared/extensions'
 import { humanizeError } from '@shared/humanize'
 import { call, getState, quietCall, useApp } from '@renderer/state/store'
 import { confirmDialog } from '@renderer/views/common/ConfirmDialog'
+import { useSheetEscape } from '@renderer/views/common/useSheetEscape'
 import { updateEngine } from '@renderer/views/shell/actions'
 import PlanBadge from '@renderer/views/shell/PlanBadge'
 import Spinner from '@renderer/views/shell/Spinner'
@@ -103,6 +104,10 @@ export default function ConnectProvidersView({ onClose }: Props): JSX.Element {
   const [showSignIn, setShowSignIn] = useState(false)
   const [showAddLocal, setShowAddLocal] = useState(false)
   const [showModels, setShowModels] = useState(false)
+
+  // Escape closes this sheet, not the Settings window under it — unless a
+  // sheet it opened is on top, which takes Escape itself.
+  useSheetEscape(onClose, !showSignIn && !showAddLocal && !showModels)
 
   // `.task { await providers.refresh() }`
   useEffect(() => {

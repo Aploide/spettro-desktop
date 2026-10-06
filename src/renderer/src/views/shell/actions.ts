@@ -12,7 +12,7 @@ import { call, getState, quietCall } from '@renderer/state/store'
 import { openSettings, startNewSession } from '@renderer/state/shell'
 import { pendingDeletes } from '@renderer/state/pendingDeletes'
 import { confirmDialog } from '@renderer/views/common/ConfirmDialog'
-import { showToast } from '@renderer/views/common/Toast'
+import { dismissToast, showToast } from '@renderer/views/common/Toast'
 
 /** Calls that fail in the background or report their own failure in place;
  *  a toast for them would be noise, or a second copy. */
@@ -81,8 +81,14 @@ export async function deleteChat(chat: Pick<ChatSummary, 'id' | 'title' | 'isBus
   if (answer !== 'confirm') return
   const wasSelected = getState().app?.selectedSessionId === chat.id
   if (wasSelected) startNewSession(chat.projectPath)
-  pendingDeletes.schedule(chat.id, () => void call('closeChat', chat.id))
-  showToast({
+  // Once the delete has really happened, its Undo goes with it (hovering
+  // holds a toast past its time, and an Undo that does nothing is a lie).
+  let toastId = 0
+  pendingDeletes.schedule(chat.id, () => {
+    dismissToast(toastId)
+    void call('closeChat', chat.id)
+  })
+  toastId = showToast({
     title: `Deleted “${chat.title}”`,
     action: {
       label: 'Undo',

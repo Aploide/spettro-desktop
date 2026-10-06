@@ -199,3 +199,21 @@ describe('closing', () => {
     expect(made('workflowDiscardRun')[0][1]).toEqual(['scratch-1'])
   })
 })
+
+describe('unsaved edits', () => {
+  it('asks before opening another workflow over them (WP9 review)', async () => {
+    const { ConfirmHost } = await import('@renderer/views/common/ConfirmDialog')
+    render(<ConfirmHost />)
+    await openFirstWorkflow()
+    fireEvent.change(screen.getByLabelText('Workflow script'), {
+      target: { value: SCRIPT + '\n// edited\n' }
+    })
+    fireEvent.click(document.querySelector('.wfs-row-open')!)
+    await waitFor(() => expect(screen.getByText(/Save changes to/)).toBeTruthy())
+    // Cancel keeps the edits on screen and opens nothing.
+    fireEvent.click(screen.getByText('Cancel'))
+    await vi.advanceTimersByTimeAsync(50)
+    expect(made('workflowRead')).toHaveLength(1)
+    expect(String((screen.getByLabelText('Workflow script') as HTMLTextAreaElement).value)).toContain('// edited')
+  })
+})

@@ -201,6 +201,9 @@ async function askBeforeQuit(): Promise<void> {
       app.quit()
     } else if (choice === guard.whenFinishedLabel && model) {
       model.notify('Spettro will quit when it finishes working.')
+      // A second Ctrl+Q while waiting asks again (so Quit Now stays one
+      // keystroke away) instead of being swallowed.
+      askingQuit = false
       await model.waitForIdle()
       quitApproved = true
       app.quit()

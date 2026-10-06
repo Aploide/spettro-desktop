@@ -15,6 +15,7 @@ import type { KeyboardEvent } from 'react'
 import type { ModelEntry } from '@shared/extensions'
 import { EMPTY_EXTENSIONS, contextLabel, groupedModels } from '@shared/extensions'
 import { call, useApp } from '@renderer/state/store'
+import { useSheetEscape } from '@renderer/views/common/useSheetEscape'
 import { CheckIcon, StarIcon } from './icons'
 import '@renderer/design/form.css'
 import './providers.css'
@@ -31,6 +32,8 @@ export default function ModelPickerView({
   const app = useApp()
   const models = app?.extensions?.models ?? EMPTY_EXTENSIONS.models
   const [search, setSearch] = useState('')
+  // Escape closes the list, not whatever opened it.
+  useSheetEscape(onClose)
 
   const groups = useMemo(() => {
     const query = search.trim().toLowerCase()

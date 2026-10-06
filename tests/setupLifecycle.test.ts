@@ -168,6 +168,33 @@ describe('reconnecting under the shell', () => {
   })
 })
 
+describe('default permission (Settings › General)', () => {
+  it('shows on every chat, so a cold one opened later doesn’t push the old level back', async () => {
+    const { ChatSession } = await import('@main/model/chatSession')
+    const { m } = model()
+    const permission = () => ({
+      id: 'permission',
+      name: 'Permission',
+      kind: {
+        type: 'select' as const,
+        currentValue: 'restricted',
+        flat: ['ask-first', 'restricted', 'yolo'].map((value) => ({ name: value, value })),
+        groups: []
+      }
+    })
+    const a = new ChatSession('/tmp/a', 'A')
+    const b = new ChatSession('/tmp/b', 'B')
+    a.setConfigOptions([permission()])
+    b.setConfigOptions([permission()])
+    b.pendingConfigChanges.permission = 'ask-first'
+    m.sessions = [a, b]
+    await m.setDefaultOption('permission', 'yolo')
+    expect(a.displayedConfigValues().permission).toBe('yolo')
+    expect(b.displayedConfigValues().permission).toBe('yolo')
+    expect(b.pendingConfigChanges.permission).toBeUndefined()
+  })
+})
+
 describe('banners', () => {
   it('a bad path picked twice is said twice', async () => {
     const { m, events } = model()

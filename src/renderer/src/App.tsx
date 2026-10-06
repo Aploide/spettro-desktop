@@ -184,13 +184,17 @@ export default function App(): JSX.Element {
   // Main's one-off messages (a bad CLI path, the engine restarting). Keyed
   // on the nonce, so the same message twice is shown twice. Setup shows its
   // own inline.
+  // The banner is read from the snapshot this render saw, not the store at
+  // effect time: main clears it right after sending, and the next app-state
+  // can land before the effect runs.
   const bannerNonce = app?.bannerNonce ?? 0
+  const banner = app?.banner ?? null
+  const bannerPhase = app?.phase.kind
   useEffect(() => {
-    const current = getState().app
-    if (!current?.banner || bannerNonce === 0) return
-    const kind = current.phase.kind
-    if (kind === 'needsSetup' || kind === 'installing') return
-    showToast({ title: current.banner, key: 'banner' })
+    if (!banner || bannerNonce === 0) return
+    if (bannerPhase === 'needsSetup' || bannerPhase === 'installing') return
+    showToast({ title: banner, key: 'banner' })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bannerNonce])
 
   // A prompt is shown inline when its chat can be on screen: a chat in the

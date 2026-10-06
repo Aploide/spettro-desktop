@@ -239,6 +239,8 @@ export default function TerminalDrawer({
   const newTerminal = useCallback(async () => {
     const id = await spawnShell(projectPath)
     if (!id) return
+    // Its first prompt may beat the tab onto the screen: hold it for attach.
+    if (!pendingData.current.has(id)) pendingData.current.set(id, [])
     setTabsByProject((prev) => ({
       ...prev,
       [projectPath]: [
@@ -269,6 +271,9 @@ export default function TerminalDrawer({
       restarting.current.add(tabId)
       const termId = await spawnShell(tab.projectPath).finally(() => restarting.current.delete(tabId))
       if (!termId) return
+      // The ref first, synchronously: the new shell's prompt can arrive
+      // before React re-renders, and output is routed by the ref.
+      tabsRef.current = tabsRef.current.map((t) => (t.id === tabId ? { ...t, termId, running: true } : t))
       updateTab(setTabsByProject, tabId, { termId, running: true })
       const session = sessions.current.get(tabId)
       if (session) {

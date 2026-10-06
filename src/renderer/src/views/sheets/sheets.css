@@ -134,7 +134,8 @@
   border: 1px solid var(--hairline);
   border-radius: var(--rad-sm);
   overflow: hidden;
-  max-width: 260px;
+  /* Never narrower than its labels ("Facts about this project"). */
+  flex-shrink: 0;
 }
 .mem-segment {
   appearance: none;

@@ -1631,8 +1631,17 @@ export class AppModel extends EventEmitter {
       (selected && this.liveACPSessionId(selected) ? selected : null) ??
       this.sessions.find((s) => !s.isScratch && this.liveACPSessionId(s) !== null) ??
       null
+    // Every other chat shows the new value too. A cold chat pushes what it
+    // shows when it attaches, so one still showing the old level would put
+    // it back for every session the moment it was opened.
+    for (const session of this.sessions) {
+      if (session === target || session.isScratch) continue
+      if (!session.configOptions.some((o) => o.id === configId)) continue
+      session.applyLocalConfigValue(configId, value)
+      delete session.pendingConfigChanges[configId]
+    }
     if (target) await this.setConfigValue(target.id, configId, value)
-    else this.emitAppState()
+    else this.persist()
   }
 
   // -------------------------------------------------------------------------

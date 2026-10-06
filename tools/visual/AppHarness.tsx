@@ -702,7 +702,9 @@ const app: AppStateDTO = {
           'agent exited with status 1'
         ]
       : [],
-  subscription: { plan: 'pro', email: 'carlo@example.com' },
+  // Nothing can run a model in the no-model scene — not signed in either.
+  subscription:
+    MODE === 'no-model' ? { plan: 'unknown', email: null } : { plan: 'pro', email: 'carlo@example.com' },
   extensions: MODE === 'gate' || MODE === 'gate-keys' || MODE === 'no-model' ? GATE_EXTENSIONS : EXTENSIONS,
   update: MODE === 'settings-updates' ? UPDATES : { ...EMPTY_UPDATE_STATE, app: { ...EMPTY_COMPONENT_UPDATE, current: '0.1.7' } },
   remote: MODE.startsWith('settings') ? REMOTE : null,

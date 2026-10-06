@@ -185,7 +185,7 @@ function InstallStep(): JSX.Element {
           autoFocus
           onClick={() => void call('installCLI')}
         >
-          {failed ? 'Try Again' : 'Install Spettro'}
+          {failed ? 'Try again' : 'Install Spettro'}
         </button>
       </div>
       {failed && <InstallLog log={app?.installLog ?? []} />}
@@ -233,7 +233,7 @@ function InstallLog({ log }: { log: string[] }): JSX.Element | null {
         ))}
       </div>
       <div className="diagnostics-actions">
-        <CopyButton text={log.join('\n')} label="Copy Log" />
+        <CopyButton text={log.join('\n')} label="Copy log" />
       </div>
     </Disclosure>
   )
@@ -271,7 +271,7 @@ function Advanced({ banner, bannerNonce }: { banner: string | null; bannerNonce:
         <div className="setup-advanced-row">
           <span className="setup-advanced-text">Already have Spettro&rsquo;s helper (the <code>spettro</code> command)?</span>
           <button type="button" className="btn btn--small" onClick={() => void browse()}>
-            Use an Existing Copy…
+            Use an existing copy…
           </button>
           <button type="button" className="link" onClick={() => setManualOpen((o) => !o)}>
             Type a path

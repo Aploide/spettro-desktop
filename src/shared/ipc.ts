@@ -233,7 +233,7 @@ export interface RendererApi {
   checkForUpdates(): Promise<void>
   /** Downloads the release installer for this platform and hands off to it —
    *  the app quits once the installer is running. `whenIdle` holds the
-   *  hand-off until no chat is working (Update When Finished). */
+   *  hand-off until no chat is working (Update when finished). */
   installAppUpdate(whenIdle?: boolean): Promise<void>
   /** Re-runs the official CLI install script, then reconnects the agent —
    *  after the running turns finish, with `whenIdle`. */

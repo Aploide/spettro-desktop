@@ -128,7 +128,7 @@ describe('the error card', () => {
       </TranscriptActionsProvider>
     )
     expect(screen.queryByRole('button', { name: /Try again/ })).toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: 'Connect a Model…' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Connect a model…' }))
     expect(getShell().settingsPane).toBe('models')
   })
 
@@ -246,7 +246,7 @@ describe('starting in the home folder', () => {
     typeAndEnter('Make a simple website for my bakery')
     expect(sent()).toEqual([])
     expect(screen.getByRole('alert').textContent).toContain('Choose where Spettro should work first.')
-    expect(document.activeElement?.textContent).toBe('Choose Folder…')
+    expect(document.activeElement?.textContent).toBe('Choose folder…')
     // Continue is remembered for the folder, not just this screen.
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
     expect(calls).toContainEqual(['approveBroadFolder', ['/home/anna']])
@@ -262,7 +262,7 @@ describe('starting in the home folder', () => {
   it('makes a new project folder from a name', async () => {
     app = { ...HOME, approvedBroadFolders: [] }
     render(<NewSessionView />)
-    fireEvent.click(screen.getByRole('button', { name: 'New Project…' }))
+    fireEvent.click(screen.getByRole('button', { name: 'New project…' }))
     fireEvent.change(screen.getByLabelText('Name your project'), { target: { value: 'Bakery website' } })
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: 'Create' }))

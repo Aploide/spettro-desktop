@@ -53,7 +53,7 @@ export default function NewSessionView(): JSX.Element {
     void call('rememberProject', next)
   }, [])
 
-  // The folder menu, opened from its chip or, at "New Project…" on the
+  // The folder menu, opened from its chip or, at "New project…" on the
   // home-folder warning, straight on its name field.
   const [menu, setMenu] = useState<FolderMenu>('closed')
 
@@ -106,7 +106,7 @@ export default function NewSessionView(): JSX.Element {
               {basename(path)} can&rsquo;t be found. It may have been moved or deleted.
             </span>
             <button ref={answerRef} type="button" className="btn btn--small" onClick={() => void pickFolder()}>
-              Choose Folder…
+              Choose folder…
             </button>
           </FolderNotice>
         ) : needsConfirm ? (
@@ -122,7 +122,7 @@ export default function NewSessionView(): JSX.Element {
               Continue
             </button>
             <button type="button" className="btn btn--small" onClick={() => setMenu('new')}>
-              New Project…
+              New project…
             </button>
             <button
               ref={answerRef}
@@ -130,7 +130,7 @@ export default function NewSessionView(): JSX.Element {
               className="btn btn--small btn--prominent"
               onClick={() => void pickFolder()}
             >
-              Choose Folder…
+              Choose folder…
             </button>
           </FolderNotice>
         ) : null}

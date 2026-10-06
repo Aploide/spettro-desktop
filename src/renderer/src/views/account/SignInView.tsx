@@ -14,7 +14,7 @@
 // `signedIn: false` with no plan — that is not the signed-out state.
 //
 // Nothing happens behind the user's back: the sheet first says a browser
-// window is about to open and waits for "Continue in Browser". While it waits
+// window is about to open and waits for "Continue in browser". While it waits
 // for the sign-in, the raw link sits behind "Having trouble?" for whoever's
 // browser didn't open. Escape (or Cancel) cancels the flow on the CLI too, and
 // once signed in there is nothing left to cancel.
@@ -60,7 +60,7 @@ export default function SignInView({ onComplete, onClose, stacked = false, inlin
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const finished = useRef(false)
 
-  // 'idle' until "Continue in Browser": the browser never opens unannounced.
+  // 'idle' until "Continue in browser": the browser never opens unannounced.
   const state = login?.status ?? 'idle'
   const browserUrl = login?.browserUrl ?? null
   const pricingUrl = account?.pricingUrl ?? PRICING_FALLBACK
@@ -87,7 +87,7 @@ export default function SignInView({ onComplete, onClose, stacked = false, inlin
   // A flow already outstanding when the sheet appears is resynced rather than
   // restarted — starting a second device flow would invalidate the URL the
   // user may already have open in their browser. Otherwise the sheet waits
-  // for "Continue in Browser".
+  // for "Continue in browser".
   useEffect(() => {
     const existing = getState().app?.extensions?.account.login ?? null
     if (existing !== null && (existing.status === 'pending' || existing.status === 'starting')) {
@@ -171,7 +171,7 @@ export default function SignInView({ onComplete, onClose, stacked = false, inlin
         done.
       </p>
       <button className="btn btn--prominent btn--large" autoFocus onClick={() => void start()}>
-        Continue in Browser
+        Continue in browser
       </button>
       {/* What it costs, beside the button that might cost something. */}
       <button className="link signin-plans" onClick={() => void quietCall('openExternal', pricingUrl)}>
@@ -190,7 +190,7 @@ export default function SignInView({ onComplete, onClose, stacked = false, inlin
         <span className="signin-muted signin-detail">{message(login?.error ?? failure)}</span>
       )}
       <button className="btn btn--prominent" onClick={() => void start()}>
-        Try Again
+        Try again
       </button>
     </div>
   ) : state === 'pending' ? (
@@ -217,7 +217,7 @@ export default function SignInView({ onComplete, onClose, stacked = false, inlin
             className="btn btn--small"
             onClick={() => void quietCall('openExternal', browserUrl)}
           >
-            Open in Browser
+            Open in browser
           </button>
         </Disclosure>
       )}

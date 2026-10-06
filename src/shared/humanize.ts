@@ -104,7 +104,7 @@ const RULES: Rule[] = [
     build: () => ({
       title: 'Spettro keeps stopping',
       detail: 'Its engine quit several times in a row. The details below may say why.',
-      action: action('restart', 'Try Again')
+      action: action('restart', 'Try again')
     })
   },
   {
@@ -142,7 +142,7 @@ const RULES: Rule[] = [
     build: () => ({
       title: 'No model is connected',
       detail: 'Connect a model in Settings › Models & Providers, then try again.',
-      action: action('connect', 'Connect a Model')
+      action: action('connect', 'Connect a model')
     })
   },
   {
@@ -150,7 +150,7 @@ const RULES: Rule[] = [
     build: () => ({
       title: 'That model isn’t available',
       detail: 'The provider may have removed it. Pick another model and try again.',
-      action: action('models', 'Choose a Model')
+      action: action('models', 'Choose a model')
     })
   },
   {
@@ -166,7 +166,7 @@ const RULES: Rule[] = [
     build: () => ({
       title: 'The model provider is overloaded',
       detail: 'It’s turning requests away right now. Nothing was lost — try again in a moment.',
-      action: action('retry', 'Try Again')
+      action: action('retry', 'Try again')
     })
   },
   {
@@ -178,7 +178,7 @@ const RULES: Rule[] = [
         detail: credits
           ? 'Add credits in the provider’s console, or switch to another model.'
           : 'Wait a minute, then try again.',
-        action: credits ? action('models', 'Choose a Model') : action('retry', 'Try Again')
+        action: credits ? action('models', 'Choose a model') : action('retry', 'Try again')
       }
     }
   },
@@ -192,14 +192,14 @@ const RULES: Rule[] = [
           detail: ctx.serverName
             ? `Is ${ctx.serverName} open? Start it, then try again.`
             : 'Start your local model server, then try again.',
-          action: action('retry', 'Try Again')
+          action: action('retry', 'Try again')
         }
       }
       const refused = /ECONNREFUSED|ECONNRESET/i.test(match[0])
       return {
         title: refused ? 'Spettro couldn’t connect' : 'You appear to be offline',
         detail: 'Check your internet connection, then try again.',
-        action: action('retry', 'Try Again')
+        action: action('retry', 'Try again')
       }
     }
   },
@@ -208,7 +208,7 @@ const RULES: Rule[] = [
     build: () => ({
       title: 'That took too long',
       detail: 'Spettro gave up waiting. Check your connection, then try again.',
-      action: action('retry', 'Try Again')
+      action: action('retry', 'Try again')
     })
   },
   {
@@ -218,7 +218,7 @@ const RULES: Rule[] = [
     build: () => ({
       title: 'Something went wrong inside Spettro',
       detail: 'Try again. If it keeps happening, the details below can help.',
-      action: action('retry', 'Try Again')
+      action: action('retry', 'Try again')
     })
   }
 ]

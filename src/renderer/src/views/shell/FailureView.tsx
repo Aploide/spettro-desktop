@@ -29,8 +29,8 @@ export default function FailureView({ message, onOpenSettings }: Props): JSX.Ele
           run: () => void call('installCLI')
         }
       : kind === 'update'
-        ? { label: 'Check for Updates', run: () => openSettings('updates') }
-        : { label: 'Try Again', run: () => void call('retryBootstrap') }
+        ? { label: 'Check for updates', run: () => openSettings('updates') }
+        : { label: 'Try again', run: () => void call('retryBootstrap') }
 
   return (
     <div className="failure-view">
@@ -44,7 +44,7 @@ export default function FailureView({ message, onOpenSettings }: Props): JSX.Ele
           // The engine is the wrong file or a broken one: the other way out
           // is a different file, chosen right here.
           <button className="btn" onClick={() => void chooseAnotherFile()}>
-            Choose Another File…
+            Choose another file…
           </button>
         ) : (
           <button className="btn" onClick={onOpenSettings}>

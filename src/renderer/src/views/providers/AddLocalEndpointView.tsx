@@ -139,7 +139,7 @@ export default function AddLocalEndpointView({
               No model server is running. Open LM Studio, Ollama or llama.cpp, then check again.
             </span>
             <button className="btn btn--small" onClick={scan}>
-              Check Again
+              Check again
             </button>
           </div>
         ) : (
@@ -174,7 +174,7 @@ export default function AddLocalEndpointView({
                 </button>
               ) : (
                 <button className="btn btn--small" onClick={scan}>
-                  Check Again
+                  Check again
                 </button>
               )}
             </div>
@@ -252,7 +252,7 @@ export default function AddLocalEndpointView({
                   : add(trimmed, apiKey === '' ? null : apiKey, probe.name))
               }
             >
-              {probe === null ? 'Check Address' : 'Add This Server'}
+              {probe === null ? 'Check address' : 'Add this server'}
             </button>
           </div>
         </div>

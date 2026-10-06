@@ -20,7 +20,7 @@ let terminals: TerminalManager | null = null
 let remoteHost: RemoteHost | null = null
 let ipcHandle: IpcHandle | null = null
 let didShutdown = false
-/** Set once quitting has been decided (nothing running, Quit Now, the work
+/** Set once quitting has been decided (nothing running, Quit now, the work
  *  finished, or an update handing over) — from then on nothing asks. */
 let quitApproved = false
 /** The quit question is on screen; a second Ctrl+Q doesn't stack another. */
@@ -168,7 +168,7 @@ function shouldAskBeforeQuit(): boolean {
   return busyGuard('quit', model?.busyCount() ?? 0, terminals?.runningCount() ?? 0) !== null
 }
 
-/** "Spettro is working on 2 tasks — Quit When Finished / Quit Now / Cancel".
+/** "Spettro is working on 2 tasks — Quit when finished / Quit now / Cancel".
  *  Waiting keeps the window open with a note, and quits on its own once the
  *  last turn ends. */
 async function askBeforeQuit(): Promise<void> {
@@ -201,7 +201,7 @@ async function askBeforeQuit(): Promise<void> {
       app.quit()
     } else if (choice === guard.whenFinishedLabel && model) {
       model.notify('Spettro will quit when it finishes working.')
-      // A second Ctrl+Q while waiting asks again (so Quit Now stays one
+      // A second Ctrl+Q while waiting asks again (so Quit now stays one
       // keystroke away) instead of being swallowed.
       askingQuit = false
       await model.waitForIdle()

@@ -89,20 +89,20 @@ Pick the screen with `?mode=`:
 | `question-multi` | three questions, on the second (multi-select) with picks made and Other… open |
 | `settings` | Settings, opened the way a user does (Ctrl+,) |
 | `settings-<pane>` | one per pane — `general`, `account`, `models`, `permissions`, `memory`, `remote`, `updates` (the engine has an update waiting), `advanced`, `shortcuts`, `about` — chosen in Settings' sidebar |
-| `onboarding`, `installing`, `install-failed` | setup, step 1 of 2: Install Spettro (Advanced folded), the determinate bar with Cancel, and "Couldn't download Spettro" with Try Again |
+| `onboarding`, `installing`, `install-failed` | setup, step 1 of 2: Install Spettro (Advanced folded), the determinate bar with Cancel, and "Couldn't download Spettro" with Try again |
 | `gate`, `gate-keys` | setup, step 2 of 2: Sign in to Spettro first, the quieter alternatives under it; and "Use my own API key" with one provider opened (its "Get a key" link) |
-| `failure` | the engine died: the sentence, Try Again, and the log behind "Show details" |
+| `failure` | the engine died: the sentence, Try again, and the log behind "Show details" |
 | `reconnecting` | the engine restarting under a chat: the header's "Reconnecting…", the half-written message still in the field, Send waiting |
 | `confirm-delete`, `deleted-undo` | Delete… from a row's menu: the alert, and after it the row gone with Undo on offer |
 | `no-model` | nothing connected (setup skipped): the "Connect a model to start" bar over the composer, no model offered |
 | `no-model-sent` | a message sent with nothing connected: it stays in the field, the bar says it will wait, and Settings › Models opens on the connect chooser |
 | `no-model-connect` | "Connect…" on that bar: the same chooser as setup, inside Settings › Models (no second sheet) |
-| `no-model-error` | a chat an older send left behind: the "No model is connected" card offering Connect a Model… instead of Try again |
+| `no-model-error` | a chat an older send left behind: the "No model is connected" card offering Connect a model… instead of Try again |
 | `no-model-menu` | the model menu with nothing in it: one sentence and Connect a model… |
-| `no-model-signin` | Settings › Account › Sign In…: the sign-in sheet sized by its content, plans and prices under the button |
+| `no-model-signin` | Settings › Account › Sign in…: the sign-in sheet sized by its content, plans and prices under the button |
 | `mode-menu` | the mode chip's menu: the CLI's agent descriptions replaced by what each mode does |
-| `welcome-sent` | first run in the home folder, a message sent before answering: "Choose where Spettro should work first", the focus on Choose Folder… |
-| `welcome-new-project` | the same warning's New Project…: the folder menu as a name field (makes ~/Spettro Projects/<name>) |
+| `welcome-sent` | first run in the home folder, a message sent before answering: "Choose where Spettro should work first", the focus on Choose folder… |
+| `welcome-new-project` | the same warning's New project…: the folder menu as a name field (makes ~/Spettro Projects/<name>) |
 | `welcome-more` | the sidebar footer's "…" with no session open: Workflows… disabled, saying why |
 | `gate-signin`, `gate-local` | setup's step 2 after Sign in / Use a model on this computer: each in place of the chooser with Back (no stacked sheet), the local one saying where to get LM Studio or Ollama |
 | `installing-slow` | the install stalled in one phase for 15 s: "taking longer than usual" and a moving sheen. Not in `shoot.sh` (it needs `SHOT_WAIT=16500`) |

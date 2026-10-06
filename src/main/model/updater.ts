@@ -311,7 +311,7 @@ export interface UpdateManagerOptions {
   onChange: () => void
   /** Quits the app once an installer has been handed off. */
   quit: () => void
-  /** Resolves once no chat is working — Update When Finished waits on it
+  /** Resolves once no chat is working — Update when finished waits on it
    *  before the step that would stop them (the quit, the agent restart). */
   waitForIdle?: () => Promise<void>
 }

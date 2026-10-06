@@ -86,7 +86,7 @@ export async function signOutWithConfirm(): Promise<void> {
     message: last
       ? 'Your Spettro account is the only way Spettro can run a model right now. Until you sign in again or connect a provider, it won’t be able to answer.'
       : 'Sessions using Spettro’s own models will need another model.',
-    confirmLabel: 'Sign Out',
+    confirmLabel: 'Sign out',
     destructive: true
   })
   if (answer === 'confirm') await call('accountLogout')
@@ -132,7 +132,7 @@ export default function ConnectProvidersView({ onClose }: Props): JSX.Element {
             <div className="modal-actions">
               {models.models.length > 0 && (
                 <button className="btn" onClick={() => setShowModels(true)}>
-                  Browse Models…
+                  Browse models…
                 </button>
               )}
               <button className="btn btn--prominent" onClick={onClose}>
@@ -158,7 +158,7 @@ export default function ConnectProvidersView({ onClose }: Props): JSX.Element {
                   <span className="notice-sub">{humanizeError(ext.error).detail}</span>
                 </div>
                 <button className="btn btn--small" onClick={() => void call('refreshExtensions')}>
-                  Try Again
+                  Try again
                 </button>
               </div>
             )}
@@ -189,11 +189,11 @@ export default function ConnectProvidersView({ onClose }: Props): JSX.Element {
                   </div>
                   {account.signedIn ? (
                     <button className="btn btn--small" onClick={() => void signOutWithConfirm()}>
-                      Sign Out…
+                      Sign out…
                     </button>
                   ) : (
                     <button className="btn btn--small btn--prominent" onClick={() => setShowSignIn(true)}>
-                      Sign In
+                      Sign in
                     </button>
                   )}
                 </div>
@@ -231,7 +231,7 @@ export default function ConnectProvidersView({ onClose }: Props): JSX.Element {
                 )}
                 <div className="prov-row prov-row--actions">
                   <button className="btn btn--small" onClick={() => setShowAddLocal(true)}>
-                    Add a Model on This Computer…
+                    Add a model on this computer…
                   </button>
                 </div>
               </div>

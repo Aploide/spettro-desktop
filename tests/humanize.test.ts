@@ -102,10 +102,10 @@ describe('busyGuard (quit, update and restart)', () => {
     expect(busyGuard('quit', 2)).toEqual({
       title: 'Spettro is working on 2 tasks',
       message: 'Quitting now stops them.',
-      whenFinishedLabel: 'Quit When Finished',
-      nowLabel: 'Quit Now'
+      whenFinishedLabel: 'Quit when finished',
+      nowLabel: 'Quit now'
     })
-    expect(busyGuard('update', 1)?.whenFinishedLabel).toBe('Update When Finished')
+    expect(busyGuard('update', 1)?.whenFinishedLabel).toBe('Update when finished')
     expect(busyGuard('update', 1)?.message).toBe('Updating now restarts Spettro, which stops it.')
   })
 
@@ -113,14 +113,14 @@ describe('busyGuard (quit, update and restart)', () => {
     const guard = busyGuard('quit', 0, 1)
     expect(guard?.title).toBe('A terminal is still running a command')
     expect(guard?.whenFinishedLabel).toBeNull()
-    expect(guard?.nowLabel).toBe('Quit Now')
+    expect(guard?.nowLabel).toBe('Quit now')
     expect(busyGuard('quit', 1, 2)?.message).toBe(
       'Quitting now stops them. There are also commands running in 2 terminals.'
     )
   })
 
   it('restarting the engine can only be done now or not at all', () => {
-    expect(busyGuard('restart', 3)).toMatchObject({ whenFinishedLabel: null, nowLabel: 'Restart Now' })
+    expect(busyGuard('restart', 3)).toMatchObject({ whenFinishedLabel: null, nowLabel: 'Restart now' })
     // Terminals don't run on the engine; restarting leaves them be.
     expect(busyGuard('restart', 0, 4)).toBeNull()
   })

@@ -5,7 +5,7 @@
 // including code with no React tree around it (the central `call` wrapper),
 // and the single <ToastHost/> in App draws the stack. A toast says what
 // happened in one line, may add a second line, and offers at most one action —
-// "Undo", "Try Again", "Open Settings". Errors stay longer than news, an
+// "Undo", "Try again", "Open Settings". Errors stay longer than news, an
 // action stays longer still, and hovering holds any of them.
 
 import { useEffect, useRef, useSyncExternalStore } from 'react'

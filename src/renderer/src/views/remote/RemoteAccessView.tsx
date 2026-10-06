@@ -200,7 +200,7 @@ function PairingPanel({ remote, now }: { remote: RemoteHostState; now: number })
             Done
           </button>
           <button className="remote__button remote__button--accent" onClick={() => void call('remoteOpenPairing')}>
-            Show New Code
+            Show new code
           </button>
         </div>
       </div>
@@ -233,7 +233,7 @@ function PairingPanel({ remote, now }: { remote: RemoteHostState; now: number })
           <span className="remote__manual-text">
             Can&rsquo;t scan? Copy the pairing link and open it on your phone.
           </span>
-          <CopyButton text={remote.pairingURL} label="Copy Link" className="remote__button" />
+          <CopyButton text={remote.pairingURL} label="Copy link" className="remote__button" />
         </div>
       )}
       <button className="remote__button" onClick={() => void call('remoteClosePairing')}>
@@ -252,10 +252,10 @@ function PairedDevices({ remote, now }: { remote: RemoteHostState; now: number }
   return (
     <section className="remote__devices">
       <div className="remote__devices-head">
-        <h3 className="remote__devices-title">Paired Devices</h3>
+        <h3 className="remote__devices-title">Paired devices</h3>
         <button className="remote__button remote__button--accent" onClick={() => void call('remoteOpenPairing')}>
           <QRIcon />
-          Pair a Device
+          Pair a device
         </button>
       </div>
       {active.length === 0 ? (

@@ -1131,7 +1131,7 @@ function pushEvents(): void {
     }, 900)
   }
   if (MODE === 'switcher') setTimeout(() => press('k'), 60)
-  // "New Project…" on the home-folder warning: the folder menu as a name.
+  // "New project…" on the home-folder warning: the folder menu as a name.
   if (MODE === 'welcome-new-project') setTimeout(() => click('.new-session-notice .btn:nth-of-type(2)'), 60)
   // The sidebar footer's "…" with no session open: Workflows… disabled,
   // saying why.
@@ -1190,11 +1190,11 @@ function pushEvents(): void {
       setTimeout(() => key('Enter'), 200)
     })
   }
-  // Settings › Account › Sign In…: the sign-in sheet over Settings.
+  // Settings › Account › Sign in…: the sign-in sheet over Settings.
   if (MODE === 'no-model-signin') {
     setTimeout(() => press(','), 60)
     setTimeout(() => click('[data-testid="settings-pane-account"]'), 140)
-    setTimeout(() => [...document.querySelectorAll<HTMLElement>('.btn')].find((b) => b.textContent === 'Sign In…')?.click(), 220)
+    setTimeout(() => [...document.querySelectorAll<HTMLElement>('.btn')].find((b) => b.textContent === 'Sign in…')?.click(), 220)
   }
   // "Connect…" on the bar: Settings › Models, the chooser right there.
   if (MODE === 'no-model-connect') setTimeout(() => click('.no-model-action'), 60)

@@ -3,7 +3,7 @@
 // report or the curious, not the first thing anyone should have to read.
 //
 // DiagnosticsDisclosure is the common case: the raw error and the engine's
-// recent output in a mono box, with Copy Diagnostics putting the lot (plus
+// recent output in a mono box, with Copy diagnostics putting the lot (plus
 // versions and platform) on the clipboard for a bug report.
 
 import { useEffect, useRef, useState, type ReactNode } from 'react'
@@ -108,7 +108,7 @@ export function DiagnosticsDisclosure({
         <div className="diagnostics-empty">Spettro&rsquo;s engine didn&rsquo;t print anything.</div>
       )}
       <div className="diagnostics-actions">
-        <CopyButton text={diagnostics} label="Copy Diagnostics" />
+        <CopyButton text={diagnostics} label="Copy diagnostics" />
       </div>
     </Disclosure>
   )

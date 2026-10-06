@@ -4,7 +4,7 @@
 // opens and draws its title (a pane that throws would blank the window), the
 // sidebar marks the open one, choosing another asks the open pane first
 // (Memory with unsaved edits), Enter no longer closes anything, and the
-// Updates pane leads with one "up to date / Update Now" row.
+// Updates pane leads with one "up to date / Update now" row.
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
@@ -138,7 +138,7 @@ describe('Settings', () => {
     expect(screen.queryByRole('combobox', { name: 'Default permission' })).toBeNull()
   })
 
-  it('says Spettro is up to date in one row, and offers Update Now when it isn’t', async () => {
+  it('says Spettro is up to date in one row, and offers Update now when it isn’t', async () => {
     update = {
       ...EMPTY_UPDATE_STATE,
       app: { ...EMPTY_COMPONENT_UPDATE, current: '0.1.7', latest: '0.1.7' },
@@ -146,13 +146,13 @@ describe('Settings', () => {
     }
     const { unmount } = render(<SettingsView pane="updates" onClose={() => undefined} />)
     expect(screen.getByText('Spettro is up to date')).toBeTruthy()
-    expect(screen.queryByRole('button', { name: /Update Now/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: /Update now/ })).toBeNull()
     unmount()
 
     update = { ...update, cli: { ...update.cli, latest: '2.9.1', available: true } }
     render(<SettingsView pane="updates" onClose={() => undefined} />)
     expect(screen.getByText('An update is available')).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: /Update Now/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Update now/ }))
     await act(async () => undefined)
     expect(calls.filter(([m]) => m === 'installCLIUpdate')).toEqual([['installCLIUpdate', [false]]])
   })

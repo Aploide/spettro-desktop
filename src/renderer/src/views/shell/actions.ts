@@ -49,7 +49,7 @@ export function reportActionFailure(method: string, err: unknown): void {
 }
 
 /** The handler for an error's suggested action, when the shell can perform
- *  it without knowing what was being attempted ("Try Again" can't be
+ *  it without knowing what was being attempted ("Try again" can't be
  *  replayed from here, so it has none). */
 export function errorActionRunner(kind: ErrorActionKind): (() => void) | null {
   switch (kind) {
@@ -117,7 +117,7 @@ export async function restartEngine(): Promise<void> {
   await call('retryBootstrap')
 }
 
-/** Update Now: the CLI first, then the app (installing the app quits, which
+/** Update now: the CLI first, then the app (installing the app quits, which
  *  would throw the CLI's turn away). Running work gets the choice of waiting. */
 export async function updateEverything(update: UpdateState): Promise<void> {
   const guard = busyGuard('update', getState().app?.busyTasks ?? 0)

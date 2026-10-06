@@ -3,7 +3,7 @@
 // a muted `project › branch` breadcrumb, and on the right the uncommitted-change
 // chip, the context-window ring and the terminal toggle. While the sidebar is
 // collapsed its reopen button leads the bar, where the sidebar's own was.
-// While the engine restarts underneath (a crash, an update, Restart Engine)
+// While the engine restarts underneath (a crash, an update, Restart engine)
 // a "Reconnecting…" pill sits in the bar — the only sign of it besides Send
 // waiting; nothing on screen is unmounted.
 

@@ -19,7 +19,7 @@ import './common.css'
 export interface ConfirmOptions {
   title: string
   message?: string
-  /** The button that does the thing: "Delete", "Save", "Update Now". */
+  /** The button that does the thing: "Delete", "Save", "Update now". */
   confirmLabel: string
   cancelLabel?: string
   /** Red, and not the default button. */

@@ -10,7 +10,7 @@
 //   Permissions     what each level lets Spettro do, and the default
 //   Memory          facts about you / about this project
 //   Remote          pairing a phone (formerly its own sheet)
-//   Updates         one "up to date / Update Now" row; the parts under Details
+//   Updates         one "up to date / Update now" row; the parts under Details
 //   Advanced        where the engine lives, restarting it, the default
 //                   folder, resuming a session started in the terminal
 //   Keyboard Shortcuts, About
@@ -364,7 +364,7 @@ function AccountPane({ onSignIn }: { onSignIn: () => void }): JSX.Element {
               </span>
               <div className="form-inline">
                 <button className="btn btn--prominent" onClick={onSignIn}>
-                  Sign In…
+                  Sign in…
                 </button>
                 <span className="form-spacer" />
                 <button
@@ -429,7 +429,7 @@ function AccountPane({ onSignIn }: { onSignIn: () => void }): JSX.Element {
         <div className="form-card">
           <div className="form-row form-row--actions">
             <button className="btn" onClick={() => void signOutWithConfirm()}>
-              Sign Out…
+              Sign out…
             </button>
             {ext.busy && <Spinner size={14} />}
             <span className="form-spacer" />
@@ -533,11 +533,11 @@ function ModelsPane({ onManage, onBrowseModels }: { onManage: () => void; onBrow
           </div>
           <div className="form-row form-row--actions">
             <button className="btn btn--prominent" onClick={onManage}>
-              {entries.length === 0 ? 'Connect a Model…' : 'Manage Providers…'}
+              {entries.length === 0 ? 'Connect a model…' : 'Manage providers…'}
             </button>
             {models.models.length > 0 && (
               <button className="btn" onClick={onBrowseModels}>
-                Browse Models…
+                Browse models…
               </button>
             )}
           </div>
@@ -659,10 +659,10 @@ function AdvancedPane(): JSX.Element {
           </div>
           <div className="form-row form-row--actions">
             <button className="btn" onClick={() => void restartEngine()} disabled={reconnecting}>
-              Restart Engine
+              Restart engine
             </button>
             <button className="btn" onClick={() => void chooseExecutable()}>
-              Use a Different Copy…
+              Use a different copy…
             </button>
             {/* Not running (the wrong file was chosen, or none is found):
                 the way back to the copy Spettro installs itself. */}
@@ -719,7 +719,7 @@ function AdvancedPane(): JSX.Element {
           </div>
           <div className="form-row form-row--actions">
             <button className="btn" onClick={() => void changeProjectFolder()}>
-              Change Folder…
+              Change folder…
             </button>
           </div>
         </div>
@@ -770,7 +770,7 @@ function TerminalSessions({ projectPath }: { projectPath: string | null }): JSX.
                 load()
               }}
             >
-              Resume a Terminal Session…
+              Resume a terminal session…
             </button>
           </div>
         ) : entries === null ? (
@@ -867,7 +867,7 @@ function AboutPane(): JSX.Element {
             </button>
             <span className="form-spacer" />
             <CopyButton
-              label="Copy Diagnostics"
+              label="Copy diagnostics"
               text={() =>
                 diagnosticsText({
                   appVersion,

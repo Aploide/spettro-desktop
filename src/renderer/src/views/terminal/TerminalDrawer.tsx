@@ -543,7 +543,7 @@ export default function TerminalDrawer({
           <div className="terminal-drawer__empty">
             <div className="terminal-drawer__empty-label">No terminal open</div>
             <button className="terminal-drawer__newbtn" onClick={() => void newTerminal()}>
-              New Terminal
+              New terminal
             </button>
           </div>
         )}

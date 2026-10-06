@@ -340,7 +340,7 @@ export class AppModel extends EventEmitter {
     return this.sessions.filter((s) => s.isBusy).length
   }
 
-  /** Resolves once no chat is working — Update When Finished, Quit When
+  /** Resolves once no chat is working — Update when finished, Quit When
    *  Finished. */
   waitForIdle(): Promise<void> {
     return new Promise((resolve) => {

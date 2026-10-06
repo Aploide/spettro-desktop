@@ -45,7 +45,7 @@ export async function askToSave(what: string, save: () => Promise<boolean>): Pro
     title: `Save changes to ${what}?`,
     message: 'Your changes will be lost if you don’t save them.',
     confirmLabel: 'Save',
-    alternateLabel: 'Don’t Save',
+    alternateLabel: 'Don’t save',
     alternateDestructive: true
   })
   if (answer === 'cancel') return false

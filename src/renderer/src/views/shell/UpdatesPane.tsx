@@ -1,6 +1,6 @@
 // Settings › Updates. To the person using it Spettro is one thing, so the pane
 // leads with one row: "Spettro is up to date ✓", or "An update is available"
-// with Update Now — which updates whichever halves need it (the engine first,
+// with Update now — which updates whichever halves need it (the engine first,
 // then the app, since installing the app restarts it). Running work is asked
 // about first: update now, or when it finishes.
 //
@@ -44,7 +44,7 @@ export default function UpdatesPane(): JSX.Element {
           <span>{lastChecked(appUpdate, cliUpdate)}</span>
           {' · '}
           <button className="link" disabled={checking} onClick={() => void quietCall('checkForUpdates')}>
-            {checking ? 'Checking…' : 'Check Now'}
+            {checking ? 'Checking…' : 'Check now'}
           </button>
         </div>
       </section>
@@ -163,7 +163,7 @@ function SummaryRow({ update }: { update: UpdateState }): JSX.Element {
             <span className="btn-icon">
               <DownloadIcon size={12} />
             </span>
-            Update Now
+            Update now
           </button>
         )}
       </div>

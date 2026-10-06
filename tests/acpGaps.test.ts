@@ -267,6 +267,34 @@ describe('permission prompts', () => {
     expect(session.toolById('call-3')?.status).toBe('pending')
   })
 
+  it('attach to this turn’s card, not an earlier turn’s with the same id', async () => {
+    liveModel()
+    const session = await liveChat()
+    let endTurn: (value: JSONValue) => void = () => undefined
+    fake.handlers['session/prompt'] = () => new Promise((resolve) => (endTurn = resolve))
+    model.send(session.id, 'list', [])
+    await settle()
+    fake.update('s1', { sessionUpdate: 'tool_call', toolCallId: 'call-1', title: 'Run ls', kind: 'execute', status: 'completed' })
+    endTurn({ stopReason: 'end_turn' })
+    await settle()
+    expect(session.isBusy).toBe(false)
+    model.send(session.id, 'touch it', [])
+    await settle()
+    // The CLI starts its numbering over: this turn's first call is call-1 too.
+    fake.update('s1', { sessionUpdate: 'tool_call', toolCallId: 'call-1', title: 'Run touch a', kind: 'execute', status: 'in_progress' })
+    fake.ask(21, 'session/request_permission', permissionAttached({ sessionId: 's1', toolCallId: 'call-1', command: 'touch a' }))
+
+    const [request] = shownPermissions()
+    expect(request.title).toBe('Run touch a')
+    const tools = session.items.flatMap((i) => (i.kind === 'tool' ? [i.tool] : []))
+    expect(tools.map((t) => [t.title, t.status])).toEqual([
+      ['Run ls', 'completed'],
+      ['Run touch a', 'pending']
+    ])
+    // The renderer marks the card the request names.
+    expect(request.toolCallId).toBe(tools[1].id)
+  })
+
   it('make exactly one titled card for a perm-N request and its settle update', async () => {
     liveModel()
     const session = await liveChat()

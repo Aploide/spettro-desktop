@@ -1560,7 +1560,13 @@ export class AppModel extends EventEmitter {
     if (request.toolKind === undefined && card?.kind !== undefined) request.toolKind = card.kind
     if (request.title === '') request.title = card?.title || permissionSentence(request)
     if (!session || !toolCallId || request.variant === 'compact') return null
-    if (card) return session.setToolStatus(toolCallId, 'pending')
+    if (card) {
+      // From here on the request names the card by the id it is filed
+      // under, which differs from the wire id once an earlier turn used it
+      // (ChatSession.turnStart) — the renderer marks the card by it.
+      request.toolCallId = card.id
+      return session.setToolStatus(card.id, 'pending')
+    }
     const event: ACPToolCallEvent = {
       toolCallId,
       title: request.title,
@@ -1573,6 +1579,7 @@ export class AppModel extends EventEmitter {
     if (request.toolKind !== undefined) event.kind = request.toolKind
     if (request.rawInput !== undefined) event.rawInput = request.rawInput
     session.applyToolEvent(event, true)
+    request.toolCallId = session.toolById(toolCallId)?.id ?? toolCallId
     return null
   }
 

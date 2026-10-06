@@ -61,6 +61,10 @@ export type ChatMetaPatch = Partial<
   >
 >
 
+/** Tool-call ids spettro numbers per turn (internal/acp/content.go
+ *  nextToolCallID); see ChatSession.turnStart. */
+const PER_TURN_TOOL_ID = /^(call|perm|compact)-\d+$/
+
 export class ChatSession {
   readonly id: string
   readonly projectPath: string
@@ -101,6 +105,22 @@ export class ChatSession {
   /** Chunks of a re-delivered previous answer already suppressed (see
    *  appendAssistant); reset whenever a genuinely new message starts. */
   private replayTail = ''
+
+  /**
+   * spettro numbers a turn's tool calls from 1 again every prompt (`call-1`,
+   * `perm-1`, `compact-1` — internal/acp/content.go nextToolCallID keeps the
+   * counter on the turn), so those ids are only unique within their turn.
+   * Matched across the whole chat, the second turn's `call-1` would land on
+   * the first turn's card: overwriting it in the transcript, and taking an
+   * approval to the wrong card. So they are matched only within the current
+   * turn (from `turnStart`), and a new call whose id an earlier turn already
+   * used is filed under a fresh one (`call-1~2`); `turnIds` maps this turn's
+   * wire ids to the ids they were filed under. Workflow cards keep their ids
+   * across turns on purpose (a run updates its card after the turn ends) and
+   * are matched chat-wide as before.
+   */
+  private turnStart = 0
+  private turnIds = new Map<string, string>()
 
   onItem: ((session: ChatSession, item: TranscriptItem) => void) | null = null
   onMeta: ((session: ChatSession, meta: ChatMetaPatch) => void) | null = null
@@ -394,6 +414,9 @@ export class ChatSession {
       timestamp: Date.now()
     }
     if (steering !== undefined) message.steering = steering
+    // A message that isn't steering starts a turn: the agent's tool-call
+    // numbering starts over with it (see turnStart).
+    else this.beginTurn()
     const item: TranscriptItem = { kind: 'message', message }
     this.items.push(item)
     this.isEmpty = false
@@ -584,10 +607,7 @@ export class ChatSession {
     const locations = event.locations.map((l) => ({ ...l }))
     const images = event.images.map((i) => ({ ...i }))
 
-    const existing = this.items.find(
-      (item): item is Extract<TranscriptItem, { kind: 'tool' }> =>
-        item.kind === 'tool' && item.tool.id === event.toolCallId
-    )
+    const existing = this.turnTool(event.toolCallId)
     if (existing) {
       const tool = existing.tool
       if (event.title !== undefined) tool.title = event.title
@@ -607,7 +627,7 @@ export class ChatSession {
 
     const status: ACPToolStatus = event.status ?? (isStart ? 'in_progress' : 'completed')
     const tool: ToolCallItem = {
-      id: event.toolCallId,
+      id: this.fileToolId(event.toolCallId),
       title: event.title ?? 'Tool call',
       status,
       output: combinedOutput,
@@ -630,26 +650,52 @@ export class ChatSession {
     this.emitItem(item)
   }
 
+  /** The card a tool call id names: a wire id of this turn's (see
+   *  turnStart), or the id a card was filed under. */
   toolById(toolCallId: string): ToolCallItem | null {
-    for (const item of this.items) {
-      if (item.kind === 'tool' && item.tool.id === toolCallId) return item.tool
-    }
-    return null
+    return this.turnTool(toolCallId)?.tool ?? null
   }
 
   /** Sets one card's status; returns the status it had, or null when there
    *  is no such card. */
   setToolStatus(toolCallId: string, status: ACPToolStatus): ACPToolStatus | null {
-    for (const item of this.items) {
-      if (item.kind !== 'tool' || item.tool.id !== toolCallId) continue
-      const previous = item.tool.status
-      if (previous !== status) {
-        item.tool.status = status
-        this.emitItem(item)
-      }
-      return previous
+    const item = this.turnTool(toolCallId)
+    if (!item) return null
+    const previous = item.tool.status
+    if (previous !== status) {
+      item.tool.status = status
+      this.emitItem(item)
+    }
+    return previous
+  }
+
+  private beginTurn(): void {
+    this.turnStart = this.items.length
+    this.turnIds.clear()
+  }
+
+  /** The card for `toolCallId` — this turn's only, for an id the agent
+   *  numbers per turn (see turnStart). */
+  private turnTool(toolCallId: string): Extract<TranscriptItem, { kind: 'tool' }> | null {
+    const filed = this.turnIds.get(toolCallId)
+    const perTurn = filed === undefined && PER_TURN_TOOL_ID.test(toolCallId)
+    const id = filed ?? toolCallId
+    for (let i = this.items.length - 1; i >= (perTurn ? this.turnStart : 0); i--) {
+      const item = this.items[i]
+      if (item.kind === 'tool' && item.tool.id === id) return item
     }
     return null
+  }
+
+  /** The id a new card is filed under: the agent's own, unless an earlier
+   *  turn's card already has it. */
+  private fileToolId(toolCallId: string): string {
+    const taken = (id: string): boolean =>
+      this.items.some((item) => item.kind === 'tool' && item.tool.id === id)
+    let id = toolCallId
+    for (let n = 2; taken(id); n++) id = `${toolCallId}~${n}`
+    if (PER_TURN_TOOL_ID.test(toolCallId)) this.turnIds.set(toolCallId, id)
+    return id
   }
 
   /** Marks the current streamed bubbles as finished at turn's end. */

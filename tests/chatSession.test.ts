@@ -117,6 +117,40 @@ describe('applyToolEvent', () => {
     expect(toolAt(s, 1).status).not.toBe('completed')
   })
 
+  it('keeps a later turn’s call-1 off the earlier turn’s card', () => {
+    // spettro numbers tool calls per turn (content.go nextToolCallID), so
+    // every turn has a call-1.
+    const s = session()
+    s.appendUserMessage('ls')
+    s.applyToolEvent(toolEvent({ toolCallId: 'call-1', title: 'Run ls -la' }), true)
+    s.applyToolEvent(toolEvent({ toolCallId: 'call-1', status: 'completed' }), false)
+    s.appendUserMessage('touch it')
+    expect(s.toolById('call-1')).toBeNull() // that one is the last turn's
+    s.applyToolEvent(toolEvent({ toolCallId: 'call-1', title: 'Run touch a.txt' }), true)
+    s.applyToolEvent(toolEvent({ toolCallId: 'call-1', status: 'failed' }), false)
+
+    const tools = s.items.filter((i) => i.kind === 'tool').map((i) => (i.kind === 'tool' ? i.tool : null))
+    expect(tools.map((t) => [t?.id, t?.title, t?.status])).toEqual([
+      ['call-1', 'Run ls -la', 'completed'],
+      ['call-1~2', 'Run touch a.txt', 'failed']
+    ])
+    expect(s.toolById('call-1')?.title).toBe('Run touch a.txt')
+    expect(s.toolById('call-1~2')?.title).toBe('Run touch a.txt')
+    // A steer is part of the running turn, not a new one.
+    s.appendUserMessage('also b.txt', [], 'sending')
+    expect(s.toolById('call-1')?.title).toBe('Run touch a.txt')
+  })
+
+  it('still finds a workflow card from an earlier turn', () => {
+    const s = session()
+    s.appendUserMessage('run it')
+    s.applyToolEvent(toolEvent({ toolCallId: 'workflow-wf_1', title: 'workflow review' }), true)
+    s.appendUserMessage('next')
+    s.applyToolEvent(toolEvent({ toolCallId: 'workflow-wf_1', status: 'completed' }), false)
+    expect(s.items.filter((i) => i.kind === 'tool')).toHaveLength(1)
+    expect(s.toolById('workflow-wf_1')?.status).toBe('completed')
+  })
+
   it('treats a completion with no matching start as an already-finished call', () => {
     // A call rejected before it ran arrives exactly once, as a completion.
     const s = session()

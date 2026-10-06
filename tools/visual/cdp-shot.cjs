@@ -6,8 +6,12 @@
 // can't see a native Wayland client, but the renderer's debug port can always
 // be asked for a frame. Start the app with a debug port first:
 //
-//   npx electron-vite dev --outDir /tmp/sd-live/out --remoteDebuggingPort 9333 \
-//       -- --user-data-dir=/tmp/sd-live/userdata
+//   npx electron-vite dev --outDir out/live --entry out/live/main/index.js \
+//       --remoteDebuggingPort 9333 -- --user-data-dir=/tmp/live-profile
+//
+// (`--entry` must accompany `--outDir`, or Electron starts whatever main
+// bundle was last built into out/main while the renderer is fresh; see
+// README.md, "The live app".)
 //
 //   node tools/visual/cdp-shot.cjs <port> <out.png> ["<JS to evaluate first>"]
 //

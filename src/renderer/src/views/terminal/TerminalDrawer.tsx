@@ -11,7 +11,7 @@
 // only while the app runs, restored from main via terminalList.
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Terminal } from '@xterm/xterm'
+import { Terminal, type ITheme } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import './terminal.css'
@@ -57,21 +57,44 @@ function withAlpha(color: string, alphaHex: string): string {
   return /^#[0-9a-fA-F]{6}$/.test(color) ? color + alphaHex : color
 }
 
+/** The 16 ANSI colours for the light scheme. xterm's built-in set is drawn for
+ *  a dark background: its white, bright white and bright yellow all but vanish
+ *  on --canvas, and `ls`, git and test runners print in exactly those. These
+ *  are the same hues deepened until each reads on the warm white, the way
+ *  light terminal themes remap them ("white" becomes a mid grey). The dark
+ *  scheme keeps xterm's defaults, which were made for it. */
+const LIGHT_ANSI: ITheme = {
+  black: '#1f1e1d',
+  red: '#c4453a',
+  green: '#2b7d55',
+  yellow: '#8a6a10',
+  blue: '#2f6dbf',
+  magenta: '#a3449c',
+  cyan: '#1f7a8c',
+  white: '#6b6a63',
+  brightBlack: '#8a887f',
+  brightRed: '#b03a30',
+  brightGreen: '#237049',
+  brightYellow: '#7a5d0c',
+  brightBlue: '#2659a6',
+  brightMagenta: '#8a3584',
+  brightCyan: '#186a79',
+  brightWhite: '#4a4945'
+}
+
 /** xterm theme from the computed theme.css palette. Read at mount and again
  *  whenever the colour scheme flips (see the effect below): xterm paints with
- *  concrete colours, so it can't follow the CSS variables on its own. */
-function readXtermTheme(): {
-  background: string
-  foreground: string
-  cursor: string
-  cursorAccent: string
-  selectionBackground: string
-} {
+ *  concrete colours, so it can't follow the CSS variables on its own. A theme
+ *  without ANSI entries puts xterm's dark-background defaults back, which is
+ *  what flipping to dark wants. */
+function readXtermTheme(): ITheme {
   const style = getComputedStyle(document.documentElement)
   const canvas = style.getPropertyValue('--canvas').trim() || '#262624'
   const foreground = style.getPropertyValue('--text-primary').trim() || '#f5f4ef'
   const accent = style.getPropertyValue('--accent').trim() || '#d97757'
+  const light = window.matchMedia('(prefers-color-scheme: light)').matches
   return {
+    ...(light ? LIGHT_ANSI : {}),
     background: canvas,
     foreground,
     cursor: accent,

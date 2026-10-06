@@ -155,3 +155,49 @@ describe('appearance preference', () => {
     expect(new Prefs(dir).appearance).toBe('system')
   })
 })
+
+describe('AppModel.setAppearance', () => {
+  // The IPC handler passes the renderer's argument straight through, so the
+  // model is the gate in front of nativeTheme.themeSource.
+  async function model(): Promise<{
+    m: import('@main/model/appModel').AppModel
+    applied: string[]
+    states: string[]
+    dir: string
+  }> {
+    const { mkdtempSync } = await import('fs')
+    const { tmpdir } = await import('os')
+    const { AppModel } = await import('@main/model/appModel')
+    const dir = mkdtempSync(join(tmpdir(), 'spettro-appearance-'))
+    const applied: string[] = []
+    const states: string[] = []
+    const m = new AppModel({
+      userDataDir: dir,
+      appVersion: '0.0.0-test',
+      applyAppearance: (mode) => applied.push(mode)
+    })
+    m.on('event', (e: { type: string; state?: { appearance: string } }) => {
+      if (e.type === 'app-state' && e.state) states.push(e.state.appearance)
+    })
+    return { m, applied, states, dir }
+  }
+
+  it('applies, persists and announces a valid choice', async () => {
+    const { m, applied, states, dir } = await model()
+    expect(m.getState().appearance).toBe('system')
+    m.setAppearance('dark')
+    expect(applied).toEqual(['dark'])
+    expect(states).toEqual(['dark'])
+    const { Prefs } = await import('@main/model/prefs')
+    expect(new Prefs(dir).appearance).toBe('dark')
+  })
+
+  it('ignores anything but system, light and dark', async () => {
+    const { m, applied, states } = await model()
+    m.setAppearance('sepia' as never)
+    m.setAppearance(undefined as never)
+    expect(applied).toEqual([])
+    expect(states).toEqual([])
+    expect(m.appearance).toBe('system')
+  })
+})

@@ -163,6 +163,23 @@ const APPEARANCES: { id: Appearance; label: string }[] = [
 function GeneralPane(): JSX.Element {
   const app = useApp()
   const current = app?.appearance ?? 'system'
+  // A radio group is one tab stop; the arrows move the choice (and the
+  // focus) along it, the way a native segmented control does.
+  const onKeyDown = (e: React.KeyboardEvent<HTMLElement>): void => {
+    const step =
+      e.key === 'ArrowRight' || e.key === 'ArrowDown'
+        ? 1
+        : e.key === 'ArrowLeft' || e.key === 'ArrowUp'
+          ? -1
+          : 0
+    if (step === 0) return
+    e.preventDefault()
+    const at = APPEARANCES.findIndex((a) => a.id === current)
+    const next = (at + step + APPEARANCES.length) % APPEARANCES.length
+    void call('setAppearance', APPEARANCES[next].id)
+    const buttons = e.currentTarget.querySelectorAll<HTMLButtonElement>('[role="radio"]')
+    buttons[next]?.focus()
+  }
   return (
     <div className="form-scroll">
       <section className="form-section">
@@ -171,12 +188,19 @@ function GeneralPane(): JSX.Element {
           <div className="form-row">
             <span className="form-label">Theme</span>
             <span className="form-value">
-              <span className="segmented segmented--inline" role="radiogroup" aria-label="Theme">
+              <span
+                className="segmented segmented--inline"
+                role="radiogroup"
+                aria-label="Theme"
+                onKeyDown={onKeyDown}
+              >
                 {APPEARANCES.map((a) => (
                   <button
                     key={a.id}
+                    type="button"
                     role="radio"
                     aria-checked={current === a.id}
+                    tabIndex={current === a.id ? 0 : -1}
                     className={current === a.id ? 'active' : ''}
                     onClick={() => void call('setAppearance', a.id)}
                   >

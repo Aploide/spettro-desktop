@@ -33,7 +33,8 @@ the things a screenshot renders perfectly while being wrong:
 | `setConfigValue.test.ts` | Telling an agent's refusal from a dead pipe. Getting it wrong is invisible until you look closely. |
 | `configBar.test.tsx` | That the Ultra chip *does nothing* when locked — a screenshot only shows that it looks locked. |
 | `workflowStudio.test.tsx` | That Run saves first, refuses to run a broken script, and that an old CLI says so instead of showing an empty project. |
-| `theme.test.ts` | That the light palette declares every token the dark one does (a missing one silently inherits the dark value), that view CSS uses tokens rather than hex, that `.icon-btn`/`.sheet-card` are defined once, and that a bad `appearance` on disk can't reach `nativeTheme`. |
+| `theme.test.ts` | That the light palette declares every token the dark one does (a missing one silently inherits the dark value), that view CSS uses tokens rather than hex, that `.icon-btn`/`.sheet-card` are defined once, and that a bad `appearance` — on disk or over IPC — can't reach `nativeTheme`, while a good one is applied, persisted and announced in app-state. |
+| `appearancePane.test.tsx` | Settings › General's theme control: the stored choice shows as checked, it is one tab stop, and clicks and arrow keys (wrapping) send `setAppearance`. |
 
 ## `wire.ts`
 

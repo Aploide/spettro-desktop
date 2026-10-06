@@ -30,6 +30,7 @@ import type { JSX } from 'react'
 import type {
   WorkflowInfo,
   WorkflowList,
+  WorkflowRunInfo,
   WorkflowScope,
   WorkflowValidation
 } from '@shared/extensions'
@@ -44,7 +45,7 @@ import { TranscriptRowView } from '@renderer/views/chat/transcript/TranscriptIte
 import { Icon } from '@renderer/views/chat/transcript/ToolCallView'
 import { SpettroSpinner } from '@renderer/views/chat/transcript/RunTicker'
 import Popover from '@renderer/views/common/Popover'
-import { basename } from '@renderer/views/shell/util'
+import { basename, relativeTime } from '@renderer/views/shell/util'
 import ScriptEditor from './ScriptEditor'
 import './workflows.css'
 
@@ -69,6 +70,9 @@ return results
 
 /** An unsaved draft has no name on disk yet; this is what the list calls it. */
 const DRAFT = '(new workflow)'
+
+/** How many past runs the list shows; the newest are the ones worth a look. */
+const RECENT_RUNS_SHOWN = 6
 
 interface Draft {
   /** The saved name this draft came from, or '' for a brand-new script. */
@@ -96,6 +100,13 @@ export default function WorkflowStudio({
   // empty state for it would invite the user to write one into a CLI that
   // cannot save it.
   const [unsupported, setUnsupported] = useState<string | null>(null)
+  const [runs, setRuns] = useState<WorkflowRunInfo[]>([])
+
+  // Past runs are a footnote to the list: a CLI that can't list them just
+  // shows none.
+  const refreshRuns = useCallback(async () => {
+    setRuns((await quietCall('workflowRuns', chatId).catch(() => null)) ?? [])
+  }, [chatId])
 
   const refresh = useCallback(async () => {
     try {
@@ -111,6 +122,12 @@ export default function WorkflowStudio({
   useEffect(() => {
     void refresh()
   }, [refresh])
+
+  // A test run that has just ended is the newest past run.
+  const runBusy = useChat(runChatId ?? '')?.isBusy ?? false
+  useEffect(() => {
+    if (!runBusy) void refreshRuns()
+  }, [runBusy, refreshRuns])
 
   // The scratch chat outlives this component only by accident, so it is torn
   // down on unmount — closing the studio must not leave a fan-out running
@@ -318,6 +335,7 @@ export default function WorkflowStudio({
       <div className="wfs-body">
         <WorkflowList
           list={list}
+          runs={runs}
           draft={draft}
           onOpen={open}
           onNew={() => void newDraft()}
@@ -360,12 +378,14 @@ export default function WorkflowStudio({
 
 function WorkflowList({
   list,
+  runs,
   draft,
   onOpen,
   onNew,
   onDelete
 }: {
   list: WorkflowList
+  runs: WorkflowRunInfo[]
   draft: Draft | null
   onOpen: (info: WorkflowInfo) => void
   onNew: () => void
@@ -398,6 +418,11 @@ function WorkflowList({
               </span>
             )}
             {info.description && <span className="wfs-row-desc">{info.description}</span>}
+            {info.whenToUse && (
+              <span className="wfs-row-when" title={info.whenToUse}>
+                {info.whenToUse}
+              </span>
+            )}
             {info.phases.length > 0 && (
               <span className="wfs-row-phases">
                 {info.phases.map((p) => p.title).join(' → ')}
@@ -418,7 +443,38 @@ function WorkflowList({
       {list.workflows.length === 0 && draft === null && (
         <p className="wfs-list-empty">No saved workflows in this project yet.</p>
       )}
+      {runs.length > 0 && <RecentRuns runs={runs.slice(0, RECENT_RUNS_SHOWN)} />}
     </aside>
+  )
+}
+
+/** The project's last few runs, from the studio or a chat: which workflow,
+ *  whether it finished, how long ago. A run's folder keeps its script, its
+ *  step-by-step journal and its result; clicking one shows it in the file
+ *  manager. */
+function RecentRuns({ runs }: { runs: WorkflowRunInfo[] }): JSX.Element {
+  return (
+    <section className="wfs-runs" aria-label="Recent runs">
+      <h3 className="wfs-list-heading">Recent runs</h3>
+      {runs.map((run) => (
+        <button
+          key={run.runId}
+          type="button"
+          className="wfs-run-row"
+          title={`Show this run’s files\n${run.dir}`}
+          onClick={() => void call('showItemInFolder', run.dir)}
+        >
+          <span
+            className={'wfs-run-dot' + (run.finished ? ' wfs-run-dot--done' : '')}
+            aria-hidden
+          />
+          <span className="wfs-run-name">{run.name || 'Unnamed workflow'}</span>
+          <span className="wfs-run-meta">
+            {run.finished ? 'Finished' : 'Not finished'} · {relativeTime(run.modifiedAt)}
+          </span>
+        </button>
+      ))}
+    </section>
   )
 }
 

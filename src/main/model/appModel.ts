@@ -18,6 +18,7 @@
 import { EventEmitter } from 'events'
 import { randomUUID } from 'crypto'
 import { mkdirSync, statSync } from 'fs'
+import { access, readFile } from 'fs/promises'
 import { homedir } from 'os'
 import { basename, join } from 'path'
 import type {
@@ -109,6 +110,30 @@ const CRASH_LOOP_WINDOW_MS = 10_000
  *  sharedSettings), so for those the CLI, not a chat, is the truth. */
 function isSharedConfig(id: string): boolean {
   return id !== 'mode'
+}
+
+/** How many past workflow runs the studio asks the CLI for. */
+const RECENT_WORKFLOW_RUNS = 20
+
+/** Fills in what a run's folder says about it (internal/agent workflow.go
+ *  writes meta.json as the run starts, workflow_live_run.go result.json once
+ *  it settles). The CLI runs on this machine, so the folder is readable here;
+ *  a run whose folder can't be read is listed as it came. */
+async function describeWorkflowRun(run: WorkflowRunInfo): Promise<WorkflowRunInfo> {
+  if (run.dir === '') return run
+  let name = run.name
+  try {
+    const meta: unknown = JSON.parse(await readFile(join(run.dir, 'meta.json'), 'utf8'))
+    const metaName = (meta as { name?: unknown } | null)?.name
+    if (typeof metaName === 'string') name = metaName
+  } catch {
+    // No meta.json (or not JSON): the run stays unnamed.
+  }
+  const finished = await access(join(run.dir, 'result.json')).then(
+    () => true,
+    () => false
+  )
+  return { ...run, name, finished }
 }
 
 export class AppModel extends EventEmitter {
@@ -1683,11 +1708,14 @@ export class AppModel extends EventEmitter {
     this.pushEvent({ type: 'chat-removed', chatId })
   }
 
+  /** The project's recent workflow runs, newest first, each with the name
+   *  and outcome its folder records (the CLI lists only the folders). */
   async listWorkflowRuns(chatId: string): Promise<WorkflowRunInfo[]> {
     const client = this.extensions.client
     const target = this.workflowTarget(chatId)
     if (!client || !target) return []
-    return client.listWorkflowRuns(target)
+    const runs = await client.listWorkflowRuns(target, RECENT_WORKFLOW_RUNS)
+    return Promise.all(runs.map(describeWorkflowRun))
   }
 
   // -------------------------------------------------------------------------

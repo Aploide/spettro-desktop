@@ -476,7 +476,9 @@ export function decodeWorkflowRuns(value: JSONValue): WorkflowRunInfo[] {
       {
         runId,
         dir: stringValue(row?.['dir'] as JSONValue) ?? '',
-        modifiedAt: intValue(row?.['modifiedAt'] as JSONValue) ?? 0
+        modifiedAt: intValue(row?.['modifiedAt'] as JSONValue) ?? 0,
+        name: '',
+        finished: false
       }
     ]
   })

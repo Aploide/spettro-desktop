@@ -131,6 +131,17 @@
   opacity: 0.75;
 }
 
+/* "When to use": the meta's own advice, held to two lines. */
+.wfs-row-when {
+  grid-column: 1 / -1;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
 .wfs-row-delete {
   flex: 0 0 auto;
   background: none;
@@ -168,6 +179,68 @@
   color: var(--text-secondary);
   padding: var(--sp-sm) 10px;
   margin: 0;
+}
+
+/* Past runs: a quiet footnote under the saved workflows. */
+.wfs-runs {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: var(--sp-md);
+  padding-top: var(--sp-sm);
+  border-top: 1px solid var(--hairline);
+}
+
+.wfs-list-heading {
+  margin: 0;
+  padding: 4px 10px;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--text-tertiary);
+}
+
+.wfs-run-row {
+  display: grid;
+  grid-template-columns: 8px 1fr;
+  gap: 1px 8px;
+  align-items: center;
+  padding: 6px 10px;
+  background: none;
+  border: 0;
+  border-radius: var(--rad-sm);
+  color: var(--text-primary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.wfs-run-row:hover {
+  background: color-mix(in srgb, var(--text-primary) 6%, transparent);
+}
+
+.wfs-run-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  border: 1px solid var(--text-tertiary);
+}
+
+.wfs-run-dot--done {
+  border-color: var(--success);
+  background: var(--success);
+}
+
+.wfs-run-name {
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wfs-run-meta {
+  grid-column: 2;
+  font-size: 11px;
+  color: var(--text-secondary);
 }
 
 /* ---------------------------------------------------------------- main */

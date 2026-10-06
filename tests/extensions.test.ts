@@ -123,7 +123,10 @@ describe('decodeWorkflowRuns', () => {
     const runs = decodeWorkflowRuns({
       runs: [{ runId: 'wf_1', dir: '/d/wf_1', modifiedAt: 1700000000000 }]
     })
-    expect(runs).toEqual([{ runId: 'wf_1', dir: '/d/wf_1', modifiedAt: 1700000000000 }])
+    // Name and outcome come from the run's folder, which main reads after.
+    expect(runs).toEqual([
+      { runId: 'wf_1', dir: '/d/wf_1', modifiedAt: 1700000000000, name: '', finished: false }
+    ])
   })
 
   it('drops an entry with no run id, since resume is keyed on it', () => {

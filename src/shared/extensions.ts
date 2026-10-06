@@ -332,6 +332,12 @@ export interface WorkflowRunInfo {
   dir: string
   /** ms since epoch. */
   modifiedAt: number
+  /** The workflow's meta.name, from the run folder's meta.json (written
+   *  when the run starts); '' when it left none. Filled in by main. */
+  name: string
+  /** The run settled and wrote result.json. False for one still running or
+   *  paused, and for one cut off before it could. Filled in by main. */
+  finished: boolean
 }
 
 export const EMPTY_WORKFLOW_LIST: WorkflowList = { workflows: [], searchPaths: [], cwd: '' }

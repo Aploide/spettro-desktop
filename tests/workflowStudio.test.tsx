@@ -217,3 +217,38 @@ describe('unsaved edits', () => {
     expect(String((screen.getByLabelText('Workflow script') as HTMLTextAreaElement).value)).toContain('// edited')
   })
 })
+
+describe('past runs', () => {
+  it('lists the project’s recent runs, and a click shows a run’s files', async () => {
+    answers.workflowRuns = [
+      { runId: 'r2', dir: '/home/u/.spettro/sessions/s/workflows/r2', modifiedAt: Date.now() - 120_000, name: 'review', finished: true },
+      { runId: 'r1', dir: '/home/u/.spettro/sessions/s/workflows/r1', modifiedAt: Date.now() - 7_200_000, name: '', finished: false }
+    ]
+    render(<WorkflowStudio chatId="chat-1" onClose={() => undefined} />)
+    const section = await screen.findByRole('region', { name: 'Recent runs' })
+    expect(section.textContent).toContain('Finished · 2m')
+    expect(section.textContent).toContain('Unnamed workflow')
+    expect(section.textContent).toContain('Not finished · 2h')
+    fireEvent.click(screen.getByText('Unnamed workflow'))
+    expect(made('showItemInFolder')).toEqual([['showItemInFolder', ['/home/u/.spettro/sessions/s/workflows/r1']]])
+  })
+
+  it('shows nothing for a project without any, or a CLI that can’t list them', async () => {
+    answers.workflowRuns = () => {
+      throw new Error('method not found')
+    }
+    render(<WorkflowStudio chatId="chat-1" onClose={() => undefined} />)
+    await waitFor(() => expect(made('workflowRuns')).toHaveLength(1))
+    expect(screen.queryByRole('region', { name: 'Recent runs' })).toBeNull()
+  })
+
+  it('says when to use a workflow under its name', async () => {
+    answers.workflowList = {
+      workflows: [{ ...INFO, whenToUse: 'before opening a PR' }],
+      searchPaths: ['/p/.spettro/workflows'],
+      cwd: '/p'
+    }
+    render(<WorkflowStudio chatId="chat-1" onClose={() => undefined} />)
+    expect(await screen.findByText('before opening a PR')).toBeTruthy()
+  })
+})

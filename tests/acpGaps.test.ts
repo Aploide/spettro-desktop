@@ -6,7 +6,7 @@
 // reason, a reopened chat that quietly forgot its conversation.
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -1071,3 +1071,39 @@ describe('an imported conversation', () => {
   })
 })
 
+describe('past workflow runs', () => {
+  it('read each run’s name and outcome from its folder', async () => {
+    liveModel([stored('a', null)])
+    const run = (id: string): string => {
+      const runDir = join(dir, 'runs', id)
+      mkdirSync(runDir, { recursive: true })
+      return runDir
+    }
+    // workflow.go writes meta.json as a run starts; workflow_live_run.go
+    // writes result.json once it settles.
+    const done = run('wf-done')
+    writeFileSync(join(done, 'meta.json'), JSON.stringify({ name: 'review-changes', description: 'd' }))
+    writeFileSync(join(done, 'result.json'), '[]')
+    const paused = run('wf-paused')
+    writeFileSync(join(paused, 'meta.json'), JSON.stringify({ name: 'audit-deps' }))
+    const bare = run('wf-bare')
+    const listed = [done, paused, bare, join(dir, 'runs', 'gone')].map((d, i) => ({
+      runId: `r${i}`,
+      dir: d,
+      modifiedAt: i,
+      name: '',
+      finished: false
+    }))
+    const internals = model as unknown as { extensions: { client: unknown } }
+    Object.defineProperty(internals.extensions, 'client', {
+      get: () => ({ listWorkflowRuns: () => Promise.resolve(listed) })
+    })
+    const runs = await model.listWorkflowRuns('a')
+    expect(runs.map((r) => [r.name, r.finished])).toEqual([
+      ['review-changes', true],
+      ['audit-deps', false],
+      ['', false],
+      ['', false]
+    ])
+  })
+})

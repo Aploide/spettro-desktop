@@ -2,7 +2,7 @@
 // header, scrolling transcript, composer, config bar, terminal drawer.
 //
 // Two things here are not in the Swift original, and both exist because a
-// a multi-agent workflow is not one tool call but a hundred. The
+// multi-agent workflow is not one tool call but a hundred. The
 // transcript is folded first (`groupTranscript`), so a run renders as the one
 // card that owns its members instead of a wall of interleaved rows; and while
 // a run is in flight the column can split, docking a live panel on the right.
@@ -18,7 +18,7 @@ import { call, ensureChatLoaded, useChat } from '@renderer/state/store'
 import { setTerminalVisible, useShell } from '@renderer/state/shell'
 import TerminalDrawer from '@renderer/views/terminal/TerminalDrawer'
 import { TranscriptRowView } from './transcript/TranscriptItemView'
-import { activeRuns, groupTranscript } from './transcript/orchestration'
+import { activeRuns, groupTranscript, type WorkflowRun } from './transcript/orchestration'
 import { RunTicker } from './transcript/RunTicker'
 import { Icon } from './transcript/ToolCallView'
 import OrchestrationPanel from './OrchestrationPanel'
@@ -67,6 +67,11 @@ export default function ChatView({ chatId }: { chatId: string }): JSX.Element {
   const items = chat?.items
   const rows = useMemo(() => (items ? groupTranscript(items) : []), [items])
   const live = useMemo(() => activeRuns(rows), [rows])
+  const runsById = useMemo(() => {
+    const out = new Map<string, WorkflowRun>()
+    for (const row of rows) if (row.kind === 'run') out.set(row.run.tool.id, row.run)
+    return out
+  }, [rows])
 
   const scrollToBottom = useCallback(() => {
     const el = scrollRef.current
@@ -211,7 +216,7 @@ export default function ChatView({ chatId }: { chatId: string }): JSX.Element {
             and that settle only renders if the column is still there. */}
         <aside className="chat-orchestration">
           {panelVisible && (
-            <OrchestrationPanel runs={live} onClose={() => setPanelVisible(false)} />
+            <OrchestrationPanel runs={live} current={runsById} onClose={() => setPanelVisible(false)} />
           )}
         </aside>
       </div>

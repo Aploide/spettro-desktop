@@ -893,3 +893,31 @@ describe('telling a run’s card from things that look like one', () => {
     expect(runs(rows)).toHaveLength(1)
   })
 })
+
+describe('runs without an id', () => {
+  // A run with no id gets a `wf-<n>` card, and an older CLI used that form
+  // for every card. The empty id is not one run: pooling members under it
+  // handed each run's `code#1` to every other run's card.
+  it('keep their own members, even when instance names repeat', () => {
+    const first = workflowCard(
+      { runId: '', name: 'one', status: 'success', phases: [{ title: 'P' }], agents: [{ instance: 'code#1', task: 'first', phase: 'P', status: 'success' }] },
+      { rawInput: null }
+    )
+    if (first.kind === 'tool') first.tool.id = 'wf-1'
+    const second = workflowCard(
+      { runId: '', name: 'two', status: 'success', phases: [{ title: 'P' }], agents: [{ instance: 'code#1', task: 'second', phase: 'P', status: 'success' }] },
+      { rawInput: null }
+    )
+    if (second.kind === 'tool') second.tool.id = 'wf-2'
+    const rows = groupTranscript([
+      first,
+      member({ instance: 'code#1', task: 'first', runId: '', workflow: 'one', phase: 'P', status: 'completed', output: 'FIRST' }),
+      second,
+      member({ instance: 'code#1', task: 'second', runId: '', workflow: 'two', phase: 'P', status: 'completed', output: 'SECOND' })
+    ])
+    expect(runs(rows).map((run) => run.phases[0].members.map((m) => m.resultText))).toEqual([
+      ['FIRST'],
+      ['SECOND']
+    ])
+  })
+})

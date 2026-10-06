@@ -82,6 +82,14 @@ describe('under Ask first', () => {
     expect(calls).toContainEqual(['setSelectOption', ['chat-1', 'permission', 'restricted']])
   })
 
+  it('says workflows are paused when a budget is written for the standing Ultra', () => {
+    // Ultra is saved but suspended under Ask first; a "+500k" aimed at it
+    // would be ignored, and the line has to say so rather than stay silent.
+    render(<Composer chat={chat(options({ permission: 'ask-first', ultra: true }))} />)
+    type('review the changes +500k')
+    expect(screen.getByRole('status').textContent).toMatch(/paused under Ask first/)
+  })
+
   it('says nothing about a message that does not ask for workflows', () => {
     render(<Composer chat={chat(options({ permission: 'ask-first', ultra: false }))} />)
     type('fix the typo in README')

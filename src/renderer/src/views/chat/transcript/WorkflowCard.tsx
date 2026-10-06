@@ -61,6 +61,9 @@ export function WorkflowCard({ run }: { run: WorkflowRun }): JSX.Element {
   const continued = run.continued
   const running = run.status === 'running' && !continued
   const settled = !running
+  // Finished, failed or stopped: nothing more will run. A paused run (and the
+  // card a later turn continued) may still reach its remaining phases.
+  const over = !continued && (run.status === 'done' || run.status === 'failed' || run.status === 'stopped')
   // A continued card is history the card below repeats in full, so it starts
   // folded; everything else starts open.
   const open = override ?? !continued
@@ -153,7 +156,12 @@ export function WorkflowCard({ run }: { run: WorkflowRun }): JSX.Element {
           ) : (
             <div className="wfc-tree">
               {phases.map((phase, i) => (
-                <PhaseGroup key={`${phase.title}-${i}`} phase={phase} compact={settled} />
+                <PhaseGroup
+                  key={`${phase.title}-${i}`}
+                  phase={phase}
+                  compact={settled}
+                  over={over}
+                />
               ))}
             </div>
           )}
@@ -199,7 +207,17 @@ type PhaseState = 'pending' | 'running' | 'failed' | 'done'
  * that did not succeed. What goes is the roll of successes, which becomes a
  * single "N done" the reader can open if they want it.
  */
-function PhaseGroup({ phase, compact }: { phase: WorkflowPhase; compact: boolean }): JSX.Element {
+function PhaseGroup({
+  phase,
+  compact,
+  over
+}: {
+  phase: WorkflowPhase
+  compact: boolean
+  /** The run has ended, so a phase nobody reached never will: it says "not
+   *  run" rather than "pending", which would promise work that is not coming. */
+  over: boolean
+}): JSX.Element {
   const [showAll, setShowAll] = useState(false)
   const state = phaseState(phase)
   const total = phase.members.length
@@ -239,7 +257,7 @@ function PhaseGroup({ phase, compact }: { phase: WorkflowPhase; compact: boolean
           )}
           {phase.detail !== '' && <span className="wfc-phasedetail">{phase.detail}</span>}
           {state === 'pending' ? (
-            <span className="wfc-phasepending">pending</span>
+            <span className="wfc-phasepending">{over ? 'not run' : 'pending'}</span>
           ) : (
             <>
               <ProgressMeter counts={phase.counts} width={56} />

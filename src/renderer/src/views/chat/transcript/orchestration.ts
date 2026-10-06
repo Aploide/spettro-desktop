@@ -1008,10 +1008,20 @@ function cardMembers(build: RunBuild, state: CardState, pool: Map<string, Member
   return out
 }
 
+/**
+ * Which member pool a run's card reads. Every card of one run shares its run
+ * id's pool; a run with no id (`wf-<n>`, and every card of an older CLI) gets
+ * a pool of its own, because the empty id is not one run — pooling them all
+ * under it would hand one run's `code#1` to every other run's card.
+ */
+function poolKey(runId: string, build: RunBuild): string {
+  return runId !== '' ? runId : `card:${build.tool.id}`
+}
+
 function finishWorkflow(build: RunBuild, pools: Map<string, Map<string, MemberCall>>): WorkflowRun {
   const tool = build.tool
   const state = build.meta ?? textState(tool, build.args, build.name)
-  const pool = pools.get(state.runId !== '' ? state.runId : build.runId) ?? new Map()
+  const pool = pools.get(poolKey(state.runId !== '' ? state.runId : build.runId, build)) ?? new Map()
   const members = cardMembers(build, state, pool)
 
   // Phases in the card's order; then phases only a member names; then the
@@ -1190,7 +1200,7 @@ export function groupTranscript(items: TranscriptItem[]): TranscriptRow[] {
       const runId = argStr(args, 'run_id')
       run = (runId !== '' ? byRunId.get(runId) : undefined) ?? openWorkflow ?? lastWorkflow
       if (run) {
-        const key = runId !== '' ? runId : run.runId
+        const key = poolKey(runId !== '' ? runId : run.runId, run)
         let pool = pools.get(key)
         if (!pool) pools.set(key, (pool = new Map()))
         pool.set(member.instance, member)

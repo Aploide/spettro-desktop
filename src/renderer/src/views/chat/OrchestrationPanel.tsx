@@ -220,9 +220,15 @@ interface Settled {
 
 export default function OrchestrationPanel({
   runs,
+  current,
   onClose
 }: {
   runs: WorkflowRun[]
+  /** Every run in the transcript as it stands now, by card id. A run leaves
+   *  `runs` the moment it stops running — paused at a checkpoint, stopped,
+   *  finished — and its settled line must say which, from the state it left
+   *  in rather than the last running snapshot (which can only guess "done"). */
+  current?: ReadonlyMap<string, WorkflowRun>
   onClose: () => void
 }): JSX.Element | null {
   const [settled, setSettled] = useState<Settled[]>([])
@@ -232,6 +238,10 @@ export default function OrchestrationPanel({
   const seq = useRef(0)
   const seen = useRef(new Map<string, WorkflowRun>())
   const timers = useRef<ReturnType<typeof setTimeout>[]>([])
+  // Read through a ref: it changes with every transcript update, exactly as
+  // `runs` does, and must not become a second trigger for the effect below.
+  const currentRef = useRef(current)
+  currentRef.current = current
 
   // Hold, collapse, release. The dependency is the array identity, which the
   // parent rebuilds on every update — the body only acts on differences, so
@@ -248,8 +258,13 @@ export default function OrchestrationPanel({
     const gone: Settled[] = []
     for (const [key, run] of seen.current) {
       if (live.has(key)) continue
-      // Prefer the finished snapshot — it carries the run's own summary line.
-      gone.push({ key, run: latest.get(key) ?? run, collapsed: false })
+      // Prefer the run as it is now — it carries the run's own summary line,
+      // or the pause or stop that took it off the live list.
+      gone.push({
+        key,
+        run: latest.get(key) ?? currentRef.current?.get(key) ?? run,
+        collapsed: false
+      })
     }
     seen.current = live
 

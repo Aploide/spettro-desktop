@@ -88,8 +88,11 @@ export default function Composer({ chat, promptSeed, onSubmit }: ComposerProps):
   const budgets = budgetDirectivesLive(draft, gate.ultraOn && !gate.askFirst)
   const budget = budgets ? parseBudgetDirective(draft) : null
   // The message asks for workflows (or carries a budget for the standing
-  // Ultra) while Ask first means none will run.
-  const pausedByAskFirst = gate.askFirst && (requested || (gate.ultraOn && budget !== null))
+  // Ultra) while Ask first means none will run. The budget is looked for
+  // directly: `budget` above is null under Ask first, since no directive
+  // there would be honoured.
+  const pausedByAskFirst =
+    gate.askFirst && (requested || (gate.ultraOn && parseBudgetDirective(draft) !== null))
   const matching = matchingCommands(draft, chat.commands)
   const paletteVisible = matching.length > 0 && focused
 

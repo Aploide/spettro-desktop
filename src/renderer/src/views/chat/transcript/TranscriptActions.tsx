@@ -13,8 +13,9 @@ import type { TranscriptItem } from '@shared/model'
 import { Icon } from '@renderer/design/icons'
 
 export interface TranscriptActions {
-  /** Puts a sent message's text back in the composer ("Edit & resend"). */
-  editMessage?: (text: string) => void
+  /** Puts a sent message's text, and the files it mentioned, back in the
+   *  composer ("Edit & resend"). */
+  editMessage?: (text: string, mentions?: string[]) => void
   /** Sends the last prompt again ("Try again" on a failed turn). */
   retry?: () => void
   /** The newest user message: the only one that offers Edit & resend, since

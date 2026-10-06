@@ -328,7 +328,9 @@
 }
 
 .thinking-caption {
-  min-height: 32px;
+  /* One line: every stop's caption is written to fit it, so the popover
+     neither jumps under a dragging thumb nor holds a blank second line. */
+  min-height: 16px;
   margin-top: 4px;
   font-size: var(--fs-sm);
   line-height: 16px;

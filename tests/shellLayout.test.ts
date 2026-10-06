@@ -55,6 +55,11 @@ describe('groupSessions', () => {
   it('numbers the visible rows top to bottom, archived excluded', () => {
     expect(visibleSessionOrder(sessions).map((s) => s.id)).toEqual(['new-b', 'pin-a', 'mid-a', 'old-a'])
   })
+
+  it('skips the rows of a folded group, so Ctrl+2 is the second row on screen', () => {
+    expect(visibleSessionOrder(sessions, ['/w/b']).map((s) => s.id)).toEqual(['pin-a', 'mid-a', 'old-a'])
+    expect(visibleSessionOrder(sessions, ['/w/a', '/w/b'])).toEqual([])
+  })
 })
 
 describe('relativeTime', () => {

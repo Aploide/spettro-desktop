@@ -42,7 +42,7 @@ const LEVELS: Omit<ThinkingStop, 'ultra'>[] = [
   { id: 'medium', label: 'Medium', caption: 'Thinks for a moment before acting' },
   { id: 'high', label: 'High', caption: 'Thinks things through — a good default for real work' },
   { id: 'x-high', label: 'Extra high', caption: 'Thinks longer on hard problems (slower, more tokens)' },
-  { id: 'max', label: 'Max', caption: 'As much thinking as the model allows (slowest, most tokens)' }
+  { id: 'max', label: 'Max', caption: 'As much as the model allows (slowest, most tokens)' }
 ]
 
 export const ULTRA_CAPTION =
@@ -51,7 +51,8 @@ export const ULTRA_CAPTION =
 export const ULTRA = {
   id: ULTRA_STOP,
   label: 'Ultra',
-  caption: ULTRA_CAPTION,
+  // The one-line form; ULTRA_CAPTION, the whole sentence, is its tooltip.
+  caption: 'High thinking + multi-agent workflows (more tokens)',
   ultra: true
 } as const satisfies ThinkingStop
 

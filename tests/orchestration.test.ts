@@ -749,6 +749,22 @@ describe('the card’s metadata (`_meta["spettro.app/workflow"]`)', () => {
     expect(run.stoppedReason).toBe('cancelled')
   })
 
+  it('settles members still running when their run ends, instead of spinning on', () => {
+    // A cancelled turn closes the card with its members as they last were.
+    const run = onlyWorkflow(groupTranscript([workflowCard({ ...AUDIT, status: 'cancelled' })]))
+    const byInstance = new Map(run.phases.flatMap((p) => p.members).map((m) => [m.instance, m.status]))
+    expect(byInstance.get('gp#4')).toBe('stopped')
+    expect(byInstance.get('gp#6')).toBe('stopped')
+    expect(byInstance.get('gp#1')).toBe('done')
+    expect(run.counts.running).toBe(0)
+    expect(run.counts.stopped).toBe(2)
+    // A run that is only waiting keeps its members as they are.
+    const paused = onlyWorkflow(
+      groupTranscript([workflowCard({ ...AUDIT, status: 'paused', checkpointId: 'cp-1', waiting: 'which?' })])
+    )
+    expect(paused.counts.running).toBe(2)
+  })
+
   it('carries the summary of a finished run', () => {
     const done = { ...AUDIT, status: 'success', agents: AUDIT.agents?.slice(0, 3) }
     const run = onlyWorkflow(groupTranscript([workflowCard(done, { summary: '3 agents · 1 failed · 1 replayed' })]))

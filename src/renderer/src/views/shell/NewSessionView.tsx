@@ -65,7 +65,7 @@ export default function NewSessionView(): JSX.Element {
       <div className="new-session-body">
         <h1 className="new-session-greeting">What should we build?</h1>
         <div className="new-session-composer">
-          <Composer chat={draftChat(path)} promptSeed={promptSeed} onSubmit={submit} />
+          <Composer chat={draftChat(path, app?.defaultConfigOptions ?? [])} promptSeed={promptSeed} onSubmit={submit} />
         </div>
         <div className="new-session-meta">
           <ProjectChip

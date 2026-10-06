@@ -147,7 +147,9 @@ function capitalized(s: string): string {
  * differently — a write from an edit, a listing from a search.
  */
 export function displayName(tool: Pick<ToolCallItem, 'title' | 'argsJSON' | 'kind'>): string {
-  const name = parsedTitle(tool).name
+  const { name, args } = parsedTitle(tool)
+  // ask-user, whose card is titled "Ask the user" (kind other).
+  if (askedQuestion(args) !== null || /^ask[- ](?:the[- ])?user$/i.test(name)) return 'Ask'
   switch (tool.kind) {
     case 'execute':
       if (name.startsWith('pty')) return 'Terminal'
@@ -287,8 +289,8 @@ export function rowArgument(
   tool: Pick<ToolCallItem, 'title' | 'argsJSON' | 'kind' | 'locations'>
 ): string {
   const { name, args } = parsedTitle(tool)
-  let text: string | null = null
-  if (tool.kind === 'execute' || name === 'bash' || name === 'shell' || name === 'exec') {
+  let text: string | null = askedQuestion(args)
+  if (text === null && (tool.kind === 'execute' || name === 'bash' || name === 'shell' || name === 'exec')) {
     const command = argString(args, 'command', 'cmd')
     if (command !== null) {
       const lines = command.trim().split('\n')
@@ -312,6 +314,16 @@ export function rowArgument(
   return middleTruncate(text.split('\n').join(' ⏎ '), ROW_ARGUMENT_MAX)
 }
 
+/** The first question an ask-user call put (its `questions[].question`),
+ *  or null for any other call. */
+function askedQuestion(args: Record<string, unknown> | null | undefined): string | null {
+  const questions = args?.['questions']
+  if (!Array.isArray(questions) || questions.length === 0) return null
+  const first = questions[0] as Record<string, unknown> | null
+  const text = typeof first?.['question'] === 'string' ? first['question'] : null
+  return text !== null && text.trim() !== '' ? text.trim() : null
+}
+
 /** The `[exit status N]` a failed shell command's output ends with
  *  (internal/agent/llm_runtime_shell.go); null when there is none. */
 export function exitCode(output: string): number | null {
@@ -333,9 +345,10 @@ function outputLines(output: string): number {
  * with no note than with a redundant one.
  */
 export function rowMeta(
-  tool: Pick<ToolCallItem, 'title' | 'argsJSON' | 'kind' | 'status' | 'output'>
+  tool: Pick<ToolCallItem, 'title' | 'argsJSON' | 'kind' | 'status' | 'output' | 'denied'>
 ): string | null {
   const verb = displayName(tool)
+  if (tool.status === 'failed' && tool.denied) return 'denied'
   if (tool.status === 'failed') {
     const code = tool.kind === 'execute' ? exitCode(tool.output) : null
     return code !== null ? `exit ${code}` : 'failed'
@@ -356,8 +369,16 @@ export function rowMeta(
 }
 
 /** Collapses an absolute path to its last few meaningful components:
- *  more than three `/`-separated components → the last three. */
-export function shortPath(path: string): string {
+ *  more than three `/`-separated components → the last three. With the
+ *  chat's project folder, a file inside it is named from there instead
+ *  ("src/app.ts", "hello.txt") — the last three of an absolute path can
+ *  start anywhere ("WP10/proj/hello.txt") and read like a path in the
+ *  project that isn't one. */
+export function shortPath(path: string, projectPath?: string): string {
+  if (projectPath) {
+    const root = projectPath.replace(/\/+$/, '')
+    if (root !== '' && path.startsWith(`${root}/`)) return path.slice(root.length + 1)
+  }
   const parts = path.split('/').filter((p) => p !== '')
   if (parts.length <= 3) return path
   return parts.slice(-3).join('/')

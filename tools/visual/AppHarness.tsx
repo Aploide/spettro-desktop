@@ -1022,6 +1022,20 @@ function pushEvents(): void {
     setTimeout(() => {
       click('[data-testid="permission-deny"]')
       push({ type: 'permissions', requests: [] })
+      // The CLI fails a denied call; main has marked it denied first, so the
+      // row reads as the user's answer, not an error.
+      push({
+        type: 'chat-item',
+        chatId: 'c1',
+        item: tool({
+          id: 'call_lint',
+          title: 'Run npm run lint -- --fix',
+          kind: 'execute',
+          status: 'failed',
+          denied: true,
+          argsJSON: JSON.stringify({ command: 'npm run lint -- --fix' })
+        })
+      })
     }, 850)
   }
   // The second question, with a pick made, the way a user gets there.

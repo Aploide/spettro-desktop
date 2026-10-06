@@ -54,7 +54,13 @@ export function groupSessions(all: ChatSummary[], query = ''): SessionGroups {
   }
 }
 
-/** Non-archived chats top to bottom, as the sidebar shows them. */
-export function visibleSessionOrder(sessions: ChatSummary[]): ChatSummary[] {
-  return groupSessions(sessions).groups.flatMap((g) => g.sessions)
+/** Non-archived chats top to bottom, as the sidebar shows them — none from
+ *  a group folded shut, so Ctrl/Cmd+3 is the third row on screen. */
+export function visibleSessionOrder(
+  sessions: ChatSummary[],
+  collapsedGroups: readonly string[] = []
+): ChatSummary[] {
+  return groupSessions(sessions)
+    .groups.filter((g) => !collapsedGroups.includes(g.path))
+    .flatMap((g) => g.sessions)
 }

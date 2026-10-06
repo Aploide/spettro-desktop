@@ -147,6 +147,18 @@
   min-width: 0;
 }
 
+/* A slash command's reply: the CLI lines its columns up with spaces. */
+.tr-plain {
+  margin: 0;
+  max-width: 100%;
+  overflow-x: auto;
+  font-family: var(--font-mono);
+  font-size: var(--fs-md);
+  line-height: 1.55;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+}
+
 .tr-assistant > .md {
   font-size: var(--fs-body);
   line-height: var(--lh-body);
@@ -454,6 +466,18 @@
 
 .tr-glyph--failed {
   color: var(--danger);
+}
+
+/* Denied by the user: a hollow ring struck through, in the muted ink. */
+.tr-glyph--denied::before {
+  border: 1.5px solid var(--text-tertiary);
+  background: linear-gradient(
+    135deg,
+    transparent 44%,
+    var(--text-tertiary) 44%,
+    var(--text-tertiary) 56%,
+    transparent 56%
+  );
 }
 
 .tr-glyph--failed::before {

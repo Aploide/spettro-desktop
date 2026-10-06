@@ -299,6 +299,51 @@ describe('ChatSession.rename', () => {
   })
 })
 
+describe('a slash command’s reply', () => {
+  it('is kept as the plain text the CLI lined up; a model turn’s answer is markdown', () => {
+    const s = new ChatSession('/w/acme')
+    s.appendUserMessage('/help')
+    s.appendAssistant('commands:\n  /help                 this message')
+    s.appendUserMessage('/workflows run audit')
+    s.appendAssistant('## Audit')
+    s.appendUserMessage('what is this repo?')
+    s.appendAssistant('A **web app**.')
+    const replies = s.items.flatMap((i) =>
+      i.kind === 'message' && i.message.role === 'assistant' ? [i.message.plain === true] : []
+    )
+    expect(replies).toEqual([true, false, false])
+  })
+})
+
+describe('ChatSession.derivedTitle', () => {
+  it('keeps a short first line whole', () => {
+    expect(ChatSession.derivedTitle('  Fix the login bug\nmore detail')).toBe('Fix the login bug')
+  })
+
+  it('takes the first sentence of a long prompt', () => {
+    expect(
+      ChatSession.derivedTitle('Fix the flaky checkout test. It times out about once in ten runs on CI')
+    ).toBe('Fix the flaky checkout test')
+  })
+
+  it('never stops at a comma, which leaves a fragment', () => {
+    expect(
+      ChatSession.derivedTitle('Before doing anything, ask me which of two filenames to use for a new note')
+    ).toBe('Before doing anything, ask me which of two…')
+    expect(
+      ChatSession.derivedTitle('Run the shell command `ls -la` in this folder, now, and summarise what you see')
+    ).toBe('Run the shell command `ls -la` in this folder…')
+  })
+
+  it('cuts a long clause at a word, with an ellipsis', () => {
+    const title = ChatSession.derivedTitle(
+      'Refactor the authentication middleware so every route shares one session store and logs failures'
+    )
+    expect(title).toBe('Refactor the authentication middleware so every…')
+    expect(title.length).toBeLessThanOrEqual(49)
+  })
+})
+
 describe('ChatSession.updatedAt', () => {
   it('moves with the conversation, not with notices the app adds itself', () => {
     const s = new ChatSession('/work/acme', 'Old chat', 'chat-3', 1_000)
@@ -388,7 +433,7 @@ describe('AppModel sessions (rename, unread, recents)', () => {
     const { dir, model } = await setup([stored('a', 'hello')])
     const send = vi.spyOn(model, 'send').mockImplementation(() => undefined)
     model.retryLast('a')
-    expect(send).toHaveBeenCalledWith('a', 'hello', [])
+    expect(send).toHaveBeenCalledWith('a', 'hello', [], null, [])
     send.mockClear()
     model.sessionById('a')?.setBusy(true)
     model.retryLast('a')

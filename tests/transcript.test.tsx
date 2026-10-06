@@ -178,7 +178,7 @@ describe('notices and actions', () => {
     const edits = screen.getAllByRole('button', { name: 'Edit & resend' })
     expect(edits).toHaveLength(1)
     fireEvent.click(edits[0])
-    expect(editMessage).toHaveBeenCalledWith('second try')
+    expect(editMessage).toHaveBeenCalledWith('second try', undefined)
     expect(screen.getAllByRole('button', { name: 'Copy' })).toHaveLength(2)
   })
 })

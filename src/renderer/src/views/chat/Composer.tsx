@@ -67,6 +67,8 @@ interface PendingAttachment {
 export interface PromptSeed {
   text: string
   nonce: number
+  /** Files @-mentioned in `text` (Edit & resend), drawn and sent as files. */
+  mentions?: string[]
 }
 
 export type SubmitAttachment = { data: string; mimeType: string }
@@ -87,10 +89,12 @@ interface ComposerProps {
   ) => boolean | void
 }
 
-/** The stand-in a chat-less composer renders against: nothing is busy, no
- *  options or commands are known yet, and the id is never sent anywhere
- *  (onSubmit takes the message instead). */
-export function draftChat(projectPath: string): ChatDetail {
+/** The stand-in a chat-less composer renders against: nothing is busy and no
+ *  commands are known yet. Its options are the seed the chat will start from,
+ *  and its empty id means "the chat this will create": a chip changed here
+ *  changes the seed (AppModel.setDraftOption), and onSubmit takes the
+ *  message. */
+export function draftChat(projectPath: string, configOptions: ACPConfigOption[] = []): ChatDetail {
   return {
     id: '',
     title: '',
@@ -101,7 +105,9 @@ export function draftChat(projectPath: string): ChatDetail {
     isBusy: false,
     createdAt: 0,
     items: [],
-    configOptions: [],
+    // The seed the chat will start from; the chips change it (main routes
+    // the empty chat id to setDraftOption).
+    configOptions,
     commands: [],
     plan: [],
     usage: null,
@@ -195,6 +201,7 @@ export default function Composer({ chat, promptSeed, dock, onSubmit }: ComposerP
   useEffect(() => {
     if (!promptSeed) return
     setDraft(promptSeed.text)
+    setMentions(promptSeed.mentions ?? [])
     const el = textareaRef.current
     if (!el) return
     el.focus()
@@ -528,11 +535,11 @@ export default function Composer({ chat, promptSeed, dock, onSubmit }: ComposerP
                 onChange={onFilesPicked}
               />
 
-              {!onSubmit && <ConfigBar chat={chat} />}
+              <ConfigBar chat={chat} />
 
               <div className="composer-toolbar-spacer" />
 
-              {!onSubmit && <ModelMenu chat={chat} />}
+              <ModelMenu chat={chat} />
 
               {busy && (
                 <button
@@ -587,7 +594,7 @@ export default function Composer({ chat, promptSeed, dock, onSubmit }: ComposerP
             pausedByAskFirst={pausedByAskFirst}
             budgetTokens={budget}
             onSwitchPermission={
-              gate.canRestrict && !onSubmit
+              gate.canRestrict
                 ? () => void call('setSelectOption', chat.id, 'permission', 'restricted')
                 : undefined
             }

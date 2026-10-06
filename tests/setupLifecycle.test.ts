@@ -11,6 +11,7 @@ import { tmpdir } from 'os'
 import { join } from 'path'
 import type { ChildProcess } from 'child_process'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { configValue } from '@shared/ipc'
 
 vi.mock('@main/model/cliLocator', () => ({ locateCLI: vi.fn(async () => null) }))
 
@@ -192,6 +193,38 @@ describe('default permission (Settings › General)', () => {
     expect(a.displayedConfigValues().permission).toBe('yolo')
     expect(b.displayedConfigValues().permission).toBe('yolo')
     expect(b.pendingConfigChanges.permission).toBeUndefined()
+  })
+})
+
+describe('the new-session composer’s chips', () => {
+  const select = (id: string, currentValue: string, values: string[]) => ({
+    id,
+    name: id,
+    kind: {
+      type: 'select' as const,
+      currentValue,
+      flat: values.map((value) => ({ name: value, value })),
+      groups: []
+    }
+  })
+
+  it('change the seed the chat they create starts from, mode included', async () => {
+    const { m } = model()
+    const prefs = (m as unknown as { prefs: { lastConfigOptions: unknown[] } }).prefs
+    prefs.lastConfigOptions = [
+      select('mode', 'coding', ['plan', 'coding', 'ask']),
+      select('thinking', 'high', ['low', 'medium', 'high', 'max'])
+    ]
+    const shown = (id: string) => configValue(m.getState().defaultConfigOptions, id)
+
+    // The draft's id is '' — there is no chat yet.
+    await m.setConfigValue('', 'mode', 'plan')
+    await m.setConfigValue('', 'thinking', 'max')
+    expect(shown('mode')).toBe('plan')
+    expect(shown('thinking')).toBe('max')
+
+    const chat = m.newChat('/tmp/acme')
+    expect(chat.displayedConfigValues()).toMatchObject({ mode: 'plan', thinking: 'max' })
   })
 })
 

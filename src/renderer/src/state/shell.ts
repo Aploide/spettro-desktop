@@ -50,6 +50,9 @@ export interface ShellState {
    *  from the sidebar, Ctrl/Cmd+, the menu, a toast's action or the
    *  composer's "Connect a model" bar, so it lives here rather than in App. */
   settingsPane: SettingsPane | null
+  /** Project groups folded in the sidebar, by folder. Shared rather than
+   *  each section's own: Ctrl/Cmd+1…9 count only the rows you can see. */
+  collapsedGroups: string[]
 }
 
 export function clampSidebarWidth(width: number): number {
@@ -78,7 +81,8 @@ let state: ShellState = {
   sidebarCollapsed: read(SIDEBAR_COLLAPSED_KEY) === '1',
   terminalVisible: read(TERMINAL_VISIBLE_KEY) === '1',
   newSessionPath: null,
-  settingsPane: null
+  settingsPane: null,
+  collapsedGroups: []
 }
 const listeners = new Set<() => void>()
 
@@ -129,6 +133,15 @@ export function setTerminalVisible(visible: boolean): void {
 
 export function toggleTerminal(): void {
   setTerminalVisible(!state.terminalVisible)
+}
+
+export function toggleGroupCollapsed(path: string): void {
+  const folded = state.collapsedGroups.includes(path)
+  update({
+    collapsedGroups: folded
+      ? state.collapsedGroups.filter((p) => p !== path)
+      : [...state.collapsedGroups, path]
+  })
 }
 
 export function setNewSessionPath(path: string | null): void {

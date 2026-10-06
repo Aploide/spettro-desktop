@@ -81,7 +81,7 @@ Pick the screen with `?mode=`:
 | `permission-bash` | the inline approval card for a command, a second one queued ("1 of 2"), the card's row marked "Needs approval" and the todo list folded |
 | `permission-diff` | the same for an edit: the diff preview, no "Always allow" (writes aren't remembered) |
 | `permission-compact` | the compaction prompt: "This conversation is almost full", Compact now / Continue without compacting |
-| `permission-denied` | after Deny: the "Tell Spettro what to do instead" field |
+| `permission-denied` | after Deny: the "Tell Spettro what to do instead" field, and the call's row saying "denied" (not a red "failed") |
 | `permission-orphan` | an approval no chat claims, in its modal fallback (focused, so its key hints show) |
 | `question` | the inline question card: context, a Recommended option with a preview, Other… |
 | `question-multi` | three questions, on the second (multi-select) with picks made and Other… open |
@@ -146,3 +146,49 @@ The theme follows `nativeTheme.themeSource` in both places: the harness flips
 it per shot, and the app sets it from the System / Light / Dark setting
 (Settings › General), so `window.spettro.call('setAppearance', 'light')` in the
 live app's console flips everything, the terminal included.
+
+## End to end against a real spettro
+
+Two tools in `tools/e2e` check the app against the CLI it ships with, not
+against our fixtures of it. Build the CLI first (`make build` in the
+spettro checkout); `~/.local/bin/spettro` may be an older release.
+
+`acp-smoke.cjs` speaks ACP to the binary directly and prints PASS or FAIL per
+check — the handshake (extensions v4, list/resume/close, image prompts), the
+six config options in order, the commands (`ultra`, never `ultracode`),
+Ultra saved but suspended under Ask first, a refusal's reason in
+`data.error`, `/ultracode` and `/workflow-size`, the image-only refusal the
+app works around, `session/list`, resume in a fresh process announcing
+commands, close, and the `_spettro/*` providers, models, account and
+workflow methods. It runs under a throwaway HOME and spends nothing:
+
+```sh
+SPETTRO_BIN=../spettro/bin/spettro node tools/e2e/acp-smoke.cjs
+```
+
+`tests/live` runs much the same through the app's own main process (see
+`tests/README.md`).
+
+`live-ui.sh` launches the dev app with a scratch profile and drives the real
+window through scenarios (`live-ui.cjs`), screenshotting each step into
+`$OUT/NN-<name>.png` (default `/tmp/sd-live/shots`). It clicks and waits on
+`data-testid`s — `new-session`, `project-chip`, `composer-input`, `send`,
+`stop`, `model-button`, `session-settings`, `thinking-chip`,
+`settings-button`, `settings-pane-<id>`, `sidebar-toggle`, `sidebar-reopen`,
+`terminal-toggle`, `permission-allow-once` / `-deny`, `deny-feedback`,
+`question-option-<id>`, `question-submit`, `sidebar-row-<chatId>`,
+`confirm-ok` — and types with real key events.
+
+```sh
+tools/e2e/live-ui.sh free                         # no tokens: throwaway HOME
+SETUP=1 PROFILE=/tmp/setup tools/e2e/live-ui.sh setup   # first run, no CLI found
+REAL_HOME=1 tools/e2e/live-ui.sh hello permission steering question workflow
+REAL_HOME=1 tools/e2e/live-ui.sh reopen manage    # after a relaunch; no tokens
+node tools/e2e/live-ui.cjs --list
+```
+
+The paid scenarios send small prompts to the user's own model and change
+settings the CLI shares with every session and the TUI (`permission` goes to
+Ask first, then Restricted; `workflow_size` to small). Note the values
+before (`~/.spettro/config.json`, or a session's `configOptions`) and put
+them back after. `capture-live.cjs` restores its own changes on exit.

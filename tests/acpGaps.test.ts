@@ -317,6 +317,17 @@ describe('permission prompts', () => {
     })
   })
 
+  it('mark a card the user denied, so its failure reads as their answer', async () => {
+    liveModel()
+    const session = await liveChat()
+    fake.update('s1', { sessionUpdate: 'tool_call', toolCallId: 'call-1', title: 'Write hello.txt', kind: 'edit', status: 'in_progress' })
+    fake.ask(9, 'session/request_permission', permissionAttached({ sessionId: 's1', toolCallId: 'call-1', diff: { path: '/w/hello.txt', newText: 'hi' } }))
+    model.resolvePermission(shownPermissions()[0].id, 'deny')
+    // permission.go: after Deny the CLI fails the card.
+    fake.update('s1', { sessionUpdate: 'tool_call_update', toolCallId: 'call-1', status: 'failed' })
+    expect(session.toolById('call-1')).toMatchObject({ status: 'failed', denied: true })
+  })
+
   it('write a title from the kind when there is no card and no title', async () => {
     liveModel()
     await liveChat()
@@ -455,6 +466,32 @@ describe('sending', () => {
     // The bubble keeps what the user wrote.
     const user = session.items.find((i) => i.kind === 'message' && i.message.role === 'user')
     expect(user?.kind === 'message' && user.message.text).toBe('compare @src/a.ts with @lib/b c.ts.')
+  })
+
+  it('Try again sends the failed message’s @-mentioned files again, as files', async () => {
+    liveModel()
+    const session = await liveChat()
+    let prompts = 0
+    fake.handlers['session/prompt'] = () => {
+      prompts += 1
+      if (prompts === 1) throw new Reply(rpcError('overloaded'))
+      return promptResult({})
+    }
+    model.send(session.id, 'fix @src/a.ts', [], null, ['src/a.ts', '../outside.ts'])
+    await settle()
+    model.retryLast(session.id)
+    await settle()
+
+    const retried = (fake.calls('session/prompt')[1].params as { prompt: JSONValue[] }).prompt
+    expect(retried).toEqual([
+      { type: 'text', text: 'fix ' },
+      { type: 'resource_link', uri: pathToFileURL(join(dir, 'src/a.ts')).href, name: 'src/a.ts' }
+    ])
+    // Kept on the message (only the file inside the project) for Edit & resend.
+    const users = session.items.flatMap((i) =>
+      i.kind === 'message' && i.message.role === 'user' ? [i.message] : []
+    )
+    expect(users.map((m) => m.mentions)).toEqual([['src/a.ts'], ['src/a.ts']])
   })
 
   it('steers the running turn with a message sent while busy', async () => {
@@ -624,6 +661,36 @@ describe('reopening saved chats', () => {
     await settle()
     expect(fake.calls('session/new')).toHaveLength(0)
     expect((fake.calls('session/prompt')[0].params as { sessionId: string }).sessionId).toBe('old-a')
+  })
+
+  it('push a default changed during the resume, not the value shown before it', async () => {
+    // The CLI keeps workflow_size for every session (config_options.go); a
+    // chat resuming with the old value on screen used to push it back.
+    const size = (value: string): JSONValue => ({
+      id: 'workflow_size',
+      name: 'Workflow size',
+      type: 'select',
+      currentValue: value,
+      options: ['small', 'medium'].map((v) => ({ name: v, value: v }))
+    })
+    const chat = stored('a', 'old-a')
+    chat.configOptions = [
+      { id: 'workflow_size', name: 'Workflow size', kind: { type: 'select', currentValue: 'medium', groups: [], flat: [{ name: 'small', value: 'small' }, { name: 'medium', value: 'medium' }] } }
+    ]
+    liveModel([chat])
+    const resume = deferred<JSONValue>()
+    fake.handlers['session/resume'] = () => resume.promise
+    fake.handlers['session/set_config_option'] = (params) => ({
+      configOptions: [size((params as { value: string }).value)]
+    })
+    model.openChat('a')
+    await settle()
+    await model.setDefaultOption('workflow_size', 'small')
+    resume.resolve({ configOptions: [size('small')] })
+    await settle()
+    const pushed = fake.calls('session/set_config_option').map((m) => (m.params as { value: string }).value)
+    expect(pushed).not.toContain('medium')
+    expect(model.getChatDetail('a')?.configOptions[0].kind).toMatchObject({ currentValue: 'small' })
   })
 
   it('seed the slash palette from the folder’s cached commands', () => {

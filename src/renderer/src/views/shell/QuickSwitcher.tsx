@@ -29,10 +29,11 @@ export default function QuickSwitcher({
 
   // Same order as the sidebar, archived last: what you see there is what
   // comes up here.
-  const results = useMemo((): ChatSummary[] => {
+  const { results, more } = useMemo((): { results: ChatSummary[]; more: number } => {
     const sessions = (app?.sessions ?? []).filter((s) => !hidden?.has(s.id))
     const { groups, archived } = groupSessions(sessions, query)
-    return [...groups.flatMap((g) => g.sessions), ...archived].slice(0, LIMIT)
+    const all = [...groups.flatMap((g) => g.sessions), ...archived]
+    return { results: all.slice(0, LIMIT), more: Math.max(0, all.length - LIMIT) }
   }, [app?.sessions, query, hidden])
 
   useEffect(() => {
@@ -125,6 +126,12 @@ export default function QuickSwitcher({
             </div>
           ))}
         </div>
+        {more > 0 && (
+          // Past the cut, the list would otherwise end as if that were all.
+          <div className="switcher-more" role="status">
+            {more} more {more === 1 ? 'session' : 'sessions'} — type to narrow it down
+          </div>
+        )}
       </div>
     </div>
   )

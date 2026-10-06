@@ -124,6 +124,17 @@ const RULES: Rule[] = [
     })
   },
   {
+    // A turn with no provider set up: the CLI fails it at the first model
+    // call ("plan agent: agent call failed: no API endpoint configured for
+    // provider \"\"").
+    test: /no API endpoint configured|no (?:active )?(?:provider|model) (?:is )?(?:configured|selected|set)/i,
+    build: () => ({
+      title: 'No model is connected',
+      detail: 'Connect a model in Settings › Models & Providers, then try again.',
+      action: action('connect', 'Connect a Model')
+    })
+  },
+  {
     test: /unknown model|model[^.\n]{0,40}not (?:found|available|supported)|no such model|model_not_found/i,
     build: () => ({
       title: 'That model isn’t available',

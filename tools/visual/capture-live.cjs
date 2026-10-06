@@ -9,6 +9,10 @@
 // run into a scene.
 //
 //   node tools/visual/capture-live.cjs <cwd> <out.jsonl> "<prompt>"
+//
+// It spends real tokens against the user's own ~/.spettro, and switches
+// permission to YOLO and ultracode on for the run; both are put back as they
+// were when it ends, however it ends.
 
 const { spawn } = require('node:child_process')
 const fs = require('node:fs')
@@ -79,18 +83,49 @@ child.stdout.on('data', (chunk) => {
 })
 child.stderr.on('data', (d) => process.stderr.write(`[cli] ${d}`))
 
+// permission and ultra live in ~/.spettro and are shared by every session
+// (config_options.go), so what the capture switches on below would outlast
+// it. These are the user's values from session/new, put back on every exit.
+let restoreConfig = async () => {}
+
+/** Restores the user's settings, then exits — whatever ended the run. */
+function finish(code) {
+  const restored = Promise.race([
+    restoreConfig().catch((e) => console.error('could not restore settings:', e?.message || e)),
+    new Promise((r) => setTimeout(r, 5000))
+  ])
+  restored.then(() => sink.end(() => process.exit(code)))
+}
+
 ;(async () => {
   await send('initialize', {
     protocolVersion: 1,
     clientCapabilities: {},
     clientInfo: { name: 'spettro-visual-harness', title: null, version: '0' }
   })
-  const { sessionId } = await send('session/new', { cwd: CWD, mcpServers: [] })
+  const { sessionId, configOptions } = await send('session/new', { cwd: CWD, mcpServers: [] })
   console.error(`session ${sessionId}`)
-  // Ultra needs restricted or yolo, and the capture has no user to approve.
-  await send('session/set_config_option', { sessionId, configOptionId: 'permission', value: 'yolo' }).catch(() => {})
-  await send('session/set_config_option', { sessionId, configOptionId: 'ultra', value: true }).catch((e) =>
-    console.error('ultra toggle refused:', e.message || e)
+  const original = (id) => (configOptions || []).find((o) => o.id === id)?.currentValue
+  const permission = original('permission')
+  const ultra = original('ultra')
+  restoreConfig = async () => {
+    // Ultra first: under ask-first it is only suspended, never refused.
+    if (typeof ultra === 'boolean') {
+      await send('session/set_config_option', { sessionId, configId: 'ultra', type: 'boolean', value: ultra })
+    }
+    if (typeof permission === 'string') {
+      await send('session/set_config_option', { sessionId, configId: 'permission', value: permission })
+    }
+    console.error(`settings restored: permission=${permission} ultra=${ultra}`)
+  }
+  // Workflows need restricted or yolo, and the capture has no user to
+  // approve. The wire field is `configId` (acp-go-sdk SetSessionConfigOption-
+  // Request); a boolean option also names its type.
+  await send('session/set_config_option', { sessionId, configId: 'permission', value: 'yolo' }).catch((e) =>
+    console.error('permission change refused:', e?.data?.error || e?.message || e)
+  )
+  await send('session/set_config_option', { sessionId, configId: 'ultra', type: 'boolean', value: true }).catch((e) =>
+    console.error('ultra toggle refused:', e?.data?.error || e?.message || e)
   )
   console.error(`prompting: ${PROMPT}`)
   const res = await send('session/prompt', {
@@ -98,13 +133,15 @@ child.stderr.on('data', (d) => process.stderr.write(`[cli] ${d}`))
     prompt: [{ type: 'text', text: PROMPT }]
   })
   console.error(`stopReason=${res?.stopReason}`)
-  sink.end(() => process.exit(0))
+  finish(0)
 })().catch((err) => {
   console.error('capture failed:', err)
-  sink.end(() => process.exit(1))
+  finish(1)
 })
+
+process.on('SIGINT', () => finish(130))
 
 setTimeout(() => {
   console.error('live capture timed out — writing what we have')
-  sink.end(() => process.exit(2))
+  finish(2)
 }, 15 * 60 * 1000)

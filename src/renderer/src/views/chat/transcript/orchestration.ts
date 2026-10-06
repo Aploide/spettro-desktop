@@ -56,8 +56,9 @@ import { parsedTitle, subAgentCall, subAgentResult, type SubAgentResult } from '
 
 /** A member's (or a script call's) state. `pending` is a member the CLI
  *  reported in a status it does not name (its "·" glyph): not yet running,
- *  and certainly not done. */
-export type OrchStatus = 'running' | 'done' | 'failed' | 'pending'
+ *  and certainly not done. `stopped` is one still running when its run
+ *  ended (see finishWorkflow). */
+export type OrchStatus = 'running' | 'done' | 'failed' | 'pending' | 'stopped'
 
 /**
  * A run's state.
@@ -75,6 +76,8 @@ export interface OrchCounts {
   done: number
   failed: number
   pending: number
+  /** Cut off by the run ending under them (a cancelled turn, a stop). */
+  stopped: number
   cached: number
 }
 
@@ -354,6 +357,7 @@ function countMembers(members: MemberCall[]): OrchCounts {
     done: 0,
     failed: 0,
     pending: 0,
+    stopped: 0,
     cached: 0
   }
   for (const member of members) {
@@ -1022,7 +1026,15 @@ function finishWorkflow(build: RunBuild, pools: Map<string, Map<string, MemberCa
   const tool = build.tool
   const state = build.meta ?? textState(tool, build.args, build.name)
   const pool = pools.get(poolKey(state.runId !== '' ? state.runId : build.runId, build)) ?? new Map()
-  const members = cardMembers(build, state, pool)
+  const { status, stoppedReason } = runStatus(state, tool)
+  // A run that has ended has nobody still working in it. A member the card
+  // last listed as running was cut off with it — a cancelled turn closes the
+  // card without a word about its members — so it is settled as stopped
+  // rather than left spinning under a finished run forever.
+  const ended = status === 'done' || status === 'failed' || status === 'stopped'
+  const members = cardMembers(build, state, pool).map((member) =>
+    ended && member.status === 'running' ? { ...member, status: 'stopped' as const } : member
+  )
 
   // Phases in the card's order; then phases only a member names; then the
   // unnamed bucket, which always trails and only exists when it holds
@@ -1049,7 +1061,6 @@ function finishWorkflow(build: RunBuild, pools: Map<string, Map<string, MemberCa
     phases.push({ title: '', detail: '', dynamic: false, members: loose, counts: countMembers(loose) })
   }
 
-  const { status, stoppedReason } = runStatus(state, tool)
   return {
     tool,
     runId: state.runId !== '' ? state.runId : build.runId,

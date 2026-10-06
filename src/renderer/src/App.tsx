@@ -27,6 +27,7 @@ import {
 import {
   closeSettings,
   focusComposer,
+  getShell,
   openSettings,
   setNewSessionPath,
   startNewSession,
@@ -162,7 +163,7 @@ export default function App(): JSX.Element {
         focusComposer()
       } else if (/^[1-9]$/.test(e.key)) {
         const sessions = (state?.sessions ?? []).filter((s) => !pendingDeletes.isPending(s.id))
-        const target = visibleSessionOrder(sessions)[Number(e.key) - 1]
+        const target = visibleSessionOrder(sessions, getShell().collapsedGroups)[Number(e.key) - 1]
         if (target) {
           e.preventDefault()
           void call('openChat', target.id)

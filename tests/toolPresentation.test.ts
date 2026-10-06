@@ -144,6 +144,19 @@ describe('rowArgument', () => {
   })
 })
 
+describe('the ask-user row', () => {
+  it('reads "Ask" and the question, not "Ask The User  Ask the user"', () => {
+    const tool = {
+      title: 'Ask the user',
+      kind: 'other',
+      locations: [],
+      argsJSON: JSON.stringify({ questions: [{ header: 'Filename', question: 'Which filename should I use?' }] })
+    }
+    expect(displayName(tool)).toBe('Ask')
+    expect(rowArgument(tool)).toBe('Which filename should I use?')
+  })
+})
+
 describe('rowMeta', () => {
   const meta = (title: string, kind: string, status: ToolCallItem['status'], output: string) =>
     rowMeta({ title, kind, status, output, argsJSON: undefined })
@@ -158,6 +171,10 @@ describe('rowMeta', () => {
     expect(meta('bash {}', 'execute', 'failed', 'FAIL src/a.test.ts\n[exit status 1]')).toBe('exit 1')
     expect(meta('bash {}', 'execute', 'failed', 'killed')).toBe('failed')
     expect(meta('bash {}', 'execute', 'completed', 'ok')).toBeNull()
+  })
+
+  it('calls a call the user turned down "denied", not failed', () => {
+    expect(rowMeta({ title: 'file-write {}', kind: 'edit', status: 'failed', output: '', denied: true })).toBe('denied')
   })
 
   it('says nothing while the call is still running', () => {
@@ -194,6 +211,13 @@ describe('shortPath', () => {
 
   it('leaves a short path alone', () => {
     expect(shortPath('src/a.ts')).toBe('src/a.ts')
+  })
+
+  it('names a file in the chat’s folder from there', () => {
+    expect(shortPath('/tmp/sd-live/WP10/proj/hello.txt', '/tmp/sd-live/WP10/proj')).toBe('hello.txt')
+    expect(shortPath('/w/acme/src/deep/x.ts', '/w/acme/')).toBe('src/deep/x.ts')
+    // Outside it, the last three as before.
+    expect(shortPath('/etc/a/b/c.conf', '/w/acme')).toBe('a/b/c.conf')
   })
 })
 

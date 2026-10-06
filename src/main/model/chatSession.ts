@@ -40,6 +40,45 @@ import type {
 const STEERING_QUEUED = '→ steering queued'
 const STEERING_DELIVERED = '✔ steering delivered'
 
+/** The slash commands the CLI answers itself, without the model, in plain
+ *  column-aligned text (internal/acp commands.go, commands_ext.go). `/plan
+ *  <task>`, `/goal`, `/loop`, `/compact` and skills run the model and answer
+ *  in markdown like any turn. */
+const LOCAL_COMMANDS = new Set([
+  'help',
+  'mode',
+  'models',
+  'model',
+  'permission',
+  'permissions',
+  'budget',
+  'thinking',
+  'think',
+  'memory',
+  'stats',
+  'tasks',
+  'jobs',
+  'hooks',
+  'diff',
+  'ultra',
+  'workflows',
+  'workflow-size',
+  'skills',
+  'clear'
+])
+
+/** Whether `text` is one of those commands (`/workflows run …` is a turn). */
+export function isLocalCommand(text: string): boolean {
+  const match = /^\/(\S+)(.*)$/s.exec(text.trim())
+  if (!match) return false
+  if (match[1] === 'workflows' && /^\s*run\b/.test(match[2])) return false
+  return LOCAL_COMMANDS.has(match[1])
+}
+
+/** The longest title a first prompt is made into (derivedTitle): about what
+ *  the sidebar row and the header show before they ellipsize. */
+const TITLE_MAX = 48
+
 /** A single select or boolean config value, used for the local display state
  *  and for queuing changes made before a live session exists. */
 export type ConfigValue = string | boolean
@@ -75,6 +114,9 @@ export class ChatSession {
   title: string
   items: TranscriptItem[] = []
   configOptions: ACPConfigOption[] = []
+  /** The running turn is one of the CLI's own slash commands: its reply is
+   *  plain text (see isLocalCommand). */
+  private commandTurn = false
   commands: ACPCommand[] = []
   isBusy = false
   /** True until the first prompt is sent. */
@@ -406,7 +448,8 @@ export class ChatSession {
   appendUserMessage(
     text: string,
     attachments: ImageAttachmentDTO[] = [],
-    steering?: SteeringState
+    steering?: SteeringState,
+    mentions: string[] = []
   ): ChatMessage {
     const message: ChatMessage = {
       id: randomUUID(),
@@ -416,10 +459,14 @@ export class ChatSession {
       isStreaming: false,
       timestamp: Date.now()
     }
+    if (mentions.length > 0) message.mentions = mentions
     if (steering !== undefined) message.steering = steering
-    // A message that isn't steering starts a turn: the agent's tool-call
-    // numbering starts over with it (see turnStart).
-    else this.beginTurn()
+    else {
+      // A message that isn't steering starts a turn: the agent's tool-call
+      // numbering starts over with it (see turnStart).
+      this.beginTurn()
+      this.commandTurn = isLocalCommand(text)
+    }
     const item: TranscriptItem = { kind: 'message', message }
     this.items.push(item)
     this.isEmpty = false
@@ -597,6 +644,7 @@ export class ChatSession {
       message.startedAt = now
       message.endedAt = now
     }
+    if (role === 'assistant' && this.commandTurn) message.plain = true
     const item: TranscriptItem = { kind: 'message', message }
     this.items.push(item)
     this.emitItem(item)
@@ -663,6 +711,14 @@ export class ChatSession {
    *  turnStart), or the id a card was filed under. */
   toolById(toolCallId: string): ToolCallItem | null {
     return this.turnTool(toolCallId)?.tool ?? null
+  }
+
+  /** Marks a card the user turned down in its approval (ToolCallItem.denied). */
+  markDenied(toolCallId: string): void {
+    const item = this.turnTool(toolCallId)
+    if (!item || item.tool.denied) return
+    item.tool.denied = true
+    this.emitItem(item)
   }
 
   /** Sets one card's status; returns the status it had, or null when there
@@ -752,10 +808,19 @@ export class ChatSession {
     }
   }
 
+  /** A title from the first prompt: its first line, or just its first
+   *  sentence when that is long, and otherwise cut at a word with an
+   *  ellipsis — never mid-word, as if the cut were the title. Not at a
+   *  comma: "Before doing anything, ask me…" would title the chat "Before
+   *  doing anything". */
   static derivedTitle(text: string): string {
-    const trimmed = text.trim()
-    const firstLine = trimmed.split(/\r?\n/, 1)[0] ?? trimmed
-    return firstLine.slice(0, 48)
+    const firstLine = (text.trim().split(/\r?\n/, 1)[0] ?? '').replace(/\s+/g, ' ').trim()
+    if (firstLine.length <= TITLE_MAX) return firstLine
+    const sentence = /^(.{12,}?)[.!?](?:\s|$)/.exec(firstLine)?.[1]
+    if (sentence !== undefined && sentence.length <= TITLE_MAX) return sentence
+    const cut = firstLine.slice(0, TITLE_MAX)
+    const space = cut.lastIndexOf(' ')
+    return `${(space >= TITLE_MAX / 2 ? cut.slice(0, space) : cut).replace(/[\s,;:.\-–—]+$/, '')}…`
   }
 }
 

@@ -70,7 +70,7 @@ import { CLIInstaller, type InstallFailure } from './cliInstaller'
 import { locateCLI } from './cliLocator'
 import { ExtensionStores } from './extensionStores'
 import { Prefs } from './prefs'
-import { promptBlocks, type PromptAttachment } from './promptBlocks'
+import { cleanMention, promptBlocks, type PromptAttachment } from './promptBlocks'
 import { SessionStore } from './sessionStore'
 import { SubscriptionStore } from './subscriptionStore'
 import { UpdateManager } from './updater'
@@ -1076,7 +1076,20 @@ export class AppModel extends EventEmitter {
       width: 0,
       height: 0
     }))
-    const message = session.appendUserMessage(trimmed, dtos, steering ? 'sending' : undefined)
+    // Only real project files are kept (and sent): see cleanMention.
+    const kept = [
+      ...new Set(
+        mentions
+          .map((m) => cleanMention(session.projectPath, m))
+          .filter((m): m is string => m !== null)
+      )
+    ]
+    const message = session.appendUserMessage(
+      trimmed,
+      dtos,
+      steering ? 'sending' : undefined,
+      kept
+    )
     session.setBusy(true)
     this.persist()
     // The user's own message is not an agent update, so it never comes back
@@ -1089,12 +1102,12 @@ export class AppModel extends EventEmitter {
     this.emit('chat-user', session.id, trimmed, wireAttachments, Date.now(), sourceDeviceId)
     this.emit('chat-state', session.summary())
 
-    const blocks = promptBlocks(trimmed, attachments, mentions, session.projectPath)
+    const blocks = promptBlocks(trimmed, attachments, kept, session.projectPath)
     void this.runTurn(session, blocks, steering ? message.id : null)
   }
 
   /** "Try again" on a turn that failed: sends the newest prompt again,
-   *  images and all, as a new message — the failed attempt stays above it,
+   *  images and @-mentioned files and all, as a new message — the failed attempt stays above it,
    *  so the transcript still says what happened. Does nothing while a turn
    *  is running: that would steer it, which is not what the button says. */
   retryLast(chatId: string): void {
@@ -1104,11 +1117,13 @@ export class AppModel extends EventEmitter {
       (item) => item.kind === 'message' && item.message.role === 'user'
     )
     if (last?.kind !== 'message') return
-    const { text, attachments } = last.message
+    const { text, attachments, mentions } = last.message
     this.send(
       chatId,
       text,
-      attachments.map((a) => ({ data: a.data, mimeType: a.mimeType }))
+      attachments.map((a) => ({ data: a.data, mimeType: a.mimeType })),
+      null,
+      mentions ?? []
     )
   }
 
@@ -1292,7 +1307,6 @@ export class AppModel extends EventEmitter {
       }
       return null
     }
-    const displayed = session.displayedConfigValues()
     const storedId = session.acpSessionId
     if (storedId) {
       try {
@@ -1300,6 +1314,11 @@ export class AppModel extends EventEmitter {
         // The agent this resumed on was replaced meanwhile: the id routes to
         // nothing live.
         if (agent !== this.agent) return null
+        // What the chat shows now, not when the resume was asked for: a
+        // default changed while it was in flight (Settings, the new-session
+        // chips) is already on screen, and pushing the older values would
+        // put the old level back for every session.
+        const displayed = session.displayedConfigValues()
         // Register only after a successful resume: updates emitted before
         // this point belong to no session the UI should show.
         this.sessionsByACPID.set(storedId, session)
@@ -1314,6 +1333,7 @@ export class AppModel extends EventEmitter {
     try {
       const result = await agent.newSession(session.projectPath)
       if (agent !== this.agent) return null
+      const displayed = session.displayedConfigValues()
       session.setAcpSessionId(result.sessionId)
       session.setConfigOptions(result.configOptions)
       this.sessionsByACPID.set(result.sessionId, session)
@@ -1558,6 +1578,8 @@ export class AppModel extends EventEmitter {
   // -------------------------------------------------------------------------
 
   async setConfigValue(chatId: string, configId: string, value: ConfigValue): Promise<void> {
+    // No chat yet: the new-session composer, whose chips show the seed.
+    if (chatId === '') return this.setDraftOption(configId, value)
     const session = this.sessionById(chatId)
     if (!session) return
     // What the agent last told us this option was — the value to fall back to
@@ -1620,11 +1642,7 @@ export class AppModel extends EventEmitter {
    *  seed new chats start with is updated either way, and a chat attached
    *  later pushes it like any shown value. */
   async setDefaultOption(configId: string, value: ConfigValue): Promise<void> {
-    const seed = this.prefs.lastConfigOptions
-    const option = seed.find((o) => o.id === configId)
-    if (option?.kind.type === 'select' && typeof value === 'string') option.kind.currentValue = value
-    else if (option?.kind.type === 'boolean' && typeof value === 'boolean') option.kind.currentValue = value
-    if (option) this.prefs.lastConfigOptions = seed
+    this.setSeedValue(configId, value)
 
     const selected = this.selectedSessionId ? this.sessionById(this.selectedSessionId) : null
     const target =
@@ -1644,6 +1662,39 @@ export class AppModel extends EventEmitter {
     else this.persist()
   }
 
+  /** A choice made in the new-session composer, before its chat exists. It
+   *  changes the seed that chat starts from (prefs.lastConfigOptions), and
+   *  the chat pushes what it shows onto its session when it attaches — so the
+   *  first message runs with what the user saw. The mode is the session's
+   *  own; the rest the CLI shares across sessions, so those go through as a
+   *  default, like Settings' permission. */
+  private async setDraftOption(configId: string, value: ConfigValue): Promise<void> {
+    if (configId === 'mode') {
+      this.setSeedValue(configId, value)
+      this.emitAppState()
+      return
+    }
+    // Applying a default through a live chat makes that chat's options the
+    // seed (rememberConfig), its own mode included; the draft keeps its own.
+    const mode = this.prefs.lastConfigOptions.find((o) => o.id === 'mode')
+    await this.setDefaultOption(configId, value)
+    if (mode?.kind.type === 'select' && mode.kind.currentValue !== null) {
+      this.setSeedValue('mode', mode.kind.currentValue)
+    }
+    this.emitAppState()
+  }
+
+  /** Sets one value in the seed new chats start from; unknown ids are left
+   *  alone (the seed only ever holds options a session reported). */
+  private setSeedValue(configId: string, value: ConfigValue): void {
+    const seed = this.prefs.lastConfigOptions
+    const option = seed.find((o) => o.id === configId)
+    if (option?.kind.type === 'select' && typeof value === 'string') option.kind.currentValue = value
+    else if (option?.kind.type === 'boolean' && typeof value === 'boolean') option.kind.currentValue = value
+    else return
+    this.prefs.lastConfigOptions = seed
+  }
+
   // -------------------------------------------------------------------------
   // Permissions / questions
   // -------------------------------------------------------------------------
@@ -1653,6 +1704,10 @@ export class AppModel extends EventEmitter {
     if (index < 0) return
     const entry = this.pendingPermissions[index]
     this.agent?.replyPermission(entry.rpcId, optionId)
+    const kind = entry.request.options.find((o) => o.optionId === optionId)?.kind ?? ''
+    if (kind.startsWith('reject') && entry.request.chatId && entry.request.toolCallId) {
+      this.sessionById(entry.request.chatId)?.markDenied(entry.request.toolCallId)
+    }
     this.pendingPermissions.splice(index, 1)
     this.emitPermissions()
     this.emit('permission-resolved', requestId, resolvedBy)

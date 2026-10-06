@@ -9,7 +9,7 @@
 // a tool returned, and the file locations it touched. `agent` calls render as
 // the sub-agent card instead.
 
-import { useState } from 'react'
+import { createContext, useContext, useState } from 'react'
 import type { JSX } from 'react'
 import { createPortal } from 'react-dom'
 import { Icon } from '@renderer/design/icons'
@@ -63,10 +63,11 @@ export function ToolRow({ tool }: { tool: ToolCallItem }): JSX.Element {
   const meta = rowMeta(tool)
   const argument = rowArgument(tool)
   const verb = displayName(tool)
+  const denied = tool.denied === true && tool.status === 'failed'
   // The visible spans run together ("Editx.ts+1−1"); read it as a sentence.
   const spoken = [
     `${verb} ${argument}`.trim(),
-    awaiting ? 'needs approval' : STATUS_WORDS[tool.status],
+    awaiting ? 'needs approval' : denied ? 'denied' : STATUS_WORDS[tool.status],
     stat && (stat.added > 0 || stat.removed > 0)
       ? `${stat.added} added, ${stat.removed} removed`
       : null,
@@ -87,7 +88,7 @@ export function ToolRow({ tool }: { tool: ToolCallItem }): JSX.Element {
           if (hasDetail) setExpanded((e) => !e)
         }}
       >
-        <ToolStatusGlyph status={tool.status} awaiting={awaiting} />
+        <ToolStatusGlyph status={tool.status} awaiting={awaiting} denied={denied} />
         <span className="tr-tool-verb">{verb}</span>
         {argument !== '' && <span className="tr-tool-arg">{argument}</span>}
         <span className="tr-tool-spacer" />
@@ -97,7 +98,7 @@ export function ToolRow({ tool }: { tool: ToolCallItem }): JSX.Element {
         )}
         {meta && (
           <span
-            className={`tr-tool-meta${tool.status === 'failed' ? ' tr-tool-meta--failed' : ''}`}
+            className={`tr-tool-meta${tool.status === 'failed' && !denied ? ' tr-tool-meta--failed' : ''}`}
           >
             {meta}
           </span>
@@ -134,17 +135,23 @@ function shellCommand(tool: ToolCallItem): string | null {
  * The leading status mark: a hollow dot not yet started, a pulsing accent dot
  * while it runs, a green dot done, a red cross failed — and amber while the
  * CLI is waiting for the user to approve it, which is the one state that is
- * the reader's move rather than the agent's.
+ * the reader's move rather than the agent's. One the user denied gets a
+ * quiet slash: their answer, not a failure.
  */
 export function ToolStatusGlyph({
   status,
-  awaiting = false
+  awaiting = false,
+  denied = false
 }: {
   status: ToolCallItem['status']
   awaiting?: boolean
+  denied?: boolean
 }): JSX.Element {
   if (awaiting) {
     return <span className="tr-glyph tr-glyph--awaiting" role="img" aria-label="Needs approval" />
+  }
+  if (denied) {
+    return <span className="tr-glyph tr-glyph--denied" role="img" aria-label="Denied" />
   }
   switch (status) {
     case 'pending':
@@ -191,13 +198,14 @@ function ToolPanel({ tool, command }: { tool: ToolCallItem; command: string | nu
   // A diff already names its file, with every line numbered.
   const diffPaths = new Set(tool.diffs.map((d) => d.path))
   const locations = tool.locations.filter((loc) => !diffPaths.has(loc.path))
+  const projectPath = useContext(ProjectPathContext)
   return (
     <div className="tr-tool-panel">
       {locations.length > 0 && (
         <div className="tr-locations">
           {locations.map((loc, i) => (
             <span className="tr-location" key={i} title={loc.path}>
-              {shortPath(loc.path)}
+              {shortPath(loc.path, projectPath)}
               {loc.line != null && <span className="tr-location-line">:{loc.line}</span>}
             </span>
           ))}
@@ -243,6 +251,11 @@ function OutputBlock({ command, output }: { command: string | null; output: stri
 // The diff
 // ---------------------------------------------------------------------------
 
+/** The folder of the chat being drawn, so paths inside it are named from
+ *  there (shortPath). Provided by ChatView around the transcript and the
+ *  composer's approval cards. */
+export const ProjectPathContext = createContext<string | undefined>(undefined)
+
 /** Diff lines drawn before "Show all": enough for any edit worth reading in
  *  place, few enough that a rewritten file can't stall the transcript. */
 const MAX_DIFF_LINES = 400
@@ -264,17 +277,18 @@ export function DiffView({
   const total = diffLineCount(unified)
   let budget = all ? Infinity : maxLines
   const created = diff.oldText === null
+  const name = shortPath(diff.path, useContext(ProjectPathContext))
 
   return (
     <div className="tr-diff">
       <div className="tr-diff-head">
         <span className="tr-diff-path" title={diff.path}>
-          {shortPath(diff.path)}
+          {name}
         </span>
         {created && <span className="tr-diff-tag">New file</span>}
         <DiffStatLabel added={unified.added} removed={unified.removed} />
       </div>
-      <div className="tr-diff-body" role="group" aria-label={`Changes to ${shortPath(diff.path)}`}>
+      <div className="tr-diff-body" role="group" aria-label={`Changes to ${name}`}>
         <div className="tr-diff-rows">
         {unified.hunks.length === 0 && <div className="tr-diff-empty">No changes</div>}
         {unified.hunks.map((hunk, h) => {

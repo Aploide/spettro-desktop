@@ -56,6 +56,14 @@ export interface ChatMessage {
   timestamp: number
   /** Only on user messages sent mid-turn. */
   steering?: SteeringState
+  /** Assistant only: the CLI's own reply to one of its slash commands
+   *  (/help, /ultra, /models…) — column-aligned plain text, which markdown
+   *  would fold into one paragraph — shown as written. */
+  plain?: boolean
+  /** User messages only: the project files @-mentioned in it (relative
+   *  paths), so Try again and Edit & resend send them as files again rather
+   *  than as the bare text "@src/x.ts". */
+  mentions?: string[]
   /** Reasoning only: when its first and latest chunks arrived (ms since
    *  epoch), so a finished one can say "Thought for 12s". Absent on
    *  reasoning saved before they were kept. */
@@ -85,6 +93,10 @@ export interface ToolCallItem {
   /** The tool's own result text (`rawOutput.output`), which `output` — the
    *  card's display excerpt — may have clipped. */
   rawOutput?: string
+  /** The user turned it down in an approval card. The CLI then fails the
+   *  call, but that failure is the user's answer, not an error: the row says
+   *  "denied", calmly, rather than "failed" in red. */
+  denied?: boolean
   /** The full ACP rawInput re-encoded as JSON — the reliable argument source. */
   argsJSON?: string
   /** A workflow card's structured state (`_meta["spettro.app/workflow"]`),

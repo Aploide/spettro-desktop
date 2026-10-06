@@ -71,6 +71,11 @@
   animation: orp-pulse 2.4s ease-in-out infinite;
 }
 
+.orp-head--settled .orp-head-dot {
+  background: var(--text-tertiary);
+  animation: none;
+}
+
 @keyframes orp-pulse {
   0%,
   100% {

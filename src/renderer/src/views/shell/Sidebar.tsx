@@ -22,6 +22,7 @@ import {
   openSettings,
   setSidebarWidth,
   startNewSession,
+  toggleGroupCollapsed,
   toggleSidebar,
   useShell
 } from '@renderer/state/shell'
@@ -152,6 +153,7 @@ export default function Sidebar({ onOpenWorkflows }: Props): JSX.Element {
           className="sidebar-icon-btn"
           title={withShortcut('Hide sidebar', 'B')}
           aria-label="Hide sidebar"
+          data-testid="sidebar-toggle"
           onClick={toggleSidebar}
         >
           <Icon name="sidebar.left" size={15} />
@@ -207,6 +209,7 @@ export default function Sidebar({ onOpenWorkflows }: Props): JSX.Element {
           className="sidebar-icon-btn"
           title={withShortcut('Settings', ',')}
           aria-label="Settings"
+          data-testid="settings-button"
           onClick={() => openSettings('general')}
         >
           <GearIcon size={15} />
@@ -387,7 +390,7 @@ function ProjectSection({
   forceExpanded,
   ...rows
 }: RowHandlers & { group: ProjectGroup; forceExpanded: boolean }): JSX.Element {
-  const [collapsed, setCollapsed] = useState(false)
+  const collapsed = useShell((s) => s.collapsedGroups.includes(group.path))
   const isExpanded = forceExpanded || !collapsed
   const name = basename(group.path)
   // A folded group still says when one of its chats is waiting on you.
@@ -402,7 +405,7 @@ function ProjectSection({
           disabled={forceExpanded}
           title={group.path}
           aria-expanded={isExpanded}
-          onClick={() => setCollapsed((c) => !c)}
+          onClick={() => toggleGroupCollapsed(group.path)}
         >
           <span className="section-name">{name}</span>
           {waiting && <span className="section-needs-you" role="img" aria-label="A session here needs you" />}

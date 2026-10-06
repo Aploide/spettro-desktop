@@ -48,7 +48,8 @@ export default function ChatHeader({ chat }: { chat: ChatDetail }): JSX.Element 
           <button
             type="button"
             className="chat-header-title"
-            title="Rename session"
+            title={`${chat.title}\nClick to rename`}
+            aria-label={`${chat.title}, rename session`}
             onClick={() => setRenaming(true)}
           >
             {chat.title}
@@ -76,6 +77,7 @@ export default function ChatHeader({ chat }: { chat: ChatDetail }): JSX.Element 
           className={'header-btn' + (terminalVisible ? ' header-btn--on' : '')}
           title={`${terminalVisible ? 'Hide terminal' : 'Show terminal'} (${TERMINAL_SHORTCUT})`}
           aria-label="Terminal"
+          data-testid="terminal-toggle"
           aria-pressed={terminalVisible}
           onClick={toggleTerminal}
         >
@@ -121,6 +123,7 @@ export function SidebarReopenButton({ withNewSession = false }: { withNewSession
         className="header-btn header-btn--badged"
         title={elsewhere ? 'Show sidebar — another session needs you' : withShortcut('Show sidebar', 'B')}
         aria-label={elsewhere ? 'Show sidebar (another session needs you)' : 'Show sidebar'}
+        data-testid="sidebar-reopen"
         onClick={toggleSidebar}
       >
         <Icon name="sidebar.left" size={15} />

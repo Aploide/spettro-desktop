@@ -26,7 +26,7 @@ import {
   type TranscriptActions
 } from './transcript/TranscriptActions'
 import { RunTicker } from './transcript/RunTicker'
-import { Icon } from './transcript/ToolCallView'
+import { Icon, ProjectPathContext } from './transcript/ToolCallView'
 import OrchestrationPanel from './OrchestrationPanel'
 import ChatHeader, { projectName } from './ChatHeader'
 import Composer, { type PromptSeed } from './Composer'
@@ -167,7 +167,7 @@ export default function ChatView({ chatId }: { chatId: string }): JSX.Element {
   const busy = chat?.isBusy ?? false
   const actions = useMemo<TranscriptActions>(
     () => ({
-      editMessage: (text) => setPromptSeed({ text, nonce: Date.now() }),
+      editMessage: (text, mentions) => setPromptSeed({ text, mentions, nonce: Date.now() }),
       retry: () => void call('retryLast', chatId),
       ...transcriptAnchors(items ?? [], busy)
     }),
@@ -199,76 +199,78 @@ export default function ChatView({ chatId }: { chatId: string }): JSX.Element {
   const showReopen = !panelVisible && live.length > 0
 
   return (
-    <div className="chat-view" onKeyDown={onKeyDown}>
-      <ChatHeader chat={chat} />
+    <ProjectPathContext.Provider value={chat.projectPath}>
+      <div className="chat-view" onKeyDown={onKeyDown}>
+        <ChatHeader chat={chat} />
 
-      <div className="chat-body">
-        <div
-          className="chat-transcript"
-          ref={scrollRef}
-          onScroll={onScroll}
-          onWheel={(event) => pauseFollowing(event.deltaY)}
-          onTouchStart={onTouchStart}
-          onTouchMove={onTouchMove}
-          onTouchEnd={() => {
-            touchYRef.current = null
-          }}
-          tabIndex={0}
-          aria-label="Conversation"
-        >
-          <div className="chat-transcript-inner">
-            {chat.items.length === 0 && (
-              <WelcomeBanner
-                projectPath={chat.projectPath}
-                onPrompt={(text) => setPromptSeed({ text, nonce: Date.now() })}
-              />
-            )}
-            <TranscriptActionsProvider value={actions}>
-              {displayRows.map((row) => (
-                <TranscriptRowView row={row} key={row.id} />
-              ))}
-            </TranscriptActionsProvider>
-            {(chat.isBusy || showReopen) && (
-              <div className="chat-run-ticker">
-                <RunTicker chat={chat} />
-                {showReopen && (
-                  <ReopenPanelChip count={live.length} onShow={() => setPanelVisible(true)} />
-                )}
-              </div>
-            )}
-            <div className="chat-bottom-anchor" />
-          </div>
-        </div>
-        {showJumpToLatest && (
-          <button
-            type="button"
-            className="chat-jump-latest"
-            onClick={jumpToLatest}
-            aria-label="Jump to latest message"
+        <div className="chat-body">
+          <div
+            className="chat-transcript"
+            ref={scrollRef}
+            onScroll={onScroll}
+            onWheel={(event) => pauseFollowing(event.deltaY)}
+            onTouchStart={onTouchStart}
+            onTouchMove={onTouchMove}
+            onTouchEnd={() => {
+              touchYRef.current = null
+            }}
+            tabIndex={0}
+            aria-label="Conversation"
           >
-            <Icon name="chevron.down" size={13} />
-            <span>Latest message</span>
-          </button>
-        )}
-
-        {/* Kept mounted and collapsed by :empty rather than unmounted: the
-            panel holds a just-finished run for a beat before letting it go,
-            and that settle only renders if the column is still there. */}
-        <aside className="chat-orchestration">
-          {panelVisible && (
-            <OrchestrationPanel runs={live} current={runsById} onClose={() => setPanelVisible(false)} />
+            <div className="chat-transcript-inner">
+              {chat.items.length === 0 && (
+                <WelcomeBanner
+                  projectPath={chat.projectPath}
+                  onPrompt={(text) => setPromptSeed({ text, nonce: Date.now() })}
+                />
+              )}
+              <TranscriptActionsProvider value={actions}>
+                {displayRows.map((row) => (
+                  <TranscriptRowView row={row} key={row.id} />
+                ))}
+              </TranscriptActionsProvider>
+              {(chat.isBusy || showReopen) && (
+                <div className="chat-run-ticker">
+                  <RunTicker chat={chat} />
+                  {showReopen && (
+                    <ReopenPanelChip count={live.length} onShow={() => setPanelVisible(true)} />
+                  )}
+                </div>
+              )}
+              <div className="chat-bottom-anchor" />
+            </div>
+          </div>
+          {showJumpToLatest && (
+            <button
+              type="button"
+              className="chat-jump-latest"
+              onClick={jumpToLatest}
+              aria-label="Jump to latest message"
+            >
+              <Icon name="chevron.down" size={13} />
+              <span>Latest message</span>
+            </button>
           )}
-        </aside>
+
+          {/* Kept mounted and collapsed by :empty rather than unmounted: the
+              panel holds a just-finished run for a beat before letting it go,
+              and that settle only renders if the column is still there. */}
+          <aside className="chat-orchestration">
+            {panelVisible && (
+              <OrchestrationPanel runs={live} current={runsById} onClose={() => setPanelVisible(false)} />
+            )}
+          </aside>
+        </div>
+
+        <Composer chat={chat} promptSeed={promptSeed} dock={<PromptDock chat={chat} />} />
+
+        <TerminalDrawer
+          projectPath={chat.projectPath}
+          visible={terminalVisible}
+          onClose={() => setTerminalVisible(false)}
+        />
       </div>
-
-      <Composer chat={chat} promptSeed={promptSeed} dock={<PromptDock chat={chat} />} />
-
-      <TerminalDrawer
-        projectPath={chat.projectPath}
-        visible={terminalVisible}
-        onClose={() => setTerminalVisible(false)}
-      />
-    </div>
+    </ProjectPathContext.Provider>
   )
 }
 

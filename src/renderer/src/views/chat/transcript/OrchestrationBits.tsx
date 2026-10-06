@@ -143,6 +143,7 @@ export function CountsLabel({ counts }: { counts: OrchCounts }): JSX.Element {
     terms.push({ key: 'failed', text: `${counts.failed} failed`, failed: true })
   }
   if (counts.pending > 0) terms.push({ key: 'pending', text: `${counts.pending} queued` })
+  if (counts.stopped > 0) terms.push({ key: 'stopped', text: `${counts.stopped} stopped` })
   if (counts.cached > 0) terms.push({ key: 'cached', text: `${counts.cached} replayed` })
   return (
     <span className="orch-counts">

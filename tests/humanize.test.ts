@@ -29,6 +29,7 @@ describe('humanizeError', () => {
     ['getaddrinfo ENOTFOUND api.anthropic.com', 'You appear to be offline', 'retry', null],
     ['curl: (6) Could not resolve host: raw.githubusercontent.com', 'You appear to be offline', 'retry', null],
     ['prompt has no text content', 'Add a few words to send with your image', 'none', null],
+    ['plan agent: agent call failed: no API endpoint configured for provider ""', 'No model is connected', 'connect', null],
     ['unknown model "gpt-9" for provider openai', 'That model isn’t available', 'models', null],
     ['The update server timed out.', 'That took too long', 'retry', null],
     ['Internal error', 'Something went wrong inside Spettro', 'retry', null]

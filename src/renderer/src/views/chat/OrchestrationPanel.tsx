@@ -329,12 +329,15 @@ export default function OrchestrationPanel({
   if (sections.length === 0) return null
 
   const liveCount = sections.filter((section) => !section.collapsed).length
+  // The runs held for a beat after they end are not running: while only
+  // those are left, the header says they finished rather than "running".
+  const title = liveCount > 0 ? 'Running in background' : 'Finished in background'
 
   return (
-    <div className="orp" aria-label="Running in background">
-      <header className="orp-head">
+    <div className="orp" aria-label={title}>
+      <header className={`orp-head${liveCount > 0 ? '' : ' orp-head--settled'}`}>
         <span className="orp-head-dot" aria-hidden="true" />
-        <span className="orp-head-title">Running in background</span>
+        <span className="orp-head-title">{title}</span>
         <span className="orp-head-count">· {liveCount > 0 ? liveCount : sections.length}</span>
         <span className="orp-head-spacer" />
         <button

@@ -125,7 +125,7 @@ function UserBubble({ message }: { message: ChatMessage }): JSX.Element {
                 className="tr-action"
                 title="Edit & resend"
                 aria-label="Edit & resend"
-                onClick={() => editMessage(message.text)}
+                onClick={() => editMessage(message.text, message.mentions)}
               >
                 <Icon name="pencil" size={13} />
               </button>
@@ -183,7 +183,11 @@ function SteeringCaption({ state }: { state: ChatMessage['steering'] }): JSX.Ele
 function AssistantBubble({ message }: { message: ChatMessage }): JSX.Element {
   return (
     <div className="tr-assistant">
-      <MarkdownText source={message.text} />
+      {message.plain ? (
+        <pre className="tr-plain">{message.text.replace(/\s+$/, '')}</pre>
+      ) : (
+        <MarkdownText source={message.text} />
+      )}
       {message.isStreaming ? (
         <TypingDots />
       ) : (

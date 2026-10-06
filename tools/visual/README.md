@@ -133,6 +133,22 @@ SHOT_THEMES=dark node_modules/electron/dist/electron --no-sandbox \
     tools/visual/capture.cjs /tmp/sd-visual-dist /tmp/out app:chat
 ```
 
+### Accents
+
+Every harness page takes `?accent=lilac|mono` (`accentPrelude.ts` puts it on
+`<html>` before anything renders, as preload does in the app; the app
+harness also reports it in its app-state). Without it a page is in the
+default, Lilac. `SHOT_ACCENT=mono` makes `capture.cjs` and `shoot.sh` add it
+to every URL and to every file name (`app-chat-mono-dark.png`), so both
+accents can share one output folder:
+
+```sh
+for accent in lilac mono; do
+  SHOT_ACCENT=$accent node_modules/electron/dist/electron --no-sandbox \
+      tools/visual/capture.cjs /tmp/sd-visual-dist /tmp/out app:settings-general
+done
+```
+
 ## The live app
 
 `cdp-shot.cjs` screenshots the real window, against a real spettro, over the

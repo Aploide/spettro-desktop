@@ -50,6 +50,7 @@ export function registerIpc(
     approveBroadFolder: async (path) => model.approveBroadFolder(path),
     createProjectFolder: async (name) => model.createProjectFolder(name),
     setAppearance: async (mode) => model.setAppearance(mode),
+    setAccent: async (accent) => model.setAccent(accent),
     setNotifyWhenDone: async (on) => model.setNotifyWhenDone(on),
     setDefaultOption: (configId, value) => model.setDefaultOption(configId, value),
     pickFolder: async () => {

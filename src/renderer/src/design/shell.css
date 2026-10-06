@@ -64,9 +64,14 @@
   font-weight: 500;
 }
 
+/* A shade along the accent rather than a brightness filter, which does
+   nothing to Monochrome's white fill and next to nothing to its black one. */
 .btn--prominent:hover {
-  background: var(--accent);
-  filter: brightness(1.08);
+  background: var(--accent-hover);
+}
+
+.btn--prominent:active {
+  filter: none;
 }
 
 .btn--large {
@@ -89,9 +94,9 @@
 }
 
 /* The keyboard's place, in the accent rather than the engine's default
-   ring (which reads as a stray yellow outline on the warm palette). */
+   ring (which reads as a stray yellow outline on the greys). */
 .btn:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
 }
 
@@ -114,12 +119,12 @@
 }
 
 .icon-btn--accent {
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .icon-btn--accent:hover {
-  color: var(--accent);
-  filter: brightness(1.15);
+  color: var(--accent-text);
+  background: var(--accent-soft);
 }
 
 .text-input {
@@ -147,7 +152,7 @@
   padding: 0;
   font: inherit;
   font-size: 12px;
-  color: var(--accent);
+  color: var(--accent-text);
   cursor: default;
 }
 
@@ -292,7 +297,7 @@
 
 /* --------------------------------------------------------------- sidebar */
 
-/* The Claude Code tab's sidebar: a warm panel a shade off the canvas, quiet
+/* The Claude Code tab's sidebar: a grey panel a shade off the canvas, quiet
    type, rows that are text until hovered. Its width is set inline from
    state/shell.ts (220–360, dragged from .sidebar-resizer). */
 .sidebar {
@@ -602,7 +607,7 @@
 }
 
 .chat-row:has(.chat-row-open:focus-visible) {
-  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent) 55%, transparent);
+  box-shadow: inset 0 0 0 2px var(--focus-ring);
 }
 
 .chat-row--selected,
@@ -764,7 +769,7 @@
 }
 
 .chat-row-more:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  outline: 2px solid var(--focus-ring);
   outline-offset: -2px;
 }
 
@@ -890,7 +895,7 @@
 
 .sidebar-update-icon {
   display: flex;
-  color: var(--accent);
+  color: var(--accent-text);
   flex: none;
 }
 
@@ -1010,7 +1015,7 @@
 .ctx-item--armed:hover,
 .ctx-item--armed:focus-visible {
   background: var(--danger);
-  color: var(--accent-contrast);
+  color: var(--danger-contrast);
 }
 
 .ctx-separator {

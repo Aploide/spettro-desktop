@@ -83,8 +83,10 @@
   background: color-mix(in srgb, var(--text-primary) 6%, transparent);
 }
 
+/* Neutral, like the app sidebar's selected chat: the accent is kept for
+   the one action (Run), not spent on a list. */
 .wfs-row--active {
-  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  background: var(--selected-fill);
 }
 
 .wfs-row--draft {
@@ -323,7 +325,7 @@
 }
 
 .wfs-scope:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  outline: 2px solid var(--focus-ring);
   outline-offset: 1px;
 }
 
@@ -447,7 +449,7 @@
    text is painted back in. */
 .wfs-code-input::selection {
   color: var(--text-primary);
-  background: color-mix(in srgb, var(--accent) 40%, transparent);
+  background: var(--selection);
 }
 
 /* Syntax colours.

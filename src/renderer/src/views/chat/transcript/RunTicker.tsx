@@ -132,7 +132,7 @@ export function RunTicker({ chat }: { chat: ChatDetail }): JSX.Element | null {
 /** The active mode's tint, so the spinner matches the agent that's running. */
 function tickerModeColor(options: ACPConfigOption[]): string {
   const mode = options.find((o) => o.id === 'mode')
-  if (!mode) return 'var(--accent)'
+  if (!mode) return 'var(--accent-text)'
   return modeColor(currentLabel(mode))
 }
 

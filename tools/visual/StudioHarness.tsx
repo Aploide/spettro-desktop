@@ -6,6 +6,7 @@
 // (including a broken script and a compile error, which are the states worth
 // looking at) and mounts the real component. Nothing about the view is faked.
 
+import './accentPrelude'
 import { useEffect } from 'react'
 import type { JSX } from 'react'
 import { createRoot } from 'react-dom/client'

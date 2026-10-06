@@ -64,7 +64,7 @@
 }
 
 .chat-jump-latest:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
 }
 
@@ -209,7 +209,7 @@
 }
 
 .starter-prompt:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--accent) 60%, transparent);
+  outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
 }
 
@@ -572,7 +572,7 @@
    padding and no weight change: either would shift every glyph after it
    out from under the caret. The ring fakes the padding. */
 .mention-chip {
-  color: var(--accent);
+  color: var(--accent-text);
   background: color-mix(in srgb, var(--accent) 13%, transparent);
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 13%, transparent);
   border-radius: 4px;
@@ -669,7 +669,7 @@
 .composer-send:focus-visible,
 .composer-tool:focus-visible,
 .config-chip:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--accent) 60%, transparent);
+  outline: 2px solid var(--focus-ring);
   outline-offset: 1px;
 }
 
@@ -873,7 +873,7 @@
 }
 
 .todo-head:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--accent) 60%, transparent);
+  outline: 2px solid var(--focus-ring);
   outline-offset: -2px;
 }
 
@@ -937,7 +937,7 @@
 }
 
 .todo-item--in_progress .todo-glyph {
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .todo-item--completed .todo-glyph {
@@ -1281,7 +1281,7 @@
 
 .model-menu-check {
   flex: none;
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .model-menu-empty {
@@ -1332,7 +1332,7 @@
 
 .model-menu-connect:hover,
 .model-menu-connect:focus-visible {
-  filter: brightness(1.08);
+  background: var(--accent-hover);
   outline: none;
 }
 
@@ -1416,7 +1416,7 @@
 
 .session-choice:focus-visible,
 .session-segment:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--accent) 60%, transparent);
+  outline: 2px solid var(--focus-ring);
   outline-offset: -2px;
 }
 
@@ -1539,7 +1539,7 @@
 }
 
 .session-switch:checked {
-  background: var(--accent);
+  background: var(--switch-on);
 }
 
 .session-switch:checked::after {
@@ -1563,7 +1563,7 @@
    standing there as a bare chevron. */
 .model-button--unset,
 .model-button--unset:hover {
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 /* -------------------------------------------------------- no model yet */
@@ -1607,7 +1607,7 @@
 }
 
 .no-model-action:hover {
-  filter: brightness(1.08);
+  background: var(--accent-hover);
 }
 
 /* A send was held back: the bar takes the eye once, then stays put. */

@@ -1,7 +1,9 @@
 // JS-side helpers for the design system (companion to theme.css).
 // Port of Theme.modeColor from Theme.swift.
 
-const ACCENT = 'var(--accent)'
+/** The accent as text (darker than the fill on light), since a mode tint is
+ *  mostly a chip's label colour. */
+const ACCENT = 'var(--accent-text)'
 
 /** Per-agent-mode tint, matching modeColor() in the TUI's styles.go. Accepts a
  *  manifest color name ("green", "cyan", …) or a mode id ("plan", "coding").

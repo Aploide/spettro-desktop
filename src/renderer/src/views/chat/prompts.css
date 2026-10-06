@@ -79,7 +79,7 @@
 }
 
 .prompt-icon--info {
-  color: var(--accent);
+  color: var(--accent-text);
   background: color-mix(in srgb, var(--accent) 12%, transparent);
 }
 
@@ -271,7 +271,7 @@
 }
 
 .prompt-option-main:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--accent) 60%, transparent);
+  outline: 2px solid var(--focus-ring);
   outline-offset: -1px;
 }
 
@@ -456,7 +456,7 @@
 }
 
 .prompt-btn:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--accent) 60%, transparent);
+  outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
 }
 
@@ -486,7 +486,7 @@
 .prompt-btn--danger {
   border-color: transparent;
   background: var(--danger);
-  color: var(--accent-contrast);
+  color: var(--danger-contrast);
 }
 
 .prompt-btn--danger:hover:not(:disabled) {

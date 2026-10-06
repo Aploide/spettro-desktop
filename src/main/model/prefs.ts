@@ -39,7 +39,7 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'fs'
 import { dirname, join } from 'path'
 import type { ACPCommand, ACPConfigOption } from '../../shared/acp'
-import { isAppearance, type Appearance } from '../../shared/model'
+import { DEFAULT_ACCENT, isAccent, isAppearance, type Accent, type Appearance } from '../../shared/model'
 
 interface PrefsData {
   explicitCLIPath: string
@@ -48,6 +48,7 @@ interface PrefsData {
   recentProjects: string[]
   cachedCommandsByProject: Record<string, ACPCommand[]>
   appearance: Appearance
+  accent: Accent
   providerSetupSkipped: boolean
   notifyWhenDone: boolean
   approvedBroadFolders: string[]
@@ -73,6 +74,7 @@ function defaults(): PrefsData {
     recentProjects: [],
     cachedCommandsByProject: {},
     appearance: 'system',
+    accent: DEFAULT_ACCENT,
     providerSetupSkipped: false,
     notifyWhenDone: true,
     approvedBroadFolders: [],
@@ -112,6 +114,7 @@ function sanitize(raw: unknown): PrefsData {
     if (obj.cachedCommands.length > 0) data.cachedCommandsByProject[ANY_PROJECT] = obj.cachedCommands
   }
   if (isAppearance(obj.appearance)) data.appearance = obj.appearance
+  if (isAccent(obj.accent)) data.accent = obj.accent
   if (typeof obj.providerSetupSkipped === 'boolean') data.providerSetupSkipped = obj.providerSetupSkipped
   if (typeof obj.notifyWhenDone === 'boolean') data.notifyWhenDone = obj.notifyWhenDone
   if (Array.isArray(obj.approvedBroadFolders)) {
@@ -237,6 +240,15 @@ export class Prefs {
 
   set appearance(value: Appearance) {
     this.data.appearance = value
+    this.save()
+  }
+
+  get accent(): Accent {
+    return this.data.accent
+  }
+
+  set accent(value: Accent) {
+    this.data.accent = value
     this.save()
   }
 

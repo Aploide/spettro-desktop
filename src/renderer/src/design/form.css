@@ -346,6 +346,25 @@
   padding: 3px 14px;
 }
 
+/* Accent: each choice shows itself, not the accent in force — lilac is
+   always lilac here, Monochrome always the ink. A hairline ring keeps the
+   ink dot from merging into a dark segment. */
+.segmented-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex: none;
+  box-shadow: inset 0 0 0 0.5px var(--hairline);
+}
+
+.segmented-swatch--lilac {
+  background: var(--lilac);
+}
+
+.segmented-swatch--mono {
+  background: var(--text-primary);
+}
+
 /* ---------------------------------------------------------- form fields */
 
 /* Companion to shell.css's mono `.text-input`, for prose-ish fields (search,
@@ -485,7 +504,7 @@
 }
 
 .settings-nav-item:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--accent) 60%, transparent);
+  outline: 2px solid var(--focus-ring);
   outline-offset: -2px;
 }
 
@@ -764,7 +783,7 @@
 }
 
 .form-toggle input:checked + .form-toggle-track {
-  background: var(--accent);
+  background: var(--switch-on);
 }
 
 .form-toggle input:checked + .form-toggle-track .form-toggle-thumb {
@@ -772,7 +791,7 @@
 }
 
 .form-toggle input:focus-visible + .form-toggle-track {
-  outline: 2px solid color-mix(in srgb, var(--accent) 60%, transparent);
+  outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
 }
 
@@ -864,7 +883,7 @@
 }
 
 .update-summary-icon--new {
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .update-summary-texts {

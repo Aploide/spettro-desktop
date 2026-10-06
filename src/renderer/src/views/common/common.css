@@ -88,7 +88,7 @@
   font: inherit;
   font-size: var(--fs-sm);
   font-weight: 600;
-  color: var(--accent);
+  color: var(--accent-text);
   background: color-mix(in srgb, var(--accent) 12%, transparent);
   border: none;
   border-radius: 999px;
@@ -188,7 +188,7 @@
 .btn.btn--destructive-fill {
   background: var(--danger);
   border-color: transparent;
-  color: var(--accent-contrast);
+  color: var(--danger-contrast);
   font-weight: 500;
 }
 
@@ -199,7 +199,7 @@
 
 .confirm-card .btn:focus-visible,
 .toast-card button:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--accent) 70%, transparent);
+  outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
 }
 

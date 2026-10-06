@@ -7,6 +7,7 @@ import type { ACPPermissionRequest, ACPQuestionRequest } from '@shared/acp'
 import type { MainEvent, SpettroBridge } from '@shared/ipc'
 import type { AppStateDTO, ChatDetail } from '@shared/model'
 import { transcriptItemId } from '@shared/model'
+import { applyAccent } from '@renderer/design/accent'
 import { saveDraft } from './drafts'
 
 export interface RendererState {
@@ -37,6 +38,9 @@ export function getState(): RendererState {
 function reduce(event: MainEvent): void {
   switch (event.type) {
     case 'app-state':
+      // Before the re-render, so the frame that shows the new state is
+      // already in its accent.
+      applyAccent(event.state.accent)
       emit({ ...state, app: event.state })
       break
     case 'chat-reset':

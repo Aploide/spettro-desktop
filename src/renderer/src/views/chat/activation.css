@@ -14,8 +14,8 @@
    by manufacturing a surface that suits the ramp. */
 
 /* The palette lives in custom properties because the effect has to read on
-   more than one surface: the composer and a sent user bubble, each a warm
-   neutral in either appearance. A surface that needs different hues declares
+   more than one surface: the composer and a sent user bubble, each a neutral
+   grey in either appearance. A surface that needs different hues declares
    its own ramp; defaults must be set here, on :root, and not on .glow: a
    declaration on the element itself would beat the surface's inherited one. */
 :root {
@@ -28,6 +28,19 @@
 @media (prefers-color-scheme: light) {
   :root {
     --glow-ramp: #6d28d9, #9333ea, #c026d3, #db2777, #0284c7, #0891b2;
+  }
+}
+
+/* Monochrome keeps the shimmer and drops the hues: a sweep of greys, with the
+   specular stop at the ink's far end (white on dark; on light, where white
+   would hole the word, a mid grey between two inks). */
+:root[data-accent='mono'] {
+  --glow-ramp: #8e8e93, #c7c7cc, #ffffff, #e5e5ea, #aeaeb2, #8e8e93;
+}
+
+@media (prefers-color-scheme: light) {
+  :root[data-accent='mono'] {
+    --glow-ramp: #1d1d1f, #48484a, #8e8e93, #636366, #2c2c2e, #1d1d1f;
   }
 }
 
@@ -69,7 +82,7 @@ textarea.glow-input {
    glyphs are painted back in. */
 textarea.glow-input::selection {
   color: var(--text-primary);
-  background: color-mix(in srgb, var(--accent) 45%, transparent);
+  background: var(--selection);
 }
 
 .glow {
@@ -168,6 +181,6 @@ textarea.glow-input::selection {
 }
 
 .workflow-hint-action:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--accent) 70%, transparent);
+  outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
 }

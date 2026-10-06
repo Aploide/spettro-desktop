@@ -56,6 +56,7 @@ const STATE: AppStateDTO = {
   missingProjects: [],
   homePath: '/home/me',
   appearance: 'system',
+  accent: 'lilac',
   noModel: false,
   providerSetupSkipped: false,
   notifyWhenDone: true,

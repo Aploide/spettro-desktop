@@ -8,6 +8,7 @@
 // output (fixtures.ts) so every state, including the ones that need a real
 // provider and ten minutes of waiting to reach, is one build away.
 
+import './accentPrelude'
 import type { JSX } from 'react'
 import { createRoot } from 'react-dom/client'
 import { groupTranscript, activeRuns } from '@renderer/views/chat/transcript/orchestration'

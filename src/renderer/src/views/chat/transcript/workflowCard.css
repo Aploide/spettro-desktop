@@ -86,7 +86,7 @@
 }
 
 .wfc--running .wfc-mark {
-  color: var(--accent);
+  color: var(--accent-text);
   background: color-mix(in srgb, var(--accent) 15%, transparent);
   animation: wfc-pulse 2s ease-in-out infinite;
 }
@@ -165,7 +165,7 @@
 
 .wfc-badge--running {
   background: color-mix(in srgb, var(--accent) 16%, transparent);
-  color: color-mix(in srgb, var(--accent) 80%, var(--text-primary));
+  color: var(--accent-text);
 }
 
 .wfc-badge--failed {
@@ -589,7 +589,7 @@
 .wfc-head:focus-visible,
 .wfc-more:focus-visible,
 .wfc-disclose:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--accent) 70%, transparent);
+  outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
   border-radius: var(--rad-sm);
 }

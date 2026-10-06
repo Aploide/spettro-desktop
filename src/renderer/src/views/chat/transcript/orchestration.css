@@ -131,7 +131,7 @@
 
 .orch-pill--replayed {
   background: color-mix(in srgb, var(--accent) 16%, transparent);
-  color: color-mix(in srgb, var(--accent) 80%, var(--text-primary));
+  color: var(--accent-text);
 }
 
 /* ------------------------------------------------------------------------- */
@@ -308,7 +308,7 @@
 .orch-script-icon {
   display: inline-flex;
   flex: none;
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .orch-script-title {

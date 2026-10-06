@@ -21,6 +21,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Terminal, type ITheme } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { humanizeError } from '@shared/humanize'
+import { onAccentChange } from '@renderer/design/accent'
 import { quietCall } from '@renderer/state/store'
 import { confirmDialog } from '@renderer/views/common/ConfirmDialog'
 import { showToast } from '@renderer/views/common/Toast'
@@ -73,26 +74,26 @@ function withAlpha(color: string, alphaHex: string): string {
 /** The 16 ANSI colours for the light scheme. xterm's built-in set is drawn for
  *  a dark background: its white, bright white and bright yellow all but vanish
  *  on --canvas, and `ls`, git and test runners print in exactly those. These
- *  are the same hues deepened until each reads on the warm white, the way
+ *  are the same hues deepened until each reads on the white, the way
  *  light terminal themes remap them ("white" becomes a mid grey). The dark
  *  scheme keeps xterm's defaults, which were made for it. */
 const LIGHT_ANSI: ITheme = {
-  black: '#1f1e1d',
+  black: '#1d1d1f',
   red: '#c4453a',
   green: '#2b7d55',
   yellow: '#8a6a10',
   blue: '#2f6dbf',
   magenta: '#a3449c',
   cyan: '#1f7a8c',
-  white: '#6b6a63',
-  brightBlack: '#8a887f',
+  white: '#5c5c61',
+  brightBlack: '#6e6e73',
   brightRed: '#b03a30',
   brightGreen: '#237049',
   brightYellow: '#7a5d0c',
   brightBlue: '#2659a6',
   brightMagenta: '#8a3584',
   brightCyan: '#186a79',
-  brightWhite: '#4a4945'
+  brightWhite: '#48484a'
 }
 
 /** xterm theme from the computed theme.css palette. Read at mount and again
@@ -102,9 +103,12 @@ const LIGHT_ANSI: ITheme = {
  *  what flipping to dark wants. */
 function readXtermTheme(): ITheme {
   const style = getComputedStyle(document.documentElement)
-  const canvas = style.getPropertyValue('--canvas').trim() || '#262624'
-  const foreground = style.getPropertyValue('--text-primary').trim() || '#f5f4ef'
-  const accent = style.getPropertyValue('--accent').trim() || '#d97757'
+  const canvas = style.getPropertyValue('--canvas').trim() || '#1c1c1e'
+  const foreground = style.getPropertyValue('--text-primary').trim() || '#f5f5f7'
+  // The cursor is the accent's fill; selection its tint (the --selection
+  // token is rgba(), which xterm takes as it is).
+  const accent = style.getPropertyValue('--accent').trim() || '#b9a3f5'
+  const selection = style.getPropertyValue('--selection').trim()
   const light = window.matchMedia('(prefers-color-scheme: light)').matches
   return {
     ...(light ? LIGHT_ANSI : {}),
@@ -112,7 +116,7 @@ function readXtermTheme(): ITheme {
     foreground,
     cursor: accent,
     cursorAccent: canvas,
-    selectionBackground: withAlpha(accent, '4d')
+    selectionBackground: selection || withAlpha(accent, '4d')
   }
 }
 
@@ -326,8 +330,9 @@ export default function TerminalDrawer({
 
   // ---- live re-theme ------------------------------------------------------
   // The appearance setting flips nativeTheme in main, which flips this media
-  // query; every open terminal (not just the visible one) is repainted so a
-  // hidden tab doesn't come back in the old scheme.
+  // query, and the accent setting flips data-accent on <html>; every open
+  // terminal (not just the visible one) is repainted on either, so a hidden
+  // tab doesn't come back in the old colours.
   useEffect(() => {
     const query = window.matchMedia('(prefers-color-scheme: dark)')
     const onChange = (): void => {
@@ -335,7 +340,11 @@ export default function TerminalDrawer({
       for (const session of sessions.current.values()) session.term.options.theme = theme
     }
     query.addEventListener('change', onChange)
-    return () => query.removeEventListener('change', onChange)
+    const stopAccent = onAccentChange(onChange)
+    return () => {
+      query.removeEventListener('change', onChange)
+      stopAccent()
+    }
   }, [])
 
   // Closing a tab with a command still running in it asks first; an idle

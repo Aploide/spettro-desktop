@@ -54,7 +54,7 @@
 }
 
 .prov-icon--accent {
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .prov-icon--connected {
@@ -100,7 +100,7 @@
   font-size: 9px;
   font-weight: 600;
   letter-spacing: 0.02em;
-  color: var(--accent);
+  color: var(--accent-text);
   background: color-mix(in srgb, var(--accent) 15%, transparent);
   border-radius: 999px;
   padding: 1px 5px;
@@ -292,7 +292,7 @@
   gap: 3px;
   font-size: 10px;
   font-weight: 600;
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .model-chips {
@@ -329,7 +329,7 @@
 }
 
 .form-card .model-row--choosable:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--accent) 60%, transparent);
+  outline: 2px solid var(--focus-ring);
   outline-offset: -2px;
 }
 

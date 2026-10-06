@@ -24,7 +24,7 @@ import { useEffect, useState } from 'react'
 import type { ACPConfigOption } from '@shared/acp'
 import { EMPTY_EXTENSIONS, creditDetail, remainingFraction, shortHost } from '@shared/extensions'
 import { diagnosticsText, humanizeError } from '@shared/humanize'
-import type { Appearance, CLISessionEntry } from '@shared/model'
+import { DEFAULT_ACCENT, type Accent, type Appearance, type CLISessionEntry } from '@shared/model'
 import { SHORTCUTS, shortcutText } from '@shared/shortcuts'
 import { call, quietCall, useApp, useStore } from '@renderer/state/store'
 import { closeSettings, openSettings, type SettingsPane } from '@renderer/state/shell'
@@ -196,6 +196,13 @@ const APPEARANCES: { id: Appearance; label: string }[] = [
   { id: 'dark', label: 'Dark' }
 ]
 
+/** The accent choices, each with a swatch of itself (not of the current
+ *  accent), the way macOS shows its accent colours. */
+const ACCENTS: { id: Accent; label: string; title: string }[] = [
+  { id: 'lilac', label: 'Lilac', title: 'A soft lilac for buttons, links and selection' },
+  { id: 'mono', label: 'Monochrome', title: 'No colour: buttons, links and selection in black and white' }
+]
+
 /** The permission option Settings edits: the selected chat's, which is the
  *  live one, else what new chats start with. */
 function usePermissionOption(): ACPConfigOption | null {
@@ -232,6 +239,22 @@ function GeneralPane(): JSX.Element {
                 value={current}
                 choices={APPEARANCES.map((a) => ({ value: a.id, label: a.label }))}
                 onChange={(id) => void call('setAppearance', id as Appearance)}
+              />
+            </span>
+          </div>
+          <div className="form-row">
+            <span className="form-label">Accent</span>
+            <span className="form-value">
+              <Segmented
+                label="Accent"
+                value={app?.accent ?? DEFAULT_ACCENT}
+                choices={ACCENTS.map((a) => ({
+                  value: a.id,
+                  label: a.label,
+                  title: a.title,
+                  swatch: a.id
+                }))}
+                onChange={(id) => void call('setAccent', id as Accent)}
               />
             </span>
           </div>
@@ -295,7 +318,9 @@ function Segmented({
 }: {
   label: string
   value: string
-  choices: { value: string; label: string; title?: string }[]
+  /** `swatch` puts a small colour sample before a choice's label
+   *  (.segmented-swatch--<swatch>). */
+  choices: { value: string; label: string; title?: string; swatch?: string }[]
   onChange: (value: string) => void
 }): JSX.Element {
   const onKeyDown = (e: React.KeyboardEvent<HTMLElement>): void => {
@@ -325,6 +350,7 @@ function Segmented({
           title={c.title}
           onClick={() => onChange(c.value)}
         >
+          {c.swatch && <span className={`segmented-swatch segmented-swatch--${c.swatch}`} aria-hidden />}
           {c.label}
         </button>
       ))}

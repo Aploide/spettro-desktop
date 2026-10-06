@@ -24,8 +24,10 @@
 //                 welcome-new-project | welcome-more | installing-slow |
 //                 gate-signin | gate-local | no-model-signin | error-toast |
 //                 context | cleared | commands
+//   …and &accent=lilac|mono on any harness page (accentPrelude.ts).
 
 import './appPrelude'
+import { HARNESS_ACCENT } from './accentPrelude'
 import { createRoot } from 'react-dom/client'
 import App from '@renderer/App'
 import type { ACPConfigOption, ACPPermissionRequest, ACPQuestionRequest } from '@shared/acp'
@@ -862,6 +864,7 @@ const app: AppStateDTO = {
   missingProjects: FIRST_RUN ? [] : ['/home/carlo/code/old-prototype'],
   homePath: HOME,
   appearance: 'system',
+  accent: HARNESS_ACCENT,
   noModel: NO_MODEL,
   providerSetupSkipped: NO_MODEL,
   notifyWhenDone: true,
@@ -1067,6 +1070,7 @@ function push(event: MainEvent): void {
 }
 ;(window as unknown as { spettro: unknown }).spettro = {
   platform: 'linux',
+  accent: HARNESS_ACCENT,
   onEvent: (handler: (event: MainEvent) => void) => {
     listeners.add(handler)
     return () => listeners.delete(handler)

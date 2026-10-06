@@ -36,6 +36,7 @@ import type {
 } from '../../shared/acp'
 import type { MainEvent } from '../../shared/ipc'
 import type {
+  Accent,
   Appearance,
   AppStateDTO,
   ChatDetail,
@@ -48,7 +49,7 @@ import type {
   SubscriptionState,
   TurnSummary
 } from '../../shared/model'
-import { isAppearance, PROJECTS_FOLDER } from '../../shared/model'
+import { isAccent, isAppearance, PROJECTS_FOLDER } from '../../shared/model'
 import type {
   ConnectResult,
   LocalProbeResult,
@@ -325,6 +326,7 @@ export class AppModel extends EventEmitter {
       missingProjects: this.missingProjects(),
       homePath: homedir(),
       appearance: this.prefs.appearance,
+      accent: this.prefs.accent,
       noModel: this.noModel,
       providerSetupSkipped: this.prefs.providerSetupSkipped,
       notifyWhenDone: this.prefs.notifyWhenDone,
@@ -396,6 +398,20 @@ export class AppModel extends EventEmitter {
     if (!isAppearance(mode)) return
     this.prefs.appearance = mode
     this.applyAppearance(mode)
+    this.emitAppState()
+  }
+
+  /** The persisted accent. Read by main when it builds the window, so the
+   *  renderer has it before its first paint. */
+  get accent(): Accent {
+    return this.prefs.accent
+  }
+
+  /** Purely a renderer concern (data-accent on <html>), so there is nothing
+   *  for main to apply: the new value reaches the page in app-state. */
+  setAccent(accent: Accent): void {
+    if (!isAccent(accent) || accent === this.prefs.accent) return
+    this.prefs.accent = accent
     this.emitAppState()
   }
 

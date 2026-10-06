@@ -120,7 +120,7 @@ THEME_COUNT="$(printf '%s' "$THEMES" | awk -F, '{print NF}')"
 
 rm -rf "$OUT"
 for scene in "${SCENES[@]}"; do
-  SHOT_THEMES="$THEMES" SHOT_HEIGHT="${SHOT_HEIGHT:-1800}" \
+  SHOT_THEMES="$THEMES" SHOT_HEIGHT="${SHOT_HEIGHT:-1800}" SHOT_ACCENT="${SHOT_ACCENT:-}" \
     "$ELECTRON" --no-sandbox tools/visual/capture.cjs "$DIST" "$OUT" "$scene"
 done
 

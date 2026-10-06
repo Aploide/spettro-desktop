@@ -276,6 +276,18 @@ export function isAppearance(value: unknown): value is Appearance {
   return value === 'system' || value === 'light' || value === 'dark'
 }
 
+/** The app's one accent colour: a soft lilac, or none at all (Monochrome, where
+ *  the accent is the ink colour). Persisted in prefs and applied as
+ *  `data-accent` on <html>, which theme.css keys its accent tokens on. The
+ *  neutrals, the semantic colours and Ultra's fire are the same in both. */
+export type Accent = 'lilac' | 'mono'
+
+export const DEFAULT_ACCENT: Accent = 'lilac'
+
+export function isAccent(value: unknown): value is Accent {
+  return value === 'lilac' || value === 'mono'
+}
+
 /** Where a CLI install stands, as setup draws it: a determinate bar over
  *  the installer's phases, then done — or why it failed. A cancelled install
  *  goes back to idle; that is not a failure to explain. */
@@ -330,6 +342,7 @@ export interface AppStateDTO {
    *  agent everything the user owns, which the new-session view warns about. */
   homePath: string
   appearance: Appearance
+  accent: Accent
   /** Nothing can run a prompt: no provider, no local server, not signed in
    *  — known for certain, never guessed (an unloaded list is not "none"). */
   noModel: boolean

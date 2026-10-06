@@ -5,7 +5,8 @@ import { app, BrowserWindow, dialog, nativeTheme, shell } from 'electron'
 import { existsSync } from 'fs'
 import { join } from 'path'
 import { busyGuard } from '../shared/busyGuard'
-import { EVENT_CHANNEL, type MainEvent } from '../shared/ipc'
+import { ACCENT_ARG, EVENT_CHANNEL, type MainEvent } from '../shared/ipc'
+import { DEFAULT_ACCENT } from '../shared/model'
 import { wireAttention } from './attention'
 import { registerIpc, type IpcHandle } from './ipc'
 import { installAppMenu } from './menu'
@@ -37,9 +38,10 @@ function iconPath(): string {
 
 /** The window's own fill, painted before the renderer's first frame. It must
  *  be theme.css's --canvas for the active scheme, or the window flashes a
- *  different colour while the page loads. */
+ *  different colour while the page loads. The accent never touches it: the
+ *  neutrals are the same in Lilac and Monochrome. */
 function windowBackground(): string {
-  return nativeTheme.shouldUseDarkColors ? '#262624' : '#faf9f5'
+  return nativeTheme.shouldUseDarkColors ? '#1c1c1e' : '#fafafa'
 }
 
 function createWindow(): void {
@@ -55,7 +57,10 @@ function createWindow(): void {
     backgroundColor: windowBackground(),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
-      sandbox: false
+      sandbox: false,
+      // The accent, for preload to put on <html> before the page's first
+      // paint; a choice made later reaches the page in app-state.
+      additionalArguments: [`${ACCENT_ARG}${model?.accent ?? DEFAULT_ACCENT}`]
     }
   })
 

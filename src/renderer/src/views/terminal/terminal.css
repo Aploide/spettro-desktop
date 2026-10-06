@@ -78,10 +78,10 @@
   flex-shrink: 0;
 }
 .terminal-tab--selected {
-  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  background: var(--selected-fill);
 }
 .terminal-tab:not(.terminal-tab--selected):hover {
-  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  background: var(--hover-fill);
 }
 
 .terminal-tab__glyph {
@@ -132,7 +132,7 @@
   flex-shrink: 0;
 }
 .terminal-drawer__iconbtn:hover {
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  background: var(--hover-fill);
 }
 
 /* ---- terminal body ---------------------------------------------------- */
@@ -214,5 +214,5 @@
   cursor: pointer;
 }
 .terminal-drawer__newbtn:hover {
-  background: color-mix(in srgb, var(--accent) 14%, var(--surface-raised));
+  background: color-mix(in srgb, var(--text-primary) 6%, var(--surface-raised));
 }

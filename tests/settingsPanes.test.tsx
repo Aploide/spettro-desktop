@@ -41,6 +41,7 @@ vi.mock('@renderer/state/store', () => {
       phase: { kind: 'ready' },
       connection: 'ok',
       appearance: 'system',
+      accent: 'lilac',
       extensions: EMPTY_EXTENSIONS,
       update,
       cli: { path: '/home/me/.local/bin/spettro', version: '2.9.0', isDev: false },

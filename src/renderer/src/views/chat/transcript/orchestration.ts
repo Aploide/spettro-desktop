@@ -1304,7 +1304,7 @@ export function sizeLabel(run: Pick<WorkflowRun, 'size' | 'sizeAgents'>): string
  * its declared colour; the renderer has no manifest, so it maps the spec id
  * itself through the same palette — "code" lands on the same green either way,
  * and anything unknown falls back to the sub-agent colour rather than going
- * untinted. (Not the accent: the warm accent sits next to the failure red, and
+ * untinted. (Not the accent itself: an accent dot sits next to the failure red, and
  * a running member must never read as a failed one.)
  */
 export function memberTint(specId: string): string {

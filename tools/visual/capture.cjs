@@ -25,6 +25,11 @@ const HEIGHT = Number(process.env.SHOT_HEIGHT || 5200)
 // The app scenes are the window itself, so they are shot at the real
 // window's default size rather than as a tall page.
 const APP_HEIGHT = Number(process.env.SHOT_APP_HEIGHT || 840)
+// The accent every page is shot in (lilac | mono; accentPrelude.ts reads it
+// from the URL). Unset leaves the page in the default, and the file names as
+// they always were; set, the accent goes into the name too
+// (app-chat-mono-dark.png), so one output folder can hold both.
+const ACCENT = process.env.SHOT_ACCENT || ''
 
 // Destroying a shot's window leaves zero windows open, and Electron's default
 // window-all-closed handler quits the app on Linux and Windows. That ended the
@@ -116,7 +121,8 @@ async function shoot(theme) {
     : SCENE
       ? `?scene=${SCENE}`
       : ''
-  const url = `file://${path.join(DIST, page)}${query}`
+  const accentQuery = ACCENT ? `${query ? '&' : '?'}accent=${ACCENT}` : ''
+  const url = `file://${path.join(DIST, page)}${query}${accentQuery}`
   await load(win, url)
   // An offscreen window never has the focus, so a page in it never sees a
   // focus event: the composer's menus (slash commands, @-files), which open
@@ -155,7 +161,7 @@ async function shoot(theme) {
   // filename. Sanitised here rather than at the call site so no caller has to
   // remember.
   const slug = (SCENE || 'all').replace(/[^a-zA-Z0-9._-]+/g, '-')
-  const file = path.join(OUT, `${slug}-${theme}.png`)
+  const file = path.join(OUT, `${slug}${ACCENT ? `-${ACCENT}` : ''}-${theme}.png`)
   fs.writeFileSync(file, image.toPNG())
   console.log(`${file}  ${JSON.stringify(image.getSize())}  page=${full}px`)
   win.destroy()

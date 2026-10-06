@@ -113,15 +113,16 @@
   transition: width var(--thinking-move);
 }
 
-/* Lit, the fill runs from the accent into white-hot at the Ultra stop. Its
-   width is the whole rail there, so the ramp's stops line up with the
-   segment behind it (--fire-start is the Max stop, set on the rail). */
+/* Lit, the whole fill is Ultra's fire, heating from ember at Low to
+   white-hot at the Ultra stop — its own palette in either accent (a lilac or
+   ink bar running into orange would read as two controls). Its width is the
+   whole rail there, so the ramp's stops line up with the segment behind it
+   (--fire-start is the Max stop, set on the rail). */
 .thinking-slider--ultra .thinking-fill {
   background: linear-gradient(
     90deg,
-    var(--accent) 0%,
-    var(--accent) calc(var(--fire-start, 80%) - 6%),
-    var(--ultra-flame) calc(var(--fire-start, 80%) + 8%),
+    var(--ultra-ember) 0%,
+    var(--ultra-flame) var(--fire-start, 80%),
     var(--ultra-spark) 100%
   );
 }
@@ -179,7 +180,7 @@
 }
 
 .thinking-body:focus-visible .thinking-thumb {
-  outline: 2px solid color-mix(in srgb, var(--accent) 60%, transparent);
+  outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
 }
 

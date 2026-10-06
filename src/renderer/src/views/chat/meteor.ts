@@ -3,8 +3,9 @@
 // The thumb lifts off as a white-hot head and accelerates along the track,
 // dragging a tapered plasma streak that *is* the slider's fill: the fill grows
 // out from behind the head and cools along its length, from white through
-// gold and orange into the accent, so there is never a gap between the fire
-// and the bar it leaves. Sparks peel off the head, scatter up and down the
+// gold and orange into ember red, the colour the lit fill starts from, so
+// there is never a gap between the fire and the bar it leaves. The fire is
+// Ultra's own palette: the same whichever accent the app is in. Sparks peel off the head, scatter up and down the
 // slider body, flicker and cool to ember red. It hits the Ultra stop at full
 // speed: a flash, a shockwave ring, a burst of embers, a few that linger —
 // and then it cools into the lit thumb the CSS draws from there on.
@@ -26,8 +27,6 @@ interface RGB {
 }
 
 export interface MeteorPalette {
-  /** The slider's own fill colour: where the streak cools to. */
-  accent: RGB
   ember: RGB
   flame: RGB
   spark: RGB
@@ -351,7 +350,7 @@ export function drawMeteor(
   }
 
   // The streak as fill: the slider's bar, burnt in from where its fill stood
-  // to the head, white-hot at the head and cooling back into the accent —
+  // to the head, white-hot at the head and cooling back to ember —
   // over the fill already there too, when the head sets out from behind it.
   // Painted, not added, so it is the bar itself rather than light on it.
   // After impact the real fill is under it and it fades away.
@@ -368,8 +367,8 @@ export function drawMeteor(
     bar.addColorStop(0, rgba(hot, barAlpha))
     bar.addColorStop(at(length * 0.12), rgba(palette.spark, barAlpha))
     bar.addColorStop(at(length * 0.45), rgba(palette.flame, barAlpha))
-    bar.addColorStop(at(Math.max(length, 1)), rgba(palette.accent, barAlpha))
-    bar.addColorStop(1, rgba(palette.accent, barAlpha))
+    bar.addColorStop(at(Math.max(length, 1)), rgba(palette.ember, barAlpha))
+    bar.addColorStop(1, rgba(palette.ember, barAlpha))
     ctx.globalCompositeOperation = 'source-over'
     ctx.strokeStyle = bar
     ctx.lineWidth = 4
@@ -584,8 +583,8 @@ function parseHex(value: string): RGB | null {
   return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 }
 }
 
-/** The fire, read from the --ultra-* tokens (and the fill's --accent) so the
- *  canvas and the CSS can't drift apart; the fallbacks are the dark scheme's. */
+/** The fire, read from the --ultra-* tokens so the canvas and the CSS can't
+ *  drift apart; the fallbacks are the dark scheme's. */
 export function readPalette(el: Element): MeteorPalette {
   const style = getComputedStyle(el)
   const token = (name: string, fallback: RGB): RGB =>
@@ -595,7 +594,6 @@ export function readPalette(el: Element): MeteorPalette {
       ? window.matchMedia('(prefers-color-scheme: dark)').matches
       : true
   return {
-    accent: token('--accent', { r: 217, g: 119, b: 87 }),
     ember: token('--ultra-ember', { r: 224, g: 69, b: 43 }),
     flame: token('--ultra-flame', { r: 255, g: 138, b: 61 }),
     spark: token('--ultra-spark', { r: 255, g: 211, b: 107 }),

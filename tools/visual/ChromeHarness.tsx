@@ -15,6 +15,7 @@
 //             Low; `&meteorProgress=0.3` (and `&meteorFrom=<stop>`) freezes
 //             one frame instead
 
+import './accentPrelude'
 import type { JSX } from 'react'
 import { createRoot } from 'react-dom/client'
 import ConfigBar from '@renderer/views/chat/ConfigBar'

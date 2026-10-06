@@ -90,7 +90,7 @@ describe('theme.css', () => {
     for (const name of [...names, ...ids]) {
       const ref = /^var\((--[a-z0-9-]+)\)$/.exec(modeColor(name))
       expect(ref, name).not.toBeNull()
-      expect(dark.has(ref![1]) || ref![1] === '--accent', name).toBe(true)
+      expect(dark.has(ref![1]) || ref![1] === '--accent-text', name).toBe(true)
       expect(light.has(ref![1]), name).toBe(true)
     }
   })
@@ -199,5 +199,276 @@ describe('AppModel.setAppearance', () => {
     expect(applied).toEqual([])
     expect(states).toEqual([])
     expect(m.appearance).toBe('system')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The accents: Lilac (the palettes above) and Monochrome (data-accent='mono'),
+// each in both schemes.
+// ---------------------------------------------------------------------------
+
+/** Declarations of a block, `--name: value` (values trimmed). */
+function values(block: string): Map<string, string> {
+  return new Map([...block.matchAll(/(--[a-z0-9-]+)\s*:\s*([^;]+);/g)].map((m) => [m[1], m[2].trim()]))
+}
+
+const MONO_SELECTOR = ":root[data-accent='mono']"
+const monoDarkAt = THEME.indexOf(MONO_SELECTOR)
+const monoLightMedia = THEME.indexOf('@media (prefers-color-scheme: light)', monoDarkAt)
+const monoLightBody = monoLightMedia < 0 ? '' : blockAt(THEME, monoLightMedia)
+
+const PALETTE = {
+  lilac: {
+    dark: values(rootBlocks(THEME).find((b) => b.includes('--canvas:')) ?? ''),
+    light: values(lightBody === '' ? '' : blockAt(lightBody, lightBody.indexOf(':root')))
+  },
+  mono: {
+    dark: values(monoDarkAt < 0 ? '' : blockAt(THEME, monoDarkAt)),
+    light: values(monoLightBody === '' ? '' : blockAt(monoLightBody, monoLightBody.indexOf(MONO_SELECTOR)))
+  }
+}
+
+/** A scheme's palette as an accent sees it: the shared palette with the
+ *  accent's overrides on top. */
+function resolved(accent: 'lilac' | 'mono', scheme: 'dark' | 'light'): Map<string, string> {
+  return new Map([...PALETTE.lilac[scheme], ...(accent === 'mono' ? PALETTE.mono[scheme] : [])])
+}
+
+/** Every token an accent decides. Views use these instead of deriving
+ *  their own shades of --accent, so both accents cover all of them. */
+const ACCENT_TOKENS = [
+  '--accent',
+  '--accent-hover',
+  '--accent-contrast',
+  '--accent-text',
+  '--accent-soft',
+  '--focus-ring',
+  '--selection',
+  '--agent-accent',
+  '--switch-on',
+  '--mode-plan',
+  '--mode-coding',
+  '--mode-ask'
+]
+
+function rgb(value: string): [number, number, number] {
+  const hex = /^#([0-9a-f]{6})$/i.exec(value)
+  if (!hex) throw new Error(`not a #rrggbb colour: ${value}`)
+  const n = parseInt(hex[1], 16)
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255]
+}
+
+function luminance([r, g, b]: [number, number, number]): number {
+  const lin = (c: number): number => {
+    const s = c / 255
+    return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4
+  }
+  return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b)
+}
+
+/** WCAG contrast ratio of two #rrggbb colours. */
+function contrast(a: string, b: string): number {
+  const [hi, lo] = [luminance(rgb(a)), luminance(rgb(b))].sort((x, y) => y - x)
+  return (hi + 0.05) / (lo + 0.05)
+}
+
+const COMBOS = [
+  ['lilac', 'dark'],
+  ['lilac', 'light'],
+  ['mono', 'dark'],
+  ['mono', 'light']
+] as const
+
+describe('accents', () => {
+  it('has a monochrome block for each scheme', () => {
+    expect(monoDarkAt).toBeGreaterThan(lightMedia)
+    expect(PALETTE.mono.dark.size).toBeGreaterThan(0)
+    expect(PALETTE.mono.light.size).toBeGreaterThan(0)
+  })
+
+  it('declares the same tokens in both monochrome blocks, and only palette tokens', () => {
+    expect([...PALETTE.mono.light.keys()].sort()).toEqual([...PALETTE.mono.dark.keys()].sort())
+    const unknown = [...PALETTE.mono.dark.keys()].filter((t) => !dark.has(t))
+    expect(unknown).toEqual([])
+  })
+
+  it('covers every accent token in all four accent × scheme palettes', () => {
+    for (const t of ACCENT_TOKENS) {
+      expect(PALETTE.lilac.dark.has(t), `${t} lilac dark`).toBe(true)
+      expect(PALETTE.lilac.light.has(t), `${t} lilac light`).toBe(true)
+      expect(PALETTE.mono.dark.has(t), `${t} mono dark`).toBe(true)
+      expect(PALETTE.mono.light.has(t), `${t} mono light`).toBe(true)
+    }
+  })
+
+  it('changes nothing but the accent: neutrals and semantic colours are shared', () => {
+    for (const t of [
+      '--canvas',
+      '--sidebar-bg',
+      '--surface-raised',
+      '--text-primary',
+      '--text-secondary',
+      '--text-tertiary',
+      '--hairline',
+      '--success',
+      '--danger',
+      '--warning',
+      '--diff-added-bg'
+    ]) {
+      expect(PALETTE.mono.dark.has(t), t).toBe(false)
+    }
+  })
+
+  it('keeps Ultra on fire in both accents', () => {
+    for (const t of ['--ultra-ember', '--ultra-flame', '--ultra-spark', '--ultra-core']) {
+      expect(PALETTE.mono.dark.has(t), t).toBe(false)
+      expect(PALETTE.mono.light.has(t), t).toBe(false)
+      const [r, g, b] = rgb(PALETTE.lilac.dark.get(t)!)
+      // Warm: red leads, blue trails.
+      expect(r).toBeGreaterThan(b)
+      expect(r).toBeGreaterThanOrEqual(g)
+    }
+  })
+
+  it('uses true neutral greys for the surfaces and text', () => {
+    for (const scheme of ['dark', 'light'] as const) {
+      for (const t of [
+        '--canvas',
+        '--sidebar-bg',
+        '--surface-raised',
+        '--surface-sunken',
+        '--user-bubble-bg',
+        '--text-primary',
+        '--text-secondary',
+        '--text-tertiary'
+      ]) {
+        const [r, g, b] = rgb(PALETTE.lilac[scheme].get(t)!)
+        // No warm (or any) cast: channels within a hair of each other.
+        expect(Math.max(r, g, b) - Math.min(r, g, b), `${t} ${scheme}`).toBeLessThanOrEqual(5)
+      }
+    }
+  })
+
+  it('makes Monochrome colourless and Lilac a lilac', () => {
+    for (const scheme of ['dark', 'light'] as const) {
+      for (const t of ['--accent', '--accent-hover', '--accent-text', '--accent-contrast', '--mode-plan']) {
+        const [r, g, b] = rgb(resolved('mono', scheme).get(t)!)
+        expect(Math.max(r, g, b) - Math.min(r, g, b), `${t} mono ${scheme}`).toBeLessThanOrEqual(5)
+      }
+      const [r, g, b] = rgb(resolved('lilac', scheme).get('--accent')!)
+      // Blue-violet: blue leads, then red, then green.
+      expect(b).toBeGreaterThan(r)
+      expect(r).toBeGreaterThan(g)
+    }
+  })
+
+  it.each(COMBOS)('passes WCAG AA in %s × %s', (accent, scheme) => {
+    const p = resolved(accent, scheme)
+    const at = (t: string): string => p.get(t)!
+    const surfaces = ['--canvas', '--sidebar-bg', '--surface-raised', '--surface-sunken']
+    // Label on a filled accent button (and on its hover shade).
+    expect(contrast(at('--accent-contrast'), at('--accent'))).toBeGreaterThanOrEqual(4.5)
+    expect(contrast(at('--accent-contrast'), at('--accent-hover'))).toBeGreaterThanOrEqual(4.5)
+    for (const s of surfaces) {
+      for (const t of ['--text-primary', '--text-secondary', '--text-tertiary', '--accent-text']) {
+        expect(contrast(at(t), at(s)), `${t} on ${s}`).toBeGreaterThanOrEqual(4.5)
+      }
+      // A filled control (a toggle, the slider's fill) against its surface.
+      expect(contrast(at('--accent'), at(s)), `--accent on ${s}`).toBeGreaterThanOrEqual(3)
+    }
+  })
+
+  it('never paints text in the fill colour (text takes --accent-text)', () => {
+    const offenders = cssFiles(RENDERER).flatMap((f) =>
+      stripComments(readFileSync(f, 'utf8'))
+        .split('\n')
+        .filter((line) => /^\s*color:\s*var\(--accent\)/.test(line))
+        .map((line) => `${f.slice(RENDERER.length)}: ${line.trim()}`)
+    )
+    expect(offenders).toEqual([])
+  })
+
+  it('draws every focus ring in --focus-ring', () => {
+    const offenders = cssFiles(RENDERER).flatMap((f) =>
+      stripComments(readFileSync(f, 'utf8'))
+        .split('\n')
+        .filter((line) => /outline:.*var\(--accent/.test(line))
+        .map((line) => `${f.slice(RENDERER.length)}: ${line.trim()}`)
+    )
+    expect(offenders).toEqual([])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The accent preference.
+// ---------------------------------------------------------------------------
+
+describe('accent preference', () => {
+  it('defaults to lilac, persists a choice, and ignores garbage on disk', async () => {
+    const { mkdtempSync, writeFileSync } = await import('fs')
+    const { tmpdir } = await import('os')
+    const { Prefs } = await import('@main/model/prefs')
+    const dir = mkdtempSync(join(tmpdir(), 'spettro-accent-'))
+
+    expect(new Prefs(dir).accent).toBe('lilac')
+
+    const prefs = new Prefs(dir)
+    prefs.accent = 'mono'
+    expect(new Prefs(dir).accent).toBe('mono')
+    // The other preferences are untouched by it.
+    expect(new Prefs(dir).appearance).toBe('system')
+
+    writeFileSync(join(dir, 'preferences.json'), JSON.stringify({ accent: 'terracotta' }))
+    expect(new Prefs(dir).accent).toBe('lilac')
+    writeFileSync(join(dir, 'preferences.json'), JSON.stringify({ accent: 42, appearance: 'dark' }))
+    expect(new Prefs(dir).accent).toBe('lilac')
+    expect(new Prefs(dir).appearance).toBe('dark')
+  })
+})
+
+describe('AppModel.setAccent', () => {
+  async function model(): Promise<{
+    m: import('@main/model/appModel').AppModel
+    applied: string[]
+    states: string[]
+    dir: string
+  }> {
+    const { mkdtempSync } = await import('fs')
+    const { tmpdir } = await import('os')
+    const { AppModel } = await import('@main/model/appModel')
+    const dir = mkdtempSync(join(tmpdir(), 'spettro-accent-model-'))
+    const applied: string[] = []
+    const states: string[] = []
+    const m = new AppModel({
+      userDataDir: dir,
+      appVersion: '0.0.0-test',
+      applyAppearance: (mode) => applied.push(mode)
+    })
+    m.on('event', (e: { type: string; state?: { accent: string } }) => {
+      if (e.type === 'app-state' && e.state) states.push(e.state.accent)
+    })
+    return { m, applied, states, dir }
+  }
+
+  it('persists and announces a valid choice, without touching the scheme', async () => {
+    const { m, applied, states, dir } = await model()
+    expect(m.getState().accent).toBe('lilac')
+    m.setAccent('mono')
+    expect(states).toEqual(['mono'])
+    expect(applied).toEqual([])
+    expect(m.accent).toBe('mono')
+    const { Prefs } = await import('@main/model/prefs')
+    expect(new Prefs(dir).accent).toBe('mono')
+    // Choosing what is already in force announces nothing.
+    m.setAccent('mono')
+    expect(states).toEqual(['mono'])
+  })
+
+  it('ignores anything but lilac and mono', async () => {
+    const { m, states } = await model()
+    m.setAccent('terracotta' as never)
+    m.setAccent(undefined as never)
+    expect(states).toEqual([])
+    expect(m.accent).toBe('lilac')
   })
 })

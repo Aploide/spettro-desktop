@@ -130,7 +130,7 @@
 }
 
 .tr-action:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--accent) 60%, transparent);
+  outline: 2px solid var(--focus-ring);
   outline-offset: 1px;
 }
 
@@ -316,7 +316,7 @@
 }
 
 .tr-reasoning-header:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--accent) 60%, transparent);
+  outline: 2px solid var(--focus-ring);
 }
 
 .tr-reasoning-body {
@@ -444,7 +444,7 @@
 }
 
 .tr-error-retry:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--accent) 60%, transparent);
+  outline: 2px solid var(--focus-ring);
   outline-offset: 1px;
 }
 
@@ -481,7 +481,7 @@
 }
 
 .tr-tool-header:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--accent) 60%, transparent);
+  outline: 2px solid var(--focus-ring);
 }
 
 .tr-tool-verb {
@@ -975,7 +975,7 @@
 }
 
 .tr-agent-header:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--accent) 60%, transparent);
+  outline: 2px solid var(--focus-ring);
 }
 
 .tr-agent-header > .tr-glyph {
@@ -1138,7 +1138,7 @@
 }
 
 .md-link {
-  color: var(--accent);
+  color: var(--accent-text);
   text-decoration: none;
 }
 
@@ -1232,7 +1232,7 @@
 }
 
 .md-copy:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--accent) 60%, transparent);
+  outline: 2px solid var(--focus-ring);
 }
 
 .md-codeblock-body {
@@ -1269,7 +1269,7 @@
   position: relative;
   display: inline-block;
   flex: none;
-  color: var(--accent);
+  color: var(--accent-text);
   animation: tr-spin 0.4s steps(8) infinite;
 }
 

@@ -7,7 +7,7 @@
 // local component state, so a choice made elsewhere shows here too.
 
 import { describe, expect, it, vi, beforeEach } from 'vitest'
-import { render, screen, cleanup, fireEvent } from '@testing-library/react'
+import { render, screen, cleanup, fireEvent, within } from '@testing-library/react'
 import { EMPTY_EXTENSIONS } from '@shared/extensions'
 import { EMPTY_UPDATE_STATE } from '@shared/update'
 
@@ -48,7 +48,7 @@ describe('Settings › General › Theme', () => {
   it('opens on General and shows the stored choice as checked', () => {
     render(<SettingsView pane="general" onClose={() => undefined} />)
     const group = screen.getByRole('radiogroup', { name: 'Theme' })
-    const radios = screen.getAllByRole('radio')
+    const radios = within(group).getAllByRole('radio')
     expect(group).toBeTruthy()
     expect(radios.map((r) => r.textContent)).toEqual(['System', 'Light', 'Dark'])
     expect(radios.map((r) => r.getAttribute('aria-checked'))).toEqual(['false', 'true', 'false'])

@@ -12,6 +12,7 @@ import type {
   ACPQuestionRequest
 } from './acp'
 import type {
+  Accent,
   Appearance,
   AppStateDTO,
   ChatDetail,
@@ -37,6 +38,10 @@ import type {
 // ---------------------------------------------------------------------------
 
 export const EVENT_CHANNEL = 'spettro:event'
+
+/** The launch argument main gives the window's renderer process
+ *  (`--spettro-accent=lilac`), read by preload before the page paints. */
+export const ACCENT_ARG = '--spettro-accent='
 
 export type MainEvent =
   /** App-level state changed (phase, sessions list, banner, selection, …).
@@ -118,6 +123,9 @@ export interface RendererApi {
   /** System / Light / Dark. Persisted, and applied to the whole window
    *  (and the terminal) live; the new value comes back in app-state. */
   setAppearance(mode: Appearance): Promise<void>
+  /** Lilac or Monochrome. Persisted, and applied live (data-accent on <html>);
+   *  the new value comes back in app-state. */
+  setAccent(accent: Accent): Promise<void>
   /** Settings › General: a notification when a turn ends in the background. */
   setNotifyWhenDone(on: boolean): Promise<void>
   /** Settings' defaults (the permission level): applied to the selected
@@ -259,6 +267,9 @@ export interface SpettroBridge {
   ): ReturnType<RendererApi[M]>
   onEvent(listener: (event: MainEvent) => void): () => void
   platform: NodeJS.Platform
+  /** The accent this window was opened with, known before the first paint
+   *  (main hands it over as a launch argument; app-state follows later). */
+  accent: Accent
 }
 
 /** Reads a session-scoped config option snapshot value by id (helper). */

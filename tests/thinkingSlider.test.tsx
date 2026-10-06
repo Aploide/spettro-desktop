@@ -16,11 +16,14 @@ import type { ACPConfigOption } from '@shared/acp'
 const calls: [string, unknown[]][] = []
 let hold: { release: () => void } | null = null
 let holding = false
+/** When set, answers every call: the CLI as a test scripts it. */
+let answer: ((method: string, args: unknown[]) => Promise<void>) | null = null
 
 vi.mock('@renderer/state/store', () => {
   const mocked = {
     call: (method: string, ...args: unknown[]) => {
       calls.push([method, args])
+      if (answer) return answer(method, args)
       if (!holding) return Promise.resolve()
       return new Promise<void>((resolve) => {
         hold = { release: resolve }
@@ -41,6 +44,7 @@ beforeEach(() => {
   calls.length = 0
   hold = null
   holding = false
+  answer = null
   cleanup()
 })
 
@@ -382,6 +386,302 @@ describe('the meteor', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+})
+
+describe('arriving at Ultra, frame by frame', () => {
+  // What a user saw on clicking Ultra: the thumb sliding there lit, the bar
+  // turning to fire, then both snapping back to Max for a short meteor; the
+  // smoulder and the slides starting in the frame the meteor appeared. Each
+  // of these reads the slider the way a frame would draw it.
+  const meteor = (): Element | null => document.querySelector('.thinking-meteor')
+  const root = (): Element => document.querySelector('.thinking-slider') as Element
+  const thumbLeft = (): string =>
+    (document.querySelector('.thinking-thumb') as HTMLElement).style.left
+  const fillAt = (): string =>
+    (document.querySelector('.thinking-fill') as HTMLElement).style.getPropertyValue('--f')
+  const lit = (): boolean => root().classList.contains('thinking-slider--ultra')
+  const RAIL = 300
+
+  let rect: { mockRestore: () => void } | null = null
+  beforeEach(() => {
+    // A rail 300px wide at the window's left edge: Low at 0, Max at 240,
+    // Ultra at 300.
+    rect = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      const width = this.classList.contains('thinking-rail') ? RAIL : 0
+      return { left: 0, top: 0, right: width, bottom: 0, width, height: 0, x: 0, y: 0, toJSON: () => ({}) }
+    })
+  })
+  afterEach(() => {
+    rect?.mockRestore()
+    vi.useRealTimers()
+  })
+
+  const press = (x: number): void => {
+    fireEvent.pointerDown(slider(), { button: 0, clientX: x, pointerId: 1 })
+  }
+  const move = (x: number): void => {
+    fireEvent.pointerMove(slider(), { clientX: x, pointerId: 1 })
+  }
+  const release = (): void => {
+    fireEvent.pointerUp(slider(), { pointerId: 1 })
+  }
+
+  it('a press on the bar’s Ultra end lights nothing and moves nothing until it lets go', async () => {
+    holding = true
+    render(<ThinkingSlider chat={chat(options({ thinking: 'low', ultra: false }))} />)
+    press(RAIL)
+    // Pressed: the words say where a release goes; the bar stays as it is.
+    expect(screen.getByText('Ultra', { selector: '.thinking-value' })).toBeTruthy()
+    expect(lit()).toBe(false)
+    expect(thumbLeft()).toBe('0%')
+    expect(fillAt()).toBe('0')
+    expect(meteor()).toBeNull()
+    expect(calls).toEqual([])
+    release()
+    // Released: the meteor sets out from Low, where the thumb stood — not
+    // from Max — and the thumb and fill wait there for it.
+    expect(meteor()).not.toBeNull()
+    expect(lit()).toBe(true)
+    expect(fillAt()).toBe('0')
+    expect(thumbLeft()).toBe('0%')
+    await settle()
+    expect(calls).toEqual([['setSelectOption', ['chat-1', 'thinking', 'high']]])
+  })
+
+  it('a drag onto Ultra leaves the thumb on the last stop it crossed, and flies from there', () => {
+    holding = true
+    render(<ThinkingSlider chat={chat(options({ thinking: 'low', ultra: false }))} />)
+    press(0)
+    move(240) // Max
+    expect(thumbLeft()).toBe('80%')
+    move(RAIL) // Ultra
+    expect(thumbLeft()).toBe('80%')
+    expect(lit()).toBe(false)
+    expect(document.querySelector('.thinking-label--current')?.textContent).toBe('Ultra')
+    release()
+    expect(meteor()).not.toBeNull()
+    expect(fillAt()).toBe('0.8')
+    expect(thumbLeft()).toBe('80%')
+  })
+
+  it('a drag off a lit Ultra and back stays on Ultra, with no meteor', () => {
+    render(<ThinkingSlider chat={chat(options({ thinking: 'high', ultra: true }))} />)
+    press(RAIL)
+    move(240)
+    expect(thumbLeft()).toBe('80%')
+    move(RAIL)
+    expect(thumbLeft()).toBe('100%')
+    release()
+    expect(meteor()).toBeNull()
+    expect(calls).toEqual([])
+  })
+
+  it('never mounts the smoulder, or sends the thumb ahead, in the frame the meteor sets out', () => {
+    // Every canvas that asks for a context: the smoulder asks as it mounts.
+    const asked: string[] = []
+    const getContext = HTMLCanvasElement.prototype.getContext
+    HTMLCanvasElement.prototype.getContext = function (this: HTMLCanvasElement) {
+      asked.push(this.className)
+      return null
+    } as never
+    try {
+      holding = true
+      render(<ThinkingSlider chat={chat(options({ thinking: 'max', ultra: false }))} />)
+      press(240) // on Max, where the thumb is
+      release()
+      press(RAIL)
+      release()
+      expect(meteor()).not.toBeNull()
+      expect(asked).toEqual(['thinking-meteor'])
+      // The hidden thumb stays on Max until impact: sent on to Ultra, it
+      // would slide there unseen (its transition started by the frame above).
+      expect(thumbLeft()).toBe('80%')
+    } finally {
+      HTMLCanvasElement.prototype.getContext = getContext
+    }
+  })
+
+  it('lights the fill in the very frame the head lands, not a frame later', () => {
+    // From impact the canvas draws its streak fading into the lit fill under
+    // it; a fill still where the flight set out leaves the bar empty behind
+    // the head for that frame.
+    const noop = (): void => {}
+    const gradient = { addColorStop: noop }
+    const ctx = new Proxy(
+      {},
+      {
+        get: (_, key) =>
+          key === 'createLinearGradient' || key === 'createRadialGradient' ? () => gradient : noop,
+        set: () => true
+      }
+    )
+    const getContext = HTMLCanvasElement.prototype.getContext
+    HTMLCanvasElement.prototype.getContext = (() => ctx) as never
+    const frames: FrameRequestCallback[] = []
+    const raf = vi.spyOn(window, 'requestAnimationFrame').mockImplementation((cb) => {
+      frames.push(cb)
+      return frames.length
+    })
+    try {
+      const { rerender } = render(<ThinkingSlider chat={chat(options({ thinking: 'high', ultra: false }))} />)
+      rerender(<ThinkingSlider chat={chat(options({ thinking: 'high', ultra: true }))} />)
+      expect(root().classList.contains('thinking-slider--flying')).toBe(true)
+      expect(fillAt()).toBe('0.4')
+      // A frame just past impact (from High: lands ≈53% of the way through
+      // a run of about a second), run as the browser would, outside React.
+      frames[frames.length - 1](performance.now() + 700)
+      expect(root().classList.contains('thinking-slider--flying')).toBe(false)
+      expect(fillAt()).toBe('1')
+      expect(thumbLeft()).toBe('100%')
+    } finally {
+      raf.mockRestore()
+      HTMLCanvasElement.prototype.getContext = getContext
+    }
+  })
+
+  /**
+   * Low → Ultra by keyboard, with the CLI answering as `script` says, at
+   * fake time. Checks, after every step, that the slider shows Ultra, that
+   * the one meteor is still the one that set out (never relaunched), and
+   * that nothing jumps: the fill and the hidden thumb wait at Low until
+   * impact, then stand on Ultra.
+   */
+  async function arrive(
+    script: (step: (opts: { thinking: string; ultra: boolean }, ms?: number) => Promise<void>) => Promise<void>,
+    respond: (method: string, args: unknown[]) => Promise<void>
+  ): Promise<{ meteors: Set<Element>; rerender: (o: { thinking: string; ultra: boolean }) => void }> {
+    vi.useFakeTimers()
+    answer = respond
+    const { rerender: raw } = render(<ThinkingSlider chat={chat(options({ thinking: 'low', ultra: false }))} />)
+    const rerender = (o: { thinking: string; ultra: boolean }): void =>
+      raw(<ThinkingSlider chat={chat(options(o))} />)
+    const meteors = new Set<Element>()
+    let elapsed = 0
+    const check = (): void => {
+      const m = meteor()
+      if (m) meteors.add(m)
+      expect(slider().getAttribute('aria-valuetext')).toBe('Ultra')
+      expect(lit()).toBe(true)
+      expect(meteors.size).toBe(1)
+      // Before impact (≈680ms from Low) fill and thumb wait at Low; after
+      // it, they are on Ultra.
+      if (elapsed < 600) {
+        expect(fillAt()).toBe('0')
+        expect(thumbLeft()).toBe('0%')
+      } else if (elapsed > 750) {
+        expect(fillAt()).toBe('1')
+        expect(thumbLeft()).toBe('100%')
+      }
+    }
+    fireEvent.keyDown(slider(), { key: 'End' })
+    check()
+    await script(async (o, ms = 0) => {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(ms)
+      })
+      elapsed += ms
+      rerender(o)
+      check()
+    })
+    // Let everything run out: the meteor burns down into the smoulder.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3000)
+    })
+    elapsed += 3000
+    check()
+    expect(meteor()).toBeNull()
+    expect(meteors.size).toBe(1)
+    return { meteors, rerender }
+  }
+
+  const after = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
+
+  it('flies once when the CLI answers promptly, each option landing as its call returns', async () => {
+    await arrive(
+      async (step) => {
+        await step({ thinking: 'high', ultra: false }, 20)
+        await step({ thinking: 'high', ultra: true }, 20)
+      },
+      () => after(20)
+    )
+  })
+
+  it('flies once when the CLI is slower than the meteor', async () => {
+    await arrive(
+      async (step) => {
+        await step({ thinking: 'high', ultra: false }, 0)
+        await step({ thinking: 'high', ultra: false }, 1100)
+        await step({ thinking: 'high', ultra: true }, 0)
+        await step({ thinking: 'high', ultra: true }, 1100)
+      },
+      () => after(1100)
+    )
+  })
+
+  it('flies once when the options trail the replies', async () => {
+    await arrive(
+      async (step) => {
+        // Both calls are answered before either option is in.
+        await step({ thinking: 'low', ultra: false }, 50)
+        await step({ thinking: 'high', ultra: false }, 100)
+        await step({ thinking: 'high', ultra: true }, 300)
+      },
+      () => after(10)
+    )
+  })
+
+  it('flies once when a stale option lands between the two', async () => {
+    let n = 0
+    await arrive(
+      async (step) => {
+        await step({ thinking: 'high', ultra: false }, 5)
+        await step({ thinking: 'high', ultra: true }, 20)
+        // Another session's echo of "thinking high", sent before ultra was
+        // on, arrives after it; the second call is still out.
+        await step({ thinking: 'high', ultra: false }, 80)
+        await step({ thinking: 'high', ultra: true }, 200)
+      },
+      () => after(n++ === 0 ? 10 : 400)
+    )
+  })
+
+  it('lets go where the CLI is when it refuses, without the thumb sliding back from Ultra', async () => {
+    vi.useFakeTimers()
+    answer = () => after(10)
+    const { rerender } = render(<ThinkingSlider chat={chat(options({ thinking: 'low', ultra: false }))} />)
+    fireEvent.keyDown(slider(), { key: 'End' })
+    const first = meteor()
+    expect(first).not.toBeNull()
+    // Ultra on, the calls through — and then the refusal rolls it back, the
+    // meteor still in the air.
+    rerender(<ThinkingSlider chat={chat(options({ thinking: 'high', ultra: true }))} />)
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30)
+    })
+    expect(meteor()).toBe(first)
+    // The hidden thumb waits at Low, where the eye last saw it: when the
+    // refusal brings it back it comes from there, with the fill, rather than
+    // sliding back into view from Ultra, where it never was.
+    expect(thumbLeft()).toBe('0%')
+    rerender(<ThinkingSlider chat={chat(options({ thinking: 'high', ultra: false }))} />)
+    // The preview let go with the calls: the refusal shows straight away.
+    expect(slider().getAttribute('aria-valuetext')).toBe('High')
+    expect(meteor()).toBeNull()
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1500)
+    })
+    expect(slider().getAttribute('aria-valuetext')).toBe('High')
+    expect(meteor()).toBeNull()
+    expect(document.querySelector('.thinking-embers')).toBeNull()
+    expect(thumbLeft()).toBe('40%')
+    // Nothing relaunched it on the way.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3000)
+    })
+    expect(meteor()).toBeNull()
   })
 })
 

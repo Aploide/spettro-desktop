@@ -92,10 +92,6 @@ export interface MeteorTiming {
   lands: number
 }
 
-/** The shortest run, as a share of the rail. One step (Max → Ultra) is too
- *  short to read as a meteor, so it sets out from a little behind Max and is
- *  already streaking by the time it passes it. */
-const MIN_RUN = 0.36
 /** After impact: the flash, the embers and the cooling into the thumb. */
 const AFTER = 0.46
 /** The bar height the sizes below were tuned in. */
@@ -113,7 +109,13 @@ const PERSIST = 0.24
  * can tell a frame before impact from one after.
  */
 export function meteorTiming(fromFrac: number, toFrac: number): MeteorTiming {
-  const startFrac = Math.max(0, Math.min(fromFrac, toFrac - MIN_RUN))
+  // From the stop the thumb was on, always: the thumb is hidden the moment
+  // the head appears, so a head set out from anywhere else is the thumb
+  // jumping. (One set out from behind Max, to give a one-step run room to
+  // streak, sat inside the fill it had just left, the fill's end showing
+  // ahead of it.) A short run streaks anyway: it sets out fast (`launch`)
+  // and trails a tail of its own from the first frame.
+  const startFrac = Math.max(0, Math.min(1, fromFrac))
   const span = Math.abs(toFrac - startFrac)
   const flight = 0.3 + 0.38 * span
   const total = flight + AFTER
@@ -368,9 +370,9 @@ export function drawMeteor(
   // to the head, white-hot at the head and cooling back to ember. Painted,
   // not added, so it is the bar itself rather than light on it: its whole
   // height, which the bar's pill clips round at the ends. Set out from Low,
-  // it burns Low's end cap too; set out from behind the fill (a one-step run
-  // from Max), the part over the fill already there fades in from nothing,
-  // so the accent turns to fire rather than being cut off by it. After
+  // it burns Low's end cap too; set out from further along, the tail that
+  // reaches back over the fill already there fades in from nothing, so the
+  // accent turns to fire rather than being cut off by it. After
   // impact the real fill is under it and it fades away.
   const barAlpha = landed ? 1 - clamp01(since / 0.22) : 1
   const fromLow = Math.abs(run.fillX - (dir > 0 ? run.railLeft : run.railRight)) < 1

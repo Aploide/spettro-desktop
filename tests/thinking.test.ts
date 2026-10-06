@@ -215,13 +215,20 @@ describe('the meteor', () => {
     }
   })
 
-  it('sets out from behind Max for a one-step run, so the streak has room to show', () => {
-    expect(meteorTiming(0.8, 1).startFrac).toBeLessThan(0.8)
-    expect(meteorTiming(0, 1).startFrac).toBe(0)
-    const run = planMeteor({ ...body, fromFrac: 0.8 }, 7)
-    // The fill still ends at Max: the streak is drawn on from there.
-    expect(run.fillX).toBe(8 + 0.8 * 318)
-    expect(run.fromX).toBeLessThan(run.fillX)
+  it('sets out from the stop the thumb was on, even for a one-step run', () => {
+    // The thumb is hidden as the head appears: a head set out from anywhere
+    // else (from behind Max, once, for a longer streak) is the thumb jumping,
+    // with the fill's end showing ahead of the head.
+    for (const fromFrac of [0, 0.2, 0.6, 0.8]) {
+      expect(meteorTiming(fromFrac, 1).startFrac).toBe(fromFrac)
+      const run = planMeteor({ ...body, fromFrac }, 7)
+      expect(run.fromX).toBe(run.fillX)
+      expect(run.fillX).toBe(8 + fromFrac * 318)
+    }
+    // A short run comes in streaking: it sets out faster than a long one.
+    expect(planMeteor({ ...body, fromFrac: 0.8 }, 7).launch).toBeGreaterThan(
+      planMeteor({ ...body, fromFrac: 0 }, 7).launch
+    )
   })
 
   it('throws 40–120 sparks, each out before the run ends', () => {

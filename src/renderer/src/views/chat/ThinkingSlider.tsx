@@ -21,6 +21,7 @@
 // that opens the slider in a popover.
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { flushSync } from 'react-dom'
 import type { CSSProperties, JSX, KeyboardEvent, PointerEvent } from 'react'
 import type { ChatDetail } from '@shared/model'
 import { call, useApp } from '@renderer/state/store'
@@ -51,6 +52,17 @@ const PAUSED_CAPTION = 'Ultra is saved, but workflows don’t run under Ask firs
  *  round to it (the CLI refused, and rolled the option back). */
 const SETTLE_MS = 1200
 
+/** A press on the bar, and where it has been dragged. `at` is the stop under
+ *  the pointer — the one a release selects, and what the words name. `rest`
+ *  is where the thumb is drawn meanwhile: the same, except over Ultra while
+ *  Ultra isn't on. Ultra is reached by the meteor, on release, from where
+ *  the thumb stands; a thumb that slid there first, lit, and then went back
+ *  for the meteor to set out from Max was the press playing twice. */
+interface Press {
+  at: number
+  rest: number
+}
+
 interface SliderProps {
   chat: ChatDetail
   /** Whether the session's model reasons; false disables the slider. */
@@ -77,7 +89,7 @@ export default function ThinkingSlider({
   const [pending, setPending] = useState<ThinkingStop | null>(null)
   // The move's calls have all returned; the preview waits for the options.
   const [sent, setSent] = useState(false)
-  const [drag, setDrag] = useState<number | null>(null)
+  const [drag, setDrag] = useState<Press | null>(null)
   const [dismissed, setDismissed] = useState(false)
   const commit = useCommit(chat.id, base)
   const bodyRef = useRef<HTMLDivElement>(null)
@@ -85,7 +97,7 @@ export default function ThinkingSlider({
 
   const state: ThinkingState | null = base && pending ? previewState(base, pending) : base
   const lit = !!state && state.ultraOn && !state.paused
-  const meteor = useMeteor(lit, drag ?? state?.index ?? -1, state?.stops.length ?? 0)
+  const meteor = useMeteor(lit, drag?.rest ?? state?.index ?? -1, state?.stops.length ?? 0)
   const frozen = meteorProgress !== undefined || idleTime !== undefined
   const reduced = useReducedMotion()
   const visible = usePageVisible()
@@ -137,10 +149,14 @@ export default function ThinkingSlider({
   const { stops } = state
   const last = stops.length - 1
   const disabled = reasons === false
-  const shown = drag ?? state.index
-  const shownStop = shown >= 0 ? stops[shown] : null
-  const frac = (i: number): number => (last <= 0 ? 0 : Math.max(0, i) / last)
   const ultraIndex = stops.findIndex((s) => s.ultra)
+  // Where the thumb is drawn, and the stop the words name: apart only while
+  // a press is over an Ultra that isn't on yet (see Press).
+  const shown = drag?.rest ?? state.index
+  const aim = drag?.at ?? state.index
+  const shownStop = shown >= 0 ? stops[shown] : null
+  const aimStop = aim >= 0 ? stops[aim] : null
+  const frac = (i: number): number => (last <= 0 ? 0 : Math.max(0, i) / last)
 
   const flight =
     meteorProgress !== undefined
@@ -152,8 +168,12 @@ export default function ThinkingSlider({
       : meteor.landed
   // In flight the meteor's streak *is* the fill: the bar stays where the eye
   // last saw it and the canvas burns it the rest of the way, so fire and fill
-  // can never come apart. It takes over again, whole, at impact.
-  const fillFrac = flight && !landed ? frac(flight.from) : frac(shown)
+  // can never come apart. It takes over again, whole, at impact. The hidden
+  // thumb waits there too, and is put down on Ultra at impact: a thumb sent
+  // on ahead would slide there unseen, and slide back into view from the
+  // far end if the CLI refused the move mid-flight.
+  const at = flight && !landed ? flight.from : shown
+  const fillFrac = frac(at)
   // Lit and settled on Ultra, with nothing else moving: the bar smoulders —
   // for as long as someone could be looking at it.
   const smoulder =
@@ -181,22 +201,27 @@ export default function ThinkingSlider({
     return Math.round(f * last)
   }
 
+  // Over an Ultra that isn't on, the thumb stays where it last stood.
+  const pressAt = (i: number, rest: number): Press => ({
+    at: i,
+    rest: i === ultraIndex && state.index !== ultraIndex ? rest : i
+  })
   const onPointerDown = (e: PointerEvent<HTMLDivElement>): void => {
     if (disabled || e.button !== 0) return
     e.preventDefault()
     bodyRef.current?.focus()
     e.currentTarget.setPointerCapture?.(e.pointerId)
-    setDrag(indexAt(e.clientX) ?? state.index)
+    setDrag(pressAt(indexAt(e.clientX) ?? state.index, state.index))
   }
   const onPointerMove = (e: PointerEvent<HTMLDivElement>): void => {
     if (drag === null) return
     const i = indexAt(e.clientX)
-    if (i !== null && i !== drag) setDrag(i)
+    if (i !== null && i !== drag.at) setDrag(pressAt(i, drag.rest))
   }
   const onPointerUp = (): void => {
     if (drag === null) return
     setDrag(null)
-    select(drag)
+    select(drag.at)
   }
 
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>): void => {
@@ -233,12 +258,12 @@ export default function ThinkingSlider({
   const showPaused = state.paused && shown === ultraIndex
   const caption = disabled
     ? `${modelName(chat) ?? 'This model'} doesn’t think before answering, so this has no effect`
-    : !shownStop
+    : !aimStop
       ? OFF_CAPTION
       : showPaused
         ? PAUSED_CAPTION
-        : shownStop.caption
-  const valueLabel = showPaused ? 'Ultra · Paused' : shownStop ? shownStop.label : 'Off'
+        : aimStop.caption
+  const valueLabel = showPaused ? 'Ultra · Paused' : aimStop ? aimStop.label : 'Off'
 
   const className =
     'thinking-slider' +
@@ -320,7 +345,7 @@ export default function ThinkingSlider({
           </div>
           {/* Off is not a stop: its hollow thumb waits short of Low, so the
               slider never looks as if it were on Low while saying Off. */}
-          <span className="thinking-thumb" style={{ left: shown < 0 ? OFF_THUMB : `${frac(shown) * 100}%` }}>
+          <span className="thinking-thumb" style={{ left: at < 0 ? OFF_THUMB : `${frac(at) * 100}%` }}>
             {showPaused && <PauseGlyph />}
           </span>
         </div>
@@ -332,7 +357,7 @@ export default function ThinkingSlider({
             key={stop.id}
             className={
               'thinking-label' +
-              (i === shown ? ' thinking-label--current' : '') +
+              (i === aim ? ' thinking-label--current' : '') +
               (stop.ultra ? ' thinking-label--ultra' : '') +
               (i === 0 ? ' thinking-label--first' : i === last ? ' thinking-label--last' : '')
             }
@@ -344,7 +369,7 @@ export default function ThinkingSlider({
         ))}
       </div>
 
-      <div className="thinking-caption" title={shownStop?.ultra ? ULTRA_CAPTION : undefined}>
+      <div className="thinking-caption" title={aimStop?.ultra ? ULTRA_CAPTION : undefined}>
         {caption}
       </div>
 
@@ -535,48 +560,67 @@ interface MeteorState {
   done: () => void
 }
 
+interface MeteorRun {
+  /** What the last render saw: whether Ultra was lit, and where the thumb
+   *  was drawn. */
+  lit: boolean
+  shown: number
+  flight: { from: number; landed: boolean } | null
+  /** Counts flights; each one's canvas is keyed by it. */
+  key: number
+  glowIn: boolean
+}
+
 /**
  * Starts a meteor when Ultra becomes lit — and only then. `shown` is the stop
  * the thumb was drawn at, so the flight starts where the eye last saw it.
+ *
+ * Decided while rendering, not in an effect after it: an effect let the
+ * render that lit Ultra commit without its flight — the smoulder mounting
+ * for it, the thumb and fill starting their slides to Ultra — before the
+ * flight's own render undid them, all inside the frame the meteor appeared.
  */
 function useMeteor(lit: boolean, shown: number, count: number): MeteorState {
-  const [flight, setFlight] = useState<{ from: number } | null>(null)
-  const [landed, setLanded] = useState(true)
-  const [key, setKey] = useState(0)
-  const [glowIn, setGlowIn] = useState(false)
-  const wasLit = useRef<boolean | null>(null)
-  const lastShown = useRef(shown)
-
-  // Layout effects, so the first frame of the flight is the first frame
-  // painted: never a plain lit thumb for one frame first.
-  useLayoutEffect(() => {
-    if (wasLit.current === false && lit) {
+  const [run, setRun] = useState<MeteorRun>(() => ({
+    // Drawn lit already (on mount) is not an arrival.
+    lit,
+    shown,
+    flight: null,
+    key: 0,
+    glowIn: false
+  }))
+  if (run.lit !== lit || run.shown !== shown) {
+    let next: MeteorRun = { ...run, lit, shown }
+    if (lit && !run.lit) {
       if (prefersReducedMotion()) {
-        setGlowIn(true)
+        next = { ...next, glowIn: true }
       } else {
         const ultra = count - 1
-        // Dragged onto Ultra, the thumb is already there: fly in from the
-        // stop before it rather than not at all.
-        const from = lastShown.current >= ultra ? ultra - 1 : lastShown.current
-        setFlight({ from: Math.max(0, from) })
-        setLanded(false)
-        setKey((k) => k + 1)
+        // Lit with the thumb already on Ultra (a pause lifted), fly in from
+        // the stop before it rather than not at all.
+        const from = run.shown >= ultra ? ultra - 1 : run.shown
+        next = { ...next, flight: { from: Math.max(0, from), landed: false }, key: run.key + 1 }
       }
+    } else if (!lit) {
+      next = { ...next, flight: null, glowIn: false }
     }
-    if (!lit) {
-      setFlight(null)
-      setLanded(true)
-      setGlowIn(false)
-    }
-    wasLit.current = lit
-  }, [lit, count])
-  useLayoutEffect(() => {
-    lastShown.current = shown
-  })
+    // React renders again at once with this, before anything is committed.
+    setRun(next)
+  }
 
-  const land = useCallback(() => setLanded(true), [])
-  const done = useCallback(() => setFlight(null), [])
-  return { flight, landed, key, glowIn, land, done }
+  const land = useCallback(
+    () => setRun((r) => (r.flight ? { ...r, flight: { ...r.flight, landed: true } } : r)),
+    []
+  )
+  const done = useCallback(() => setRun((r) => ({ ...r, flight: null })), [])
+  return {
+    flight: run.flight,
+    landed: run.flight?.landed ?? true,
+    key: run.key,
+    glowIn: run.glowIn,
+    land,
+    done
+  }
 }
 
 /**
@@ -652,13 +696,17 @@ function MeteorCanvas({
     const lands = run.flight / run.total
     const tick = (now: number): void => {
       const p = (now - start) / (run.total * 1000)
+      // The slider's side of each moment is committed now, before this
+      // frame is drawn, not left to React's next task: from impact the canvas
+      // draws its streak fading into the lit fill, and with that fill still
+      // a frame away the bar showed empty behind the head for a frame.
       if (!landed && p >= lands) {
         landed = true
-        callbacks.current.onLanded()
+        flushSync(() => callbacks.current.onLanded())
       }
       if (p >= 1) {
         ctx.clearRect(0, 0, canvas.width, canvas.height)
-        callbacks.current.onDone()
+        flushSync(() => callbacks.current.onDone())
         return
       }
       paint(p)

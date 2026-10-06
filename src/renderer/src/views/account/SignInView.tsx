@@ -24,6 +24,7 @@ import type { LoginStatus } from '@shared/extensions'
 import { humanizeError } from '@shared/humanize'
 import { getState, quietCall, useApp } from '@renderer/state/store'
 import Disclosure from '@renderer/views/common/Disclosure'
+import { autoFocusQuietly } from '@renderer/views/common/quietFocus'
 import AppIcon from '@renderer/views/shell/AppIcon'
 import Spinner from '@renderer/views/shell/Spinner'
 import '@renderer/design/form.css'
@@ -170,7 +171,7 @@ export default function SignInView({ onComplete, onClose, stacked = false, inlin
         Spettro will open your web browser so you can sign in. Come back here when you&rsquo;re
         done.
       </p>
-      <button className="btn btn--prominent btn--large" autoFocus onClick={() => void start()}>
+      <button className="btn btn--prominent btn--large" ref={autoFocusQuietly} onClick={() => void start()}>
         Continue in browser
       </button>
       {/* What it costs, beside the button that might cost something. */}

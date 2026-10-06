@@ -21,6 +21,7 @@ import { call, useApp } from '@renderer/state/store'
 import { openSettings } from '@renderer/state/shell'
 import { Icon } from '@renderer/design/icons'
 import Popover from '@renderer/views/common/Popover'
+import { autoFocusQuietly } from '@renderer/views/common/quietFocus'
 import ModelPickerView from '@renderer/views/providers/ModelPickerView'
 
 export const MODEL_ID = 'model'
@@ -250,7 +251,7 @@ export function ModelMenuPanel({
     return (
       <div className="model-menu-panel" role="dialog" aria-label="Choose a model" ref={panelRef}>
         <div className="model-menu-empty model-menu-empty--none">No models yet. Connect one to start.</div>
-        <button type="button" className="model-menu-connect" autoFocus onClick={onManage}>
+        <button type="button" className="model-menu-connect" ref={autoFocusQuietly} onClick={onManage}>
           <Icon name="key" size={13} />
           <span>Connect a model…</span>
         </button>

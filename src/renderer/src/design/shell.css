@@ -79,6 +79,15 @@
   pointer-events: none;
 }
 
+/* Disabled is neutral, not a dimmed accent: a half-transparent accent over
+   the dark canvas comes out a muddy brown that reads as broken, not as
+   "not yet". Same treatment as the Studio's Run and the prompt cards. */
+.btn--prominent:disabled {
+  opacity: 1;
+  background: var(--selected-fill);
+  color: var(--text-tertiary);
+}
+
 /* The keyboard's place, in the accent rather than the engine's default
    ring (which reads as a stray yellow outline on the warm palette). */
 .btn:focus-visible {

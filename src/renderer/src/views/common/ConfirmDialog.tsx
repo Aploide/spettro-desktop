@@ -14,6 +14,7 @@
 import { useEffect, useRef, useSyncExternalStore } from 'react'
 import type { JSX } from 'react'
 import { Icon } from '@renderer/design/icons'
+import { quietFocus } from './quietFocus'
 import './common.css'
 
 export interface ConfirmOptions {
@@ -83,7 +84,7 @@ function ConfirmView({ pending }: { pending: Pending }): JSX.Element {
 
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null
-    ;(options.destructive ? cancelRef : confirmRef).current?.focus()
+    quietFocus((options.destructive ? cancelRef : confirmRef).current)
     // Captured, and stopped: an Escape that answers this alert must not also
     // close the sheet underneath it.
     const onKey = (e: KeyboardEvent): void => {

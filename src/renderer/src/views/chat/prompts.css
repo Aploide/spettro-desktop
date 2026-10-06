@@ -377,7 +377,10 @@
   padding: 8px 10px;
   min-height: 38px;
   max-height: 160px;
-  resize: vertical;
+  /* It grows with its text like the composer (QuestionCard sets the height),
+     then scrolls; no OS resize grip in the corner. */
+  resize: none;
+  overflow-y: auto;
   font: inherit;
   font-size: var(--fs-md);
   line-height: 1.45;
@@ -471,6 +474,13 @@
 
 .prompt-btn--primary:hover:not(:disabled) {
   background: color-mix(in srgb, var(--text-primary) 86%, var(--canvas));
+}
+
+/* Disabled reads as "not yet", not as a dimmed ink block. */
+.prompt-btn--primary:disabled {
+  opacity: 1;
+  background: var(--selected-fill);
+  color: var(--text-tertiary);
 }
 
 .prompt-btn--danger {

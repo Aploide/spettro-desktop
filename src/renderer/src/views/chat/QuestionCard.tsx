@@ -15,7 +15,7 @@
 // A question whose chat is unknown shows the same card in a modal sheet
 // (`presentation="sheet"`, from App).
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { JSX } from 'react'
 import type { ACPQuestion, ACPQuestionAnswer, ACPQuestionOption, ACPQuestionRequest } from '@shared/acp'
 import { call } from '@renderer/state/store'
@@ -154,6 +154,16 @@ export default function QuestionCard({
   useEffect(() => {
     if (otherOpen) otherRef.current?.focus()
   }, [otherOpen, step])
+
+  // Auto-grow with the answer, like the composer; the CSS max-height stops it
+  // and it scrolls inside from there.
+  const custom = draft.custom
+  useLayoutEffect(() => {
+    const el = otherRef.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = `${el.scrollHeight + el.offsetHeight - el.clientHeight}px`
+  }, [custom, otherOpen, step])
 
   // Rows the digits reach: the options, then "Other…".
   const rowCount = question.options.length + (question.allowCustomInput ? 1 : 0)
@@ -331,7 +341,7 @@ export default function QuestionCard({
                 <textarea
                   ref={otherRef}
                   className="prompt-field"
-                  rows={3}
+                  rows={2}
                   placeholder="Type your answer"
                   aria-label="Your own answer"
                   value={draft.custom}

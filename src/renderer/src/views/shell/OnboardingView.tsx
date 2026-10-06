@@ -21,6 +21,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { InstallState } from '@shared/model'
 import { call, quietCall, useApp } from '@renderer/state/store'
 import Disclosure, { CopyButton } from '@renderer/views/common/Disclosure'
+import { autoFocusQuietly } from '@renderer/views/common/quietFocus'
 import SignInView from '@renderer/views/account/SignInView'
 import AddLocalEndpointView from '@renderer/views/providers/AddLocalEndpointView'
 import { ProviderKeyList } from '@renderer/views/providers/ConnectProvidersView'
@@ -182,7 +183,7 @@ function InstallStep(): JSX.Element {
         <button
           type="button"
           className="btn btn--prominent btn--large setup-primary"
-          autoFocus
+          ref={autoFocusQuietly}
           onClick={() => void call('installCLI')}
         >
           {failed ? 'Try again' : 'Install Spettro'}
@@ -368,7 +369,7 @@ export function ConnectChooser({ onSkip, inPane = false }: { onSkip?: () => void
             <button
               type="button"
               className="btn btn--prominent btn--large setup-primary"
-              autoFocus
+              ref={autoFocusQuietly}
               onClick={() => setWay('signin')}
             >
               Sign in to Spettro

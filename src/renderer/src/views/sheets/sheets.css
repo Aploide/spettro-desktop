@@ -112,6 +112,11 @@
 .sheet-btn--prominent:hover:not(:disabled) {
   background: color-mix(in srgb, var(--accent) 88%, var(--accent-contrast));
 }
+.sheet-btn--prominent:disabled {
+  opacity: 1;
+  background: var(--selected-fill);
+  color: var(--text-tertiary);
+}
 
 /* reject / secondary-tinted options */
 .sheet-btn--subtle {
@@ -174,7 +179,9 @@
   line-height: 1.5;
   width: 100%;
   min-height: 260px;
-  resize: vertical;
+  /* It already fills its pane and scrolls inside; an OS resize grip in the
+     corner would only fight the layout. */
+  resize: none;
   padding: var(--sp-sm);
   border-radius: var(--rad-md);
   border: 1px solid color-mix(in srgb, var(--text-primary) 10%, transparent);

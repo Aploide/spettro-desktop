@@ -66,6 +66,7 @@ Pick the screen with `?mode=`:
 | `chat` | a finished turn: "Thought for 8s", two reads and a search folded into one line, a sub-agent, an edit, a command, a markdown answer with a code block |
 | `chat-tools` | the same turn with its rows opened: the folded reads, the edit's numbered unified diff, the command's `$ npm test` and output |
 | `chat-error` | a failed command (`exit 1`, opened), an "Interrupted" notice, and a turn the provider ended: the error card with Try again |
+| `commands` | slash commands the CLI answered: /help as a two-column list (command chip, what it does), one-line replies as quiet lines, /models' roster verbatim |
 | `chat-steering` | a running turn with a message sent mid-turn, queued for the agent's next step, and the run ticker |
 | `thinking`, `thinking-paused` | the same chat with the thinking slider open over the composer: at High, and Ultra saved under Ask first (paused, offering Restricted) |
 | `chat-one` | the same chat as the only session in the sidebar |

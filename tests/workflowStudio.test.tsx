@@ -18,7 +18,9 @@ vi.mock('@renderer/state/store', () => {
     call: (method: string, ...args: unknown[]) => {
       calls.push([method, args])
       const answer = answers[method]
-      if (typeof answer === 'function') return Promise.resolve(answer(...args))
+      // Async like the real IPC: an answer that throws rejects, it doesn't
+      // throw out of the call.
+      if (typeof answer === 'function') return Promise.resolve().then(() => answer(...args))
       return Promise.resolve(answer ?? null)
     },
     useChat: () => null

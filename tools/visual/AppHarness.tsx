@@ -23,7 +23,7 @@
 //                 no-model-error | no-model-menu | mode-menu | welcome-sent |
 //                 welcome-new-project | welcome-more | installing-slow |
 //                 gate-signin | gate-local | no-model-signin | error-toast |
-//                 context | cleared
+//                 context | cleared | commands
 
 import './appPrelude'
 import { createRoot } from 'react-dom/client'
@@ -79,7 +79,14 @@ function tool(partial: Partial<ToolCallItem> & { title: string }): TranscriptIte
 function say(
   role: 'user' | 'assistant' | 'reasoning' | 'notice',
   text: string,
-  o?: { streaming?: boolean; error?: boolean; detail?: string; thoughtFor?: number; steering?: SteeringState }
+  o?: {
+    streaming?: boolean
+    error?: boolean
+    detail?: string
+    thoughtFor?: number
+    steering?: SteeringState
+    plain?: boolean
+  }
 ): TranscriptItem {
   seq += 1
   const timestamp = NOW - 20 * MIN + seq * 1000
@@ -98,10 +105,45 @@ function say(
   }
   if (o?.steering) message.steering = o.steering
   if (o?.detail) message.detail = o.detail
+  if (o?.plain) message.plain = true
   // The harness's errors are all a turn failing, the kind Try again answers.
   if (o?.error) message.endsTurn = true
   return { kind: 'message', message }
 }
+
+/** The CLI's /help reply, verbatim (spettro internal/acp/commands.go acpHelpText). */
+const HELP_TEXT = `commands:
+  /help                 this message
+  /mode <agent-id>      switch agent mode (plan, coding, ask, ...)
+  /models [p:m [key]]   show connected models or set the active one
+  /permission <level>   set permission: yolo | restricted | ask-first
+  /budget [n|0]         set token budget per request (0 = unlimited)
+  /think <level>        set extended-thinking level (off|low|medium|high|x-high|max)
+  /goal <objective>     work autonomously until the objective is met (/goal status)
+  /loop <t> <prompt>    run a prompt every <t> until stopped (/loop stop | status)
+  /memory [show]        show persistent memory (user + project)
+  /memory add [user|project] <fact>   save one fact to persistent memory
+  /memory clear [user|project|all]    erase saved memory
+  /compact              summarize older history to free context window space
+  /compact auto <status|on|off>       manage automatic compaction
+  /clear                clear conversation history
+  /stats                show session token usage and prompt-cache hit rate
+  /tasks [list|add|done|set|show|rm|clear]   manage session tasks
+  /jobs [list] | /jobs kill <id>|all  background shell jobs
+  /hooks                list effective runtime hooks
+  /diff [path...]       diffs of files modified this session
+  /ultra [on|off]       toggle ultra, saved in your config (ultracode:
+                        substantive tasks run as dynamic workflows; needs
+                        restricted or yolo). Write "ultracode" in a message
+                        to get the same for that turn only
+  /workflows            list, show, or run saved workflow templates
+  /workflows run <name> [json | task]  adapt a saved template to the task and run it
+  /workflow-size [tier] show or set the workflow size guideline
+                        (small | medium | large | unbounded)
+  /plan [task]          switch to plan mode
+  /permissions          show/set permission level, debug details
+  /skills               list Agent Skills and where each comes from
+  /<skill> [args]       run a skill (or mention it as $skill in a prompt)`
 
 const OLD_BUTTON = `export function SaveButton({ onSave }: Props) {
   return (
@@ -278,6 +320,28 @@ function transcript(mode: string): TranscriptItem[] {
         )
       )
       return items
+    case 'commands':
+      // Slash commands answered by the CLI (ChatSession marks the reply
+      // `plain`): /help's padded two-column text becomes a list, a one-line
+      // acknowledgement a quiet line, and /models' roster stays verbatim.
+      return [
+        say('user', '/help'),
+        say('assistant', HELP_TEXT, { plain: true }),
+        say('user', '/ultra on'),
+        say(
+          'assistant',
+          'ultra on — ultracode: substantive tasks run as dynamic workflows (understand → design → implement → review), as if each message said "ultracode"',
+          { plain: true }
+        ),
+        say('user', '/permission restricted'),
+        say('assistant', 'permission set to restricted', { plain: true }),
+        say('user', '/models'),
+        say(
+          'assistant',
+          'current model: anthropic:claude-sonnet-4-5\nconnected models:\n  anthropic:claude-sonnet-4-5\n  anthropic:claude-opus-4-1\nusage: /models <provider:model> [api_key]',
+          { plain: true }
+        )
+      ]
     case 'cleared': {
       // `/clear` after the fix: the CLI's reply turned into a divider
       // (ChatSession.markContextCleared), then a fresh start below it.

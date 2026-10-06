@@ -27,6 +27,7 @@ import { ToolGroup } from './ToolGroup'
 import { ScriptCallRow } from './OrchestrationBits'
 import { WorkflowCard } from './WorkflowCard'
 import { CopyButton, useTranscriptActions } from './TranscriptActions'
+import { readCommandReply } from './commandReply'
 import Disclosure from '@renderer/views/common/Disclosure'
 import { humanizeError } from '@shared/humanize'
 import { useApp } from '@renderer/state/store'
@@ -184,9 +185,34 @@ function SteeringCaption({ state }: { state: ChatMessage['steering'] }): JSX.Ele
 // ---------------------------------------------------------------------------
 
 function AssistantBubble({ message }: { message: ChatMessage }): JSX.Element {
+  // A slash command's reply: a one-line acknowledgement is a quiet line, like
+  // the app's own notices; /help's command list becomes a list.
+  const reply = message.plain && !message.isStreaming ? readCommandReply(message.text) : null
+  if (reply?.kind === 'ack') {
+    return (
+      <div className="tr-notice tr-command-ack" role="note">
+        <Icon name="info.circle.fill" size={12} />
+        <span className="tr-notice-text">{reply.text}</span>
+      </div>
+    )
+  }
   return (
     <div className="tr-assistant">
-      {message.plain ? (
+      {reply?.kind === 'list' ? (
+        <div className="tr-commands">
+          {reply.heading !== null && <div className="tr-commands-heading">{reply.heading}</div>}
+          <dl className="tr-commands-list">
+            {reply.rows.map((row, i) => (
+              <div className="tr-commands-row" key={i}>
+                <dt>
+                  <code>{row.command}</code>
+                </dt>
+                <dd>{row.description}</dd>
+              </div>
+            ))}
+          </dl>
+        </div>
+      ) : message.plain ? (
         <pre className="tr-plain">{message.text.replace(/\s+$/, '')}</pre>
       ) : (
         <MarkdownText source={message.text} />

@@ -25,6 +25,7 @@ import { quietCall } from '@renderer/state/store'
 import { confirmDialog } from '@renderer/views/common/ConfirmDialog'
 import { showToast } from '@renderer/views/common/Toast'
 import '@xterm/xterm/css/xterm.css'
+import { basename, terminalTabLabel } from './tabLabel'
 import './terminal.css'
 
 const HEIGHT_KEY = 'spettro.terminalDrawerHeight'
@@ -42,6 +43,7 @@ interface Tab {
   /** The shell running in it now (a restart replaces it). */
   termId: string
   projectPath: string
+  /** The shell's own window title (or the folder's name until it sets one). */
   title: string
   running: boolean
 }
@@ -61,11 +63,6 @@ interface TerminalDrawerProps {
 function clampHeight(height: number): number {
   if (!Number.isFinite(height)) return DEFAULT_HEIGHT
   return Math.min(MAX_HEIGHT, Math.max(MIN_HEIGHT, height))
-}
-
-function basename(path: string): string {
-  const parts = path.split(/[\\/]/).filter(Boolean)
-  return parts[parts.length - 1] ?? path
 }
 
 /** Appends an alpha byte to #rrggbb colors; returns other formats as-is. */
@@ -318,8 +315,8 @@ export default function TerminalDrawer({
       const next: Record<string, Tab[]> = {}
       for (const [project, tabs] of Object.entries(prev)) {
         next[project] = tabs.map((t) =>
-          // Shell-set titles (OSC escapes) become the tab label, falling back
-          // to the project folder's name when empty (doc 17).
+          // The shell-set title (an OSC escape) is kept as it came; the tab
+          // shows terminalTabLabel's reading of it and the title on hover.
           t.id === id ? { ...t, title: title.trim() || basename(t.projectPath) } : t
         )
       }
@@ -490,7 +487,9 @@ export default function TerminalDrawer({
               <span className="terminal-tab__glyph mono" aria-hidden="true">
                 &gt;_
               </span>
-              <span className="terminal-tab__title">{tab.title}</span>
+              <span className="terminal-tab__title" title={tab.title}>
+                {terminalTabLabel(tab.title, tab.projectPath)}
+              </span>
               {!tab.running && <span className="terminal-tab__ended">(ended)</span>}
               <button
                 className="terminal-tab__close"

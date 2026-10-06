@@ -159,6 +159,60 @@
   white-space: pre-wrap;
 }
 
+/* /help's command list: the command as a mono chip, what it does in prose. */
+.tr-commands {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tr-commands-heading {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.tr-commands-list {
+  margin: 0;
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  column-gap: 14px;
+  row-gap: 6px;
+}
+
+/* Rows are wrappers for the pair; the grid lays out their children. */
+.tr-commands-row {
+  display: contents;
+}
+
+.tr-commands-list dt {
+  margin: 0;
+  max-width: 320px;
+}
+
+/* Inline, so a command too long for the column wraps as two chips rather
+   than becoming a grey block. */
+.tr-commands-list code {
+  display: inline;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+  padding: 1px 5px;
+  border-radius: 4px;
+  /* The same chip as inline code in an answer (.md-inline-code). */
+  background: color-mix(in srgb, var(--text-primary) 7%, transparent);
+  color: var(--text-primary);
+}
+
+.tr-commands-list dd {
+  margin: 0;
+  font-size: var(--fs-md);
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
 .tr-assistant > .md {
   font-size: var(--fs-body);
   line-height: var(--lh-body);

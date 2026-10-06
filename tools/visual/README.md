@@ -32,9 +32,17 @@ are built with `tests/wire.ts` `workflowCard` (a port of `render()` and the
 `workflow-continued` (a card a later turn took over, then its successor) and
 `workflow-detail` (every line the text can carry, read without `_meta`).
 
-The `chrome` page shows the config bar (Ultra on/off/locked, the workflow size
-chip) and the composer's glow: a lit phrase, a `+500k` budget directive with
-its hint, and the muted Ask-first variant with its "switch permission" line.
+The `chrome` page shows the config bar (the thinking chip at High, Ultra lit
+and Ultra paused, the workflow size chip) and the composer's glow: a lit
+phrase, a `+500k` budget directive with its hint, and the muted Ask-first
+variant with its "switch permission" line. `chrome:thinking` lays out the
+thinking slider in every state (High, Ultra lit, Ultra paused with its
+"Switch to Restricted?" prompt, Extra high, Off, a model that doesn't reason)
+and its chip; `chrome:meteor` freezes the meteor at points of its flight, from
+Max and from Low. The meteor is a pure function of its progress, so
+`chrome:meteor&meteorProgress=0.3` (optionally `&meteorFrom=<stop>`) is the
+same frame every time. It is a few pixels tall: `SHOT_SCALE=3` renders any
+scene at three times the density for looking closely.
 
 ## The app harness
 
@@ -51,6 +59,7 @@ Pick the screen with `?mode=`:
 | `welcome-empty` | first run: no sessions yet, working in the home folder (the warning shows) |
 | `welcome-folders` | the new-session view with its folder menu open, including a recent that no longer exists |
 | `chat` | a finished turn: reasoning, read/search/edit/bash calls, a sub-agent, a markdown answer with a code block, a plan |
+| `thinking`, `thinking-paused` | the same chat with the thinking slider open over the composer: at High, and Ultra saved under Ask first (paused, offering Restricted) |
 | `chat-one` | the same chat as the only session in the sidebar |
 | `sidebar-many` | twenty sessions across three projects: pinned, archived, one working, two finished while away |
 | `sidebar-menu` | the same, with a row's menu open (Rename… / Pin / Archive / Delete…) |

@@ -1,0 +1,401 @@
+/* The thinking slider (ThinkingSlider.tsx) and its toolbar chip.
+
+   Low → Max is a plain Apple-style slider: a hairline track, an accent fill,
+   a white thumb. The segment past Max is Ultra and is drawn in the --ultra-*
+   fire, faint as a promise until Ultra is lit, then the fill runs into it and
+   the thumb glows. The meteor is a canvas over .thinking-body, which clips
+   it: nothing it throws can land on the composer. */
+
+.thinking-popover {
+  width: 360px;
+  padding: var(--sp-md) var(--sp-lg);
+}
+
+.thinking-slider {
+  /* How long the thumb and fill take to reach a new stop. A meteor retimes
+     both to its own flight, so the fill burns along under the head. */
+  --thinking-move: 180ms cubic-bezier(0.25, 1, 0.5, 1);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  user-select: none;
+}
+
+.thinking-slider--meteor {
+  --thinking-move: 475ms cubic-bezier(0.33, 1, 0.68, 1); /* easeOutCubic, as meteor.ts */
+}
+
+.thinking-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp-sm);
+}
+
+.thinking-title {
+  font-size: var(--fs-md);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.thinking-value {
+  font-size: var(--fs-md);
+  color: var(--text-secondary);
+}
+
+/* Fire as text: ember into flame. The brighter spark end of the ramp is for
+   light on a dark ground and would vanish on the light popover. */
+.thinking-slider--ultra .thinking-value,
+.thinking-slider--ultra .thinking-label--ultra,
+.thinking-chip--ultra .config-chip-label {
+  background: linear-gradient(90deg, var(--ultra-ember), var(--ultra-flame));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  font-weight: 600;
+}
+
+/* ------------------------------------------------------------------ body */
+
+.thinking-body {
+  position: relative;
+  height: 40px;
+  /* The meteor's clip. Tall enough for the thumb's glow and focus ring. */
+  overflow: hidden;
+  /* Reaches into the popover's padding so the Ultra stop, at the very end,
+     has room for its glow inside the clip. */
+  margin: 0 -12px;
+  border-radius: var(--rad-sm);
+  cursor: pointer;
+  outline: none;
+  touch-action: none;
+}
+
+.thinking-rail {
+  position: absolute;
+  left: 20px;
+  right: 20px;
+  top: 50%;
+  height: 4px;
+  margin-top: -2px;
+}
+
+.thinking-track {
+  position: absolute;
+  inset: 0;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--text-primary) 13%, transparent);
+}
+
+/* Past Max: the Ultra segment, a faint ember until it is reached. */
+.thinking-fire {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 0;
+  border-radius: 0 2px 2px 0;
+  background: linear-gradient(90deg, var(--ultra-flame), var(--ultra-ember));
+  opacity: 0.32;
+  transition: opacity 300ms ease-out;
+}
+
+.thinking-fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  border-radius: 2px;
+  background: var(--accent);
+  transition: width var(--thinking-move);
+}
+
+/* Lit, the fill runs from the accent into white-hot at the Ultra stop. Its
+   width is the whole rail there, so the ramp's stops line up with the
+   segment behind it (--fire-start is the Max stop, set on the rail). */
+.thinking-slider--ultra .thinking-fill {
+  background: linear-gradient(
+    90deg,
+    var(--accent) 0%,
+    var(--accent) calc(var(--fire-start, 80%) - 6%),
+    var(--ultra-flame) calc(var(--fire-start, 80%) + 8%),
+    var(--ultra-spark) 100%
+  );
+}
+
+.thinking-slider--ultra .thinking-fire {
+  opacity: 1;
+}
+
+.thinking-slider--paused .thinking-fill {
+  background: color-mix(in srgb, var(--text-secondary) 55%, transparent);
+}
+
+.thinking-slider--paused .thinking-fire {
+  opacity: 0.14;
+}
+
+.thinking-tick {
+  position: absolute;
+  top: 50%;
+  width: 4px;
+  height: 4px;
+  margin: -2px 0 0 -2px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--text-primary) 30%, transparent);
+}
+
+.thinking-tick--passed {
+  background: color-mix(in srgb, var(--accent-contrast) 75%, transparent);
+}
+
+/* ----------------------------------------------------------------- thumb */
+
+.thinking-thumb {
+  position: absolute;
+  top: 50%;
+  width: 18px;
+  height: 18px;
+  margin: -9px 0 0 -9px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--paper);
+  box-shadow:
+    0 0 0 1px var(--hairline),
+    0 1px 3px color-mix(in srgb, var(--text-primary) 22%, transparent);
+  color: var(--text-secondary);
+  transition:
+    left var(--thinking-move),
+    opacity 260ms ease-out,
+    box-shadow 300ms ease-out;
+}
+
+.thinking-slider--dragging .thinking-thumb {
+  transform: scale(1.08);
+}
+
+.thinking-body:focus-visible .thinking-thumb {
+  outline: 2px solid color-mix(in srgb, var(--accent) 60%, transparent);
+  outline-offset: 2px;
+}
+
+/* Off (set somewhere else — it is not a stop): a hollow thumb at the start. */
+.thinking-slider--off .thinking-thumb {
+  background: var(--surface-raised);
+  box-shadow: inset 0 0 0 1.5px var(--text-tertiary);
+}
+
+/* Lit Ultra: a small sun, softly breathing. */
+.thinking-slider--ultra .thinking-thumb {
+  background: radial-gradient(
+    circle at 50% 45%,
+    var(--ultra-core) 0 28%,
+    var(--ultra-spark) 58%,
+    var(--ultra-flame) 100%
+  );
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--ultra-flame) 70%, transparent),
+    0 0 10px 2px color-mix(in srgb, var(--ultra-flame) 50%, transparent),
+    0 0 4px color-mix(in srgb, var(--ultra-spark) 80%, transparent);
+  animation: thinking-ultra-breathe 2.8s ease-in-out infinite alternate;
+}
+
+@keyframes thinking-ultra-breathe {
+  to {
+    box-shadow:
+      0 0 0 1px color-mix(in srgb, var(--ultra-flame) 80%, transparent),
+      0 0 14px 4px color-mix(in srgb, var(--ultra-flame) 38%, transparent),
+      0 0 5px color-mix(in srgb, var(--ultra-spark) 90%, transparent);
+  }
+}
+
+/* In flight the meteor is the thumb; the real one comes back as it cools.
+   The Ultra segment stays unlit until the head has reached it. */
+.thinking-slider--flying .thinking-fire {
+  opacity: 0.32;
+}
+
+.thinking-slider--flying .thinking-thumb {
+  opacity: 0;
+  transition:
+    left var(--thinking-move),
+    opacity 0s;
+}
+
+/* Paused Ultra: saved, not running. Muted, with a pause mark. */
+.thinking-slider--paused .thinking-thumb {
+  background: var(--surface-raised);
+  box-shadow:
+    inset 0 0 0 1.5px var(--text-tertiary),
+    var(--shadow-sm);
+  color: var(--text-secondary);
+}
+
+.thinking-meteor {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.thinking-slider--disabled .thinking-body,
+.thinking-slider--disabled .thinking-labels {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* A harness frame is one frozen instant: nothing may still be moving. */
+.thinking-slider--frozen *,
+.thinking-slider--frozen *::before {
+  transition: none !important;
+  animation: none !important;
+}
+
+/* Reduced motion gets no meteor — the lit thumb simply glows up. */
+.thinking-slider--glow-in .thinking-thumb {
+  animation: thinking-glow-in 500ms ease-out;
+}
+
+@keyframes thinking-glow-in {
+  from {
+    box-shadow: 0 0 0 0 transparent;
+    filter: saturate(0.4);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .thinking-slider {
+    --thinking-move: 0ms linear;
+  }
+  .thinking-slider--ultra .thinking-thumb {
+    animation: none;
+  }
+  .thinking-slider--glow-in .thinking-thumb {
+    animation: thinking-glow-in 500ms ease-out;
+  }
+}
+
+/* ---------------------------------------------------------------- labels */
+
+.thinking-labels {
+  position: relative;
+  height: 15px;
+  /* The rail's inset (20px) less the body's -12px overhang. */
+  margin: -6px 8px 0;
+}
+
+.thinking-label {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  font-size: var(--fs-xs);
+  line-height: 15px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.thinking-label:hover {
+  color: var(--text-primary);
+}
+
+.thinking-label--current {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.thinking-label--ultra {
+  color: color-mix(in srgb, var(--ultra-flame) 75%, var(--text-secondary));
+}
+
+.thinking-slider--disabled .thinking-label {
+  cursor: not-allowed;
+}
+
+.thinking-caption {
+  min-height: 32px;
+  margin-top: 4px;
+  font-size: var(--fs-sm);
+  line-height: 16px;
+  color: var(--text-secondary);
+}
+
+/* ---------------------------------------------------------------- prompt */
+
+.thinking-prompt {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: var(--rad-sm);
+  background: var(--surface-sunken);
+  font-size: var(--fs-sm);
+  line-height: 16px;
+  color: var(--text-primary);
+}
+
+.thinking-prompt-icon {
+  flex: none;
+  color: var(--text-secondary);
+}
+
+.thinking-prompt-text {
+  flex: 1 1 200px;
+  min-width: 0;
+}
+
+.thinking-prompt-actions {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.thinking-prompt-btn {
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--rad-xs);
+  background: var(--surface-raised);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.thinking-prompt-btn:hover {
+  background: color-mix(in srgb, var(--surface-raised) 88%, var(--text-primary));
+}
+
+.thinking-prompt-btn--primary {
+  background: var(--text-primary);
+  border-color: transparent;
+  color: var(--canvas);
+}
+
+.thinking-prompt-btn--primary:hover {
+  background: color-mix(in srgb, var(--text-primary) 86%, var(--canvas));
+}
+
+/* ------------------------------------------------------------------ chip */
+
+.thinking-chip--ultra {
+  color: var(--ultra-flame);
+  border-color: color-mix(in srgb, var(--ultra-flame) 45%, var(--hairline));
+  background: color-mix(in srgb, var(--ultra-flame) 9%, var(--surface-raised));
+}
+
+.thinking-chip--ultra:hover {
+  background: color-mix(in srgb, var(--ultra-flame) 16%, var(--surface-raised));
+}
+
+.thinking-chip--paused {
+  color: var(--text-secondary);
+  border-style: dashed;
+}
+
+.thinking-chip--inert {
+  color: var(--text-secondary);
+}

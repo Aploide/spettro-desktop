@@ -1,13 +1,22 @@
-// The chat chrome: the config bar and the activation glow.
+// The chat chrome: the config bar, the thinking slider and the activation
+// glow.
 //
-// Both are states that only exist while someone is interacting — a chip that
-// has been armed, a phrase mid-typing — so neither shows up in the transcript
-// scenes. They are also the two things most recently reported as looking
-// wrong, which is reason enough to be able to photograph them.
+// All are states that only exist while someone is interacting — a stop just
+// reached, a phrase mid-typing — so none shows up in the transcript scenes.
+// They are also the things most recently reported as looking wrong, which is
+// reason enough to be able to photograph them.
+//
+// Pick the page with `?mode=`:
+//   (none)    the config bar and the composer's glow
+//   thinking  the slider in every state it can be in, and its chip
+//   meteor    the meteor frozen at points of its flight, from Max and from
+//             Low; `&meteorProgress=0.3` (and `&meteorFrom=<stop>`) freezes
+//             one frame instead
 
 import type { JSX } from 'react'
 import { createRoot } from 'react-dom/client'
 import ConfigBar from '@renderer/views/chat/ConfigBar'
+import ThinkingSlider from '@renderer/views/chat/ThinkingSlider'
 import {
   ActivationText,
   ActivationTextarea,
@@ -20,12 +29,22 @@ import '@renderer/views/chat/chat.css'
 import '@renderer/views/chat/transcript/transcript.css'
 import './harness.css'
 
+const PARAMS = new URLSearchParams(window.location.search)
+const MODE = PARAMS.get('mode') ?? ''
+
 ;(window as unknown as { spettro: unknown }).spettro = {
   onEvent: () => undefined,
   call: () => Promise.resolve(null)
 }
 
-function options(o: { permission: string; ultra: boolean; size?: string }): ACPConfigOption[] {
+interface Options {
+  permission: string
+  ultra: boolean
+  size?: string
+  thinking?: string
+}
+
+function options(o: Options): ACPConfigOption[] {
   return [
     {
       id: 'mode',
@@ -46,7 +65,10 @@ function options(o: { permission: string; ultra: boolean; size?: string }): ACPC
         type: 'select',
         currentValue: 'x',
         groups: [],
-        flat: [{ value: 'x', name: 'SuperSmart' }]
+        flat: [
+          { value: 'x', name: 'SuperSmart' },
+          { value: 'quick', name: 'QuickChat' }
+        ]
       }
     },
     {
@@ -58,20 +80,30 @@ function options(o: { permission: string; ultra: boolean; size?: string }): ACPC
         currentValue: o.permission,
         groups: [],
         flat: [
-          { value: 'yolo', name: 'YOLO' },
-          { value: 'ask-first', name: 'Ask first' }
+          { value: 'ask-first', name: 'Ask first' },
+          { value: 'restricted', name: 'Restricted' },
+          { value: 'yolo', name: 'YOLO' }
         ]
       }
     },
     {
+      // config_options.go thinkingConfigOption.
       id: 'thinking',
       name: 'Thinking',
-      category: 'thinking',
+      description: 'Extended-thinking effort',
+      category: 'thought_level',
       kind: {
         type: 'select',
-        currentValue: 'high',
+        currentValue: o.thinking ?? 'high',
         groups: [],
-        flat: [{ value: 'high', name: 'High' }]
+        flat: [
+          { value: 'off', name: 'Off' },
+          { value: 'low', name: 'Low' },
+          { value: 'medium', name: 'Medium' },
+          { value: 'high', name: 'High' },
+          { value: 'x-high', name: 'X-High' },
+          { value: 'max', name: 'Max' }
+        ]
       }
     },
     {
@@ -142,26 +174,25 @@ function Row({ label, children }: { label: string; children: JSX.Element }): JSX
 }
 
 function Harness(): JSX.Element {
+  if (MODE === 'thinking') return <ThinkingPage />
+  if (MODE === 'meteor') return <MeteorPage />
   return (
     <div className="hz-root hz-root--chrome">
-      <Row label="Ultra armed">
+      <Row label="Thinking High — the chip opens the slider">
         <div className="hz-bar">
-          <ConfigBar chat={chat(options({ permission: 'yolo', ultra: true }))} />
+          <ConfigBar chat={chat(options({ permission: 'yolo', ultra: false }))} />
         </div>
       </Row>
-      <Row label="Ultra off · workflow size Large">
+      <Row label="Ultra lit · workflow size Large">
         <div className="hz-bar">
-          <ConfigBar chat={chat(options({ permission: 'yolo', ultra: false, size: 'large' }))} />
+          <ConfigBar chat={chat(options({ permission: 'yolo', ultra: true, size: 'large' }))} />
         </div>
       </Row>
-      <Row label="Workflow size Unbounded">
+      <Row label="Ultra paused (Ask first) · workflow size Unbounded">
         <div className="hz-bar">
-          <ConfigBar chat={chat(options({ permission: 'yolo', ultra: false, size: 'unbounded' }))} />
-        </div>
-      </Row>
-      <Row label="Ultra locked (Ask first)">
-        <div className="hz-bar">
-          <ConfigBar chat={chat(options({ permission: 'ask-first', ultra: false }))} />
+          <ConfigBar
+            chat={chat(options({ permission: 'ask-first', ultra: true, size: 'unbounded' }))}
+          />
         </div>
       </Row>
 
@@ -219,6 +250,103 @@ function Harness(): JSX.Element {
           ))}
         </div>
       </Row>
+    </div>
+  )
+}
+
+
+/** The slider as the popover shows it: same panel, laid inline. */
+function Panel({
+  label,
+  o,
+  reasons,
+  meteorProgress,
+  meteorFrom
+}: {
+  label: string
+  o: Options
+  reasons?: boolean
+  meteorProgress?: number
+  meteorFrom?: number
+}): JSX.Element {
+  return (
+    <div className="hz-chrome-row">
+      <div className="hz-chrome-label">{label}</div>
+      <div className="popover thinking-popover hz-popover">
+        <ThinkingSlider
+          chat={chat(options(o))}
+          reasons={reasons}
+          meteorProgress={meteorProgress}
+          meteorFrom={meteorFrom}
+        />
+      </div>
+    </div>
+  )
+}
+
+/** Just the thinking and ultra options: the chip alone in its bar. (Paused
+ *  still shows — the CLI's description says "suspended".) */
+function only(o: Options): ACPConfigOption[] {
+  return options(o).filter((op) => op.id === 'thinking' || op.id === 'ultra')
+}
+
+function ThinkingPage(): JSX.Element {
+  return (
+    <div className="hz-root hz-root--chrome">
+      <div className="hz-panels">
+        <Panel label="High" o={{ permission: 'yolo', ultra: false }} />
+        <Panel label="Ultra, settled (lit)" o={{ permission: 'yolo', ultra: true }} />
+        <Panel label="Ultra paused — Ask first" o={{ permission: 'ask-first', ultra: true }} />
+        <Panel label="Extra high" o={{ permission: 'yolo', ultra: false, thinking: 'x-high' }} />
+        <Panel label="Off (set elsewhere)" o={{ permission: 'yolo', ultra: false, thinking: 'off' }} />
+        <Panel
+          label="A model that doesn’t reason"
+          o={{ permission: 'yolo', ultra: false }}
+          reasons={false}
+        />
+      </div>
+      <Row label="The chip: High · Ultra lit · Ultra paused · Off">
+        <div className="hz-bar hz-chips">
+          <ConfigBar chat={chat(only({ permission: 'yolo', ultra: false }))} />
+          <ConfigBar chat={chat(only({ permission: 'yolo', ultra: true }))} />
+          <ConfigBar chat={chat(only({ permission: 'ask-first', ultra: true }))} />
+          <ConfigBar chat={chat(only({ permission: 'yolo', ultra: false, thinking: 'off' }))} />
+        </div>
+      </Row>
+    </div>
+  )
+}
+
+const FRAMES = [0.06, 0.14, 0.24, 0.36, 0.46, 0.52, 0.62, 0.76, 0.9]
+
+function MeteorPage(): JSX.Element {
+  const lit = { permission: 'yolo', ultra: true }
+  const single = PARAMS.get('meteorProgress')
+  if (single !== null) {
+    const from = PARAMS.get('meteorFrom')
+    return (
+      <div className="hz-root hz-root--chrome">
+        <Panel
+          label={`Meteor at ${single}`}
+          o={lit}
+          meteorProgress={Number(single)}
+          meteorFrom={from === null ? undefined : Number(from)}
+        />
+      </div>
+    )
+  }
+  return (
+    <div className="hz-root hz-root--chrome">
+      <div className="hz-panels">
+        {FRAMES.map((p) => (
+          <Panel key={p} label={`From Max · ${p}`} o={lit} meteorProgress={p} />
+        ))}
+      </div>
+      <div className="hz-panels">
+        {[0.1, 0.2, 0.32, 0.44].map((p) => (
+          <Panel key={p} label={`From Low · ${p}`} o={lit} meteorProgress={p} meteorFrom={0} />
+        ))}
+      </div>
     </div>
   )
 }

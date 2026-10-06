@@ -35,7 +35,10 @@ app.on('window-all-closed', () => {})
 
 app.disableHardwareAcceleration()
 app.commandLine.appendSwitch('disable-gpu')
-app.commandLine.appendSwitch('force-device-scale-factor', '1')
+// SHOT_SCALE renders at a higher pixel density, for looking closely at
+// something small (the thinking slider's meteor is a few pixels tall).
+const SCALE = Number(process.env.SHOT_SCALE || 1)
+app.commandLine.appendSwitch('force-device-scale-factor', String(SCALE))
 
 /**
  * Loads a page and waits for it to actually finish.
@@ -60,7 +63,7 @@ async function resizeViewport(win, height) {
     await contents.debugger.sendCommand('Emulation.setDeviceMetricsOverride', {
       width: WIDTH,
       height,
-      deviceScaleFactor: 1,
+      deviceScaleFactor: SCALE,
       mobile: false
     })
     // One frame for the new metrics to be laid out and painted.

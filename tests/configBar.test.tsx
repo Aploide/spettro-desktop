@@ -1,11 +1,9 @@
 // @vitest-environment jsdom
 //
-// The Ultra chip is locked under Ask first, where workflows cannot run
-// (internal/agent/workflow.go refuses them), so the user learns about it
-// before spending a click. A screenshot shows the chip looking disabled; only
-// a test shows that clicking it does nothing, and that the rule is read off
-// the sibling permission chip rather than remembered separately. (The
-// thinking slider replaces this chip.)
+// The config bar draws whatever the CLI advertises, with two exceptions that
+// are one control: thinking and Ultra are the thinking slider, opened from a
+// chip (tests/thinkingSlider.test.tsx covers the slider). There is no Ultra
+// toggle anywhere — only a test can show that something is *absent*.
 
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { render, screen, cleanup, fireEvent } from '@testing-library/react'
@@ -19,7 +17,8 @@ vi.mock('@renderer/state/store', () => ({
   call: (method: string, ...args: unknown[]) => {
     calls.push([method, args])
     return Promise.resolve()
-  }
+  },
+  useApp: () => null
 }))
 
 beforeEach(() => {
@@ -68,72 +67,53 @@ function chat(options: ACPConfigOption[]): ChatDetail {
   }
 }
 
-describe('the Ultra chip', () => {
-  it('toggles on when the permission level allows workflows', () => {
-    render(<ConfigBar chat={chat([permission('restricted'), ultra(false)])} />)
-    fireEvent.click(screen.getByText('Ultra'))
-    expect(calls).toEqual([['setBoolOption', ['chat-1', 'ultra', true]]])
-  })
-
-  it('refuses to arm under Ask first, and says why', () => {
-    // A workflow runs many agents at once; per-action approval prompts would
-    // flood the user, so workflows need Restricted or YOLO.
-    render(<ConfigBar chat={chat([permission('ask-first'), ultra(false)])} />)
-    const chip = screen.getByText('Ultra').closest('button') as HTMLButtonElement
-    fireEvent.click(chip)
-
-    expect(calls).toEqual([])
-    // aria-disabled rather than `disabled` on purpose: a disabled button in
-    // Chromium swallows the pointer events its own tooltip needs, which would
-    // leave a dead control and no explanation — the entire reason it is still
-    // on screen. So it stays focusable, carries the reason, and does not fire.
-    expect(chip.getAttribute('aria-disabled')).toBe('true')
-    expect(chip.disabled).toBe(false)
-    expect(chip.getAttribute('title') ?? '').toMatch(/Restricted or YOLO/i)
-  })
-
-  it('is still visible when it cannot be used', () => {
-    // A control that vanishes when you are not allowed to use it is a control
-    // nobody ever learns exists.
-    render(<ConfigBar chat={chat([permission('ask-first'), ultra(false)])} />)
-    expect(screen.getByText('Ultra')).toBeTruthy()
-  })
-
-  it('can always be turned OFF, whatever the permission level is', () => {
-    // The gate exists to stop workflows starting under ask-first. Someone who
-    // arrived at ultra-on and then lowered their permission has to be able to
-    // get out again.
-    render(<ConfigBar chat={chat([permission('ask-first'), ultra(true)])} />)
-    fireEvent.click(screen.getByText('Ultra'))
-    expect(calls).toEqual([['setBoolOption', ['chat-1', 'ultra', false]]])
-  })
-
-  it('reads the rule off the sibling chip, not off a value of its own', () => {
-    // The two chips sit in the same bar and must never disagree.
-    render(<ConfigBar chat={chat([permission('yolo'), ultra(false)])} />)
-    const chip = screen.getByText('Ultra').closest('button') as HTMLButtonElement
-    expect(chip.getAttribute('aria-disabled')).toBe('false')
-  })
-})
-
-describe('the Ultra chip’s words', () => {
-  it('say what Ultra does now: ultracode, run as workflows', () => {
-    // Ultra used to fan a prompt out in parallel; since the CLI's /ultra
-    // switch it means ultracode, and the words must not describe the old mode.
-    render(<ConfigBar chat={chat([permission('yolo'), ultra(false)])} />)
-    const title = screen.getByText('Ultra').closest('button')?.getAttribute('title') ?? ''
-    expect(title).toBe('Ultracode — substantial tasks run as multi-agent workflows (uses more tokens)')
-  })
-
-  it('pass on that a saved Ultra is paused under Ask first', () => {
-    const suspended: ACPConfigOption = {
-      ...ultra(true),
-      description:
-        'Ultracode: substantive tasks run as dynamic workflows (suspended under Ask first — workflows need Restricted or YOLO)'
+function thinking(value: string): ACPConfigOption {
+  return {
+    id: 'thinking',
+    name: 'Thinking',
+    category: 'thought_level',
+    kind: {
+      type: 'select',
+      currentValue: value,
+      groups: [],
+      flat: ['off', 'low', 'medium', 'high', 'x-high', 'max'].map((v) => ({ value: v, name: v }))
     }
-    render(<ConfigBar chat={chat([permission('ask-first'), suspended])} />)
-    const title = screen.getByText('Ultra').closest('button')?.getAttribute('title') ?? ''
-    expect(title).toMatch(/Paused under Ask first/)
+  }
+}
+
+describe('thinking and Ultra', () => {
+  it('are one chip, named for the level', () => {
+    render(<ConfigBar chat={chat([permission('restricted'), thinking('x-high'), ultra(false)])} />)
+    expect(screen.getByTestId('thinking-chip').textContent).toContain('Extra high')
+  })
+
+  it('never draw an Ultra toggle, whether Ultra is on or off', () => {
+    for (const on of [false, true]) {
+      cleanup()
+      render(<ConfigBar chat={chat([permission('restricted'), thinking('high'), ultra(on)])} />)
+      // Nothing toggles: no pressed-state button, no switch, no checkbox.
+      expect(document.querySelector('[aria-pressed]')).toBeNull()
+      expect(screen.queryByRole('switch')).toBeNull()
+      expect(screen.queryByRole('checkbox')).toBeNull()
+      // Besides the thinking chip, the only button is the permission chip.
+      const others = screen
+        .getAllByRole('button')
+        .filter((b) => b.getAttribute('data-testid') !== 'thinking-chip')
+      expect(others.map((b) => b.textContent)).toEqual(['Restricted'])
+    }
+  })
+
+  it('show Ultra on the chip when it is on', () => {
+    render(<ConfigBar chat={chat([permission('restricted'), thinking('high'), ultra(true)])} />)
+    const chip = screen.getByTestId('thinking-chip')
+    expect(chip.textContent).toContain('Ultra')
+    expect(chip.getAttribute('title')).toMatch(/ultracode/)
+  })
+
+  it('open the slider from the chip', () => {
+    render(<ConfigBar chat={chat([permission('restricted'), thinking('high'), ultra(false)])} />)
+    fireEvent.click(screen.getByTestId('thinking-chip'))
+    expect(screen.getByRole('slider').getAttribute('aria-valuetext')).toBe('High')
   })
 })
 

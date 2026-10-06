@@ -182,6 +182,10 @@ function select(
   }
 }
 
+/** The thinking slider, opened over the composer: at High, or with Ultra
+ *  saved under Ask first (paused, offering Restricted). */
+const THINKING_PAUSED = MODE === 'thinking-paused'
+
 const OPTIONS: ACPConfigOption[] = [
   select('mode', 'Mode', 'coding', [
     { value: 'plan', name: 'Plan' },
@@ -189,16 +193,28 @@ const OPTIONS: ACPConfigOption[] = [
     { value: 'ask', name: 'Ask' }
   ]),
   select('model', 'Model', 'anthropic:sonnet', [{ value: 'anthropic:sonnet', name: 'Claude Sonnet' }]),
-  select('permission', 'Permission', 'restricted', [
+  select('permission', 'Permission', THINKING_PAUSED ? 'ask-first' : 'restricted', [
     { value: 'ask-first', name: 'Ask first' },
     { value: 'restricted', name: 'Restricted' },
     { value: 'yolo', name: 'YOLO' }
   ]),
+  // config_options.go thinkingConfigOption / ultraConfigOption.
   select('thinking', 'Thinking', 'high', [
+    { value: 'off', name: 'Off' },
     { value: 'low', name: 'Low' },
-    { value: 'high', name: 'High' }
+    { value: 'medium', name: 'Medium' },
+    { value: 'high', name: 'High' },
+    { value: 'x-high', name: 'X-High' },
+    { value: 'max', name: 'Max' }
   ]),
-  { id: 'ultra', name: 'Ultra', kind: { type: 'boolean', currentValue: false } }
+  {
+    id: 'ultra',
+    name: 'Ultra',
+    description: THINKING_PAUSED
+      ? 'Ultracode: substantive tasks run as dynamic workflows (suspended under Ask first — workflows need Restricted or YOLO)'
+      : 'Ultracode: substantive tasks run as dynamic workflows',
+    kind: { type: 'boolean', currentValue: THINKING_PAUSED }
+  }
 ]
 
 const BUSY = MODE === 'busy'
@@ -555,6 +571,9 @@ function pushEvents(): void {
   if (MODE === 'settings') setTimeout(() => press(','), 60)
   if (MODE === 'switcher') setTimeout(() => press('k'), 60)
   if (MODE === 'welcome-folders') setTimeout(() => click('[data-testid="project-chip"]'), 60)
+  if (MODE === 'thinking' || MODE === 'thinking-paused') {
+    setTimeout(() => click('[data-testid="thinking-chip"]'), 60)
+  }
   if (MODE === 'sidebar-menu') {
     // A right-click near the row's end: the "…" button only exists on hover,
     // which an offscreen page never has, and both open the same menu.

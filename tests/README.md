@@ -37,7 +37,9 @@ the things a screenshot renders perfectly while being wrong:
 | `shellLayout.test.ts` | The sidebar's order (recency, pinned first, archived apart) — Ctrl/Cmd+1…9 and the switcher count rows in it — plus the row timestamp and the "this is your whole home folder" check. |
 | `appShell.test.tsx` | The persistent shell in jsdom: nothing selected shows the new-session view (never the old full-window picker), Ctrl+1/2 open sidebar rows, no global shortcut fires while focus is in the terminal (Ctrl+N included) or behind an open sheet, Ctrl+B collapses (persisted) and the header reopens, Ctrl+K filters and opens (Tab stays in it, Escape closes), rename from the "…" menu, Tab closes a row menu, Delete needs a second click, the same starter chip refills the composer twice, the first message waits for a home-folder confirmation and refuses a vanished folder, and otherwise creates the chat in the chosen folder. |
 | `setConfigValue.test.ts` | Telling an agent's refusal from a dead pipe. Getting it wrong is invisible until you look closely. |
-| `configBar.test.tsx` | That the Ultra chip *does nothing* when locked — a screenshot only shows that it looks locked — and says what Ultra is now (ultracode). The workflow size chip labels tiers in agents, read from the CLI's own descriptions. |
+| `configBar.test.tsx` | That thinking and Ultra are one chip named for the level, and that no Ultra toggle exists anywhere — nothing pressed, no switch, no checkbox; only a test can show something is absent. The workflow size chip labels tiers in agents, read from the CLI's own descriptions. |
+| `thinking.test.ts` | The thinking slider's arithmetic: which stop the options put the thumb on (Ultra whenever ultracode is on, "Extra high" for `x-high`, Off resting left for `off`, Low → Max order whatever the CLI's), when Ultra is paused, and which calls a move sends — Ultra is thinking *high* plus ultracode, never max, and leaving it turns ultracode off first. The meteor's run is reproducible from its seed. |
+| `thinkingSlider.test.tsx` | The slider as a user drives it (jsdom): a real `role="slider"`, arrow keys and Home/End, Ultra's two calls strictly one after the other, a burst of key presses collapsing to the last, the Paused prompt's Switch and Keep Ask first, a non-reasoning model disabling it — and the meteor playing on the way into Ultra (a key, `/ultra`, the pause lifting) but never for a slider drawn with Ultra already on. |
 | `workflowStudio.test.tsx` | That Run saves first, refuses to run a broken script, and that an old CLI says so instead of showing an empty project. |
 | `theme.test.ts` | That the light palette declares every token the dark one does (a missing one silently inherits the dark value), that view CSS uses tokens rather than hex, that `.icon-btn`/`.sheet-card` are defined once, and that a bad `appearance` — on disk or over IPC — can't reach `nativeTheme`, while a good one is applied, persisted and announced in app-state. |
 | `appearancePane.test.tsx` | Settings › General's theme control: the stored choice shows as checked, it is one tab stop, and clicks and arrow keys (wrapping) send `setAppearance`. |
@@ -55,8 +57,8 @@ these; these are not a substitute for them.
 
 ## Adding one
 
-Assert on the promise, not the implementation. The Ultra chip is the worked
-example: it uses `aria-disabled` rather than `disabled` because a disabled
-button in Chromium swallows the pointer events its own tooltip needs — so the
-test asserts the click does not fire and the reason is readable, not that a
-particular attribute is set. A test that pins the mechanism blocks the fix.
+Assert on the promise, not the implementation. The thinking slider is the
+worked example: its tests say that reaching Ultra sends thinking high and then
+ultracode on, in that order, and that the meteor plays on the way in and not
+on a re-render — not which state variable holds the flight or how the queue is
+built. A test that pins the mechanism blocks the fix.

@@ -46,10 +46,14 @@ SCENES=(
   studio:empty
   studio:broken
   chrome
+  chrome:thinking
+  chrome:meteor
   app:welcome
   app:welcome-empty
   app:welcome-folders
   app:chat
+  app:thinking
+  app:thinking-paused
   app:sidebar-many
   app:sidebar-menu
   app:collapsed

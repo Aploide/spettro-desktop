@@ -114,6 +114,14 @@
   --plan-plus: #86efac;
   --plan-rainbow: #ff6b6b, #ff9e4f, #ffd93d, #6bcb77, #4d96ff, #c77dff;
 
+  /* Ultra's fire, coolest to hottest: the thinking slider's segment past Max,
+     its lit thumb, and the meteor that arrives there (the canvas reads these
+     same tokens). On dark the sparks add light, so they run up to white. */
+  --ultra-ember: #e0452b;
+  --ultra-flame: #ff8a3d;
+  --ultra-spark: #ffd36b;
+  --ultra-core: #fffbea;
+
   /* Aliases kept for one release so views not yet moved to the names above
      keep rendering. */
   --assistant-bubble: var(--surface-raised);
@@ -176,6 +184,13 @@
     --plan-pro: #7c3aed;
     --plan-plus: #16a34a;
     --plan-rainbow: #ff6b6b, #ff9e4f, #ffd93d, #6bcb77, #4d96ff, #c77dff;
+
+    /* White-hot vanishes on a white popover, so light fire is a shade deeper
+       and its core stays a pale gold the flame ring can outline. */
+    --ultra-ember: #c2341d;
+    --ultra-flame: #e8641c;
+    --ultra-spark: #f2a516;
+    --ultra-core: #fff1c2;
 
     --assistant-bubble: var(--surface-raised);
     --user-bubble: var(--user-bubble-bg);

@@ -1,0 +1,296 @@
+// @vitest-environment jsdom
+//
+// The thinking slider as a user drives it: arrow keys, the Ultra stop's two
+// calls in order, the Paused prompt under Ask first, and the meteor — which
+// must play when Ultra is reached and never merely because the slider was
+// drawn with Ultra already on.
+
+import { describe, expect, it, vi, beforeEach, beforeAll } from 'vitest'
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
+import ThinkingSlider from '@renderer/views/chat/ThinkingSlider'
+import type { ChatDetail } from '@shared/model'
+import type { ACPConfigOption } from '@shared/acp'
+
+/** Every call, and a way to hold one open so ordering can be checked. */
+const calls: [string, unknown[]][] = []
+let hold: { release: () => void } | null = null
+let holding = false
+
+vi.mock('@renderer/state/store', () => ({
+  call: (method: string, ...args: unknown[]) => {
+    calls.push([method, args])
+    if (!holding) return Promise.resolve()
+    return new Promise<void>((resolve) => {
+      hold = { release: resolve }
+    })
+  },
+  useApp: () => null
+}))
+
+beforeAll(() => {
+  // jsdom has no canvas; the slider keeps the meteor's timing without one.
+  HTMLCanvasElement.prototype.getContext = (() => null) as never
+})
+
+beforeEach(() => {
+  calls.length = 0
+  hold = null
+  holding = false
+  cleanup()
+})
+
+function options(o: { thinking: string; ultra: boolean; permission?: string; suspended?: boolean }): ACPConfigOption[] {
+  return [
+    {
+      id: 'permission',
+      name: 'Permission',
+      kind: {
+        type: 'select',
+        currentValue: o.permission ?? 'restricted',
+        groups: [],
+        flat: [
+          { value: 'ask-first', name: 'Ask first' },
+          { value: 'restricted', name: 'Restricted' },
+          { value: 'yolo', name: 'YOLO' }
+        ]
+      }
+    },
+    {
+      id: 'thinking',
+      name: 'Thinking',
+      kind: {
+        type: 'select',
+        currentValue: o.thinking,
+        groups: [],
+        flat: ['off', 'low', 'medium', 'high', 'x-high', 'max'].map((v) => ({ value: v, name: v }))
+      }
+    },
+    {
+      id: 'ultra',
+      name: 'Ultra',
+      description: o.suspended
+        ? 'Ultracode: substantive tasks run as dynamic workflows (suspended under Ask first — workflows need Restricted or YOLO)'
+        : 'Ultracode: substantive tasks run as dynamic workflows',
+      kind: { type: 'boolean', currentValue: o.ultra }
+    }
+  ]
+}
+
+function chat(opts: ACPConfigOption[]): ChatDetail {
+  return {
+    id: 'chat-1',
+    title: 't',
+    projectPath: '/p',
+    acpSessionId: 'acp-1',
+    isPinned: false,
+    isArchived: false,
+    isBusy: false,
+    createdAt: 0,
+    items: [],
+    configOptions: opts,
+    commands: [],
+    plan: [],
+    usage: null,
+    lastTurn: null,
+    sessionTokens: 0
+  }
+}
+
+const slider = (): HTMLElement => screen.getByRole('slider')
+const press = (key: string): void => {
+  fireEvent.keyDown(slider(), { key })
+}
+/** Lets queued calls run to completion. */
+const settle = async (): Promise<void> => {
+  await act(async () => {
+    for (let i = 0; i < 5; i++) await Promise.resolve()
+  })
+}
+
+describe('the slider', () => {
+  it('is a real slider: role, range and the value in words', () => {
+    render(<ThinkingSlider chat={chat(options({ thinking: 'x-high', ultra: false }))} />)
+    expect(slider().getAttribute('aria-valuemin')).toBe('0')
+    expect(slider().getAttribute('aria-valuemax')).toBe('5')
+    expect(slider().getAttribute('aria-valuenow')).toBe('3')
+    expect(slider().getAttribute('aria-valuetext')).toBe('Extra high')
+  })
+
+  it('shows Ultra when ultracode is on, and Off when thinking is off', () => {
+    render(<ThinkingSlider chat={chat(options({ thinking: 'high', ultra: true }))} />)
+    expect(slider().getAttribute('aria-valuetext')).toBe('Ultra')
+    cleanup()
+    render(<ThinkingSlider chat={chat(options({ thinking: 'off', ultra: false }))} />)
+    expect(slider().getAttribute('aria-valuetext')).toBe('Off')
+    expect(screen.getByText('Off')).toBeTruthy()
+  })
+
+  it('steps with the arrow keys and jumps with Home', async () => {
+    render(<ThinkingSlider chat={chat(options({ thinking: 'medium', ultra: false }))} />)
+    press('ArrowRight')
+    await settle()
+    expect(calls).toEqual([['setSelectOption', ['chat-1', 'thinking', 'high']]])
+    calls.length = 0
+    press('Home')
+    await settle()
+    expect(calls).toEqual([['setSelectOption', ['chat-1', 'thinking', 'low']]])
+  })
+
+  it('moves the thumb at once, before the CLI answers', () => {
+    holding = true
+    render(<ThinkingSlider chat={chat(options({ thinking: 'medium', ultra: false }))} />)
+    press('ArrowLeft')
+    expect(slider().getAttribute('aria-valuetext')).toBe('Low')
+  })
+
+  it('goes nowhere further left from Off', async () => {
+    render(<ThinkingSlider chat={chat(options({ thinking: 'off', ultra: false }))} />)
+    press('ArrowLeft')
+    await settle()
+    expect(calls).toEqual([])
+    press('ArrowRight')
+    await settle()
+    expect(calls).toEqual([['setSelectOption', ['chat-1', 'thinking', 'low']]])
+  })
+})
+
+describe('the Ultra stop', () => {
+  it('sets thinking high, then — once that is answered — ultracode on', async () => {
+    holding = true
+    render(<ThinkingSlider chat={chat(options({ thinking: 'max', ultra: false }))} />)
+    press('ArrowRight')
+    await settle()
+    // One call in flight; the second waits for its answer.
+    expect(calls).toEqual([['setSelectOption', ['chat-1', 'thinking', 'high']]])
+    holding = false
+    await act(async () => hold?.release())
+    await settle()
+    expect(calls).toEqual([
+      ['setSelectOption', ['chat-1', 'thinking', 'high']],
+      ['setBoolOption', ['chat-1', 'ultra', true]]
+    ])
+  })
+
+  it('turns ultracode off first when leaving, then sets the level', async () => {
+    render(<ThinkingSlider chat={chat(options({ thinking: 'high', ultra: true }))} />)
+    press('ArrowLeft')
+    await settle()
+    expect(calls).toEqual([
+      ['setBoolOption', ['chat-1', 'ultra', false]],
+      ['setSelectOption', ['chat-1', 'thinking', 'max']]
+    ])
+  })
+
+  it('collapses moves made while one is in flight into the last', async () => {
+    holding = true
+    render(<ThinkingSlider chat={chat(options({ thinking: 'low', ultra: false }))} />)
+    press('ArrowRight') // medium: sent, held
+    press('ArrowRight') // high: queued
+    press('ArrowRight') // x-high: replaces it
+    holding = false
+    await act(async () => hold?.release())
+    await settle()
+    expect(calls).toEqual([
+      ['setSelectOption', ['chat-1', 'thinking', 'medium']],
+      ['setSelectOption', ['chat-1', 'thinking', 'x-high']]
+    ])
+  })
+
+  it('is paused under Ask first, and offers Restricted', async () => {
+    render(
+      <ThinkingSlider
+        chat={chat(options({ thinking: 'high', ultra: true, permission: 'ask-first', suspended: true }))}
+      />
+    )
+    expect(screen.getByText('Ultra · Paused')).toBeTruthy()
+    expect(slider().getAttribute('aria-valuetext')).toMatch(/paused/)
+    fireEvent.click(screen.getByText('Switch'))
+    expect(calls).toEqual([['setSelectOption', ['chat-1', 'permission', 'restricted']]])
+  })
+
+  it('lets the user keep Ask first, and stays saved', () => {
+    render(
+      <ThinkingSlider
+        chat={chat(options({ thinking: 'high', ultra: true, permission: 'ask-first', suspended: true }))}
+      />
+    )
+    fireEvent.click(screen.getByText('Keep Ask first'))
+    expect(screen.queryByText('Switch')).toBeNull()
+    expect(calls).toEqual([])
+    expect(slider().getAttribute('aria-valuenow')).toBe('5')
+  })
+})
+
+describe('the meteor', () => {
+  const meteor = (): Element | null => document.querySelector('.thinking-meteor')
+
+  it('plays when Ultra is reached', async () => {
+    holding = true
+    render(<ThinkingSlider chat={chat(options({ thinking: 'max', ultra: false }))} />)
+    expect(meteor()).toBeNull()
+    press('End')
+    expect(meteor()).not.toBeNull()
+  })
+
+  it('plays when Ultra arrives from elsewhere (/ultra, another session)', () => {
+    const { rerender } = render(
+      <ThinkingSlider chat={chat(options({ thinking: 'high', ultra: false }))} />
+    )
+    rerender(<ThinkingSlider chat={chat(options({ thinking: 'high', ultra: true }))} />)
+    expect(meteor()).not.toBeNull()
+  })
+
+  it('does not play for a slider drawn with Ultra already on, or re-drawn there', () => {
+    const { rerender } = render(
+      <ThinkingSlider chat={chat(options({ thinking: 'high', ultra: true }))} />
+    )
+    expect(meteor()).toBeNull()
+    rerender(<ThinkingSlider chat={chat(options({ thinking: 'high', ultra: true }))} />)
+    expect(meteor()).toBeNull()
+  })
+
+  it('does not play for a paused Ultra, and plays once the pause lifts', () => {
+    const { rerender } = render(
+      <ThinkingSlider chat={chat(options({ thinking: 'max', ultra: false, permission: 'ask-first' }))} />
+    )
+    rerender(
+      <ThinkingSlider
+        chat={chat(options({ thinking: 'high', ultra: true, permission: 'ask-first', suspended: true }))}
+      />
+    )
+    expect(meteor()).toBeNull()
+    rerender(<ThinkingSlider chat={chat(options({ thinking: 'high', ultra: true }))} />)
+    expect(meteor()).not.toBeNull()
+  })
+
+  it('burns out, leaving the lit thumb', async () => {
+    vi.useFakeTimers()
+    try {
+      const { rerender } = render(
+        <ThinkingSlider chat={chat(options({ thinking: 'high', ultra: false }))} />
+      )
+      rerender(<ThinkingSlider chat={chat(options({ thinking: 'high', ultra: true }))} />)
+      expect(meteor()).not.toBeNull()
+      await act(async () => {
+        vi.advanceTimersByTime(1000)
+      })
+      expect(meteor()).toBeNull()
+      expect(document.querySelector('.thinking-slider--ultra')).not.toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
+
+describe('a model that doesn’t reason', () => {
+  it('disables the slider and says why', async () => {
+    render(
+      <ThinkingSlider chat={chat(options({ thinking: 'high', ultra: false }))} reasons={false} />
+    )
+    expect(slider().getAttribute('aria-disabled')).toBe('true')
+    press('ArrowRight')
+    await settle()
+    expect(calls).toEqual([])
+    expect(screen.getByText(/doesn’t think before answering/)).toBeTruthy()
+  })
+})

@@ -4,20 +4,14 @@
 // booleans render as a toggle chip. Fully data-driven — whatever the CLI
 // advertises shows up without code changes.
 //
-// Ultra is the one option that gets a look of its own, because it is the one
-// option that changes what a turn *is*: everything else picks a model or a
-// mode, Ultra (ultracode) runs substantial tasks as multi-agent workflows.
-// Drawn as an anonymous boolean it reads as a preference, so here it is amber
-// and filled when armed — the most charged thing in the bar.
-//
-// Workflows run many agents at once, and per-action approval prompts would
-// flood the user, so they need the Restricted or YOLO permission level
-// (internal/acp/config_options.go). The chip shows that as an unavailable
-// control with the reason attached rather than hiding itself: a control that
-// disappears when you are not allowed to use it is a control nobody ever
-// learns exists. (The thinking slider replaces this chip; until then it keeps
-// its lock.) The special-casing keys off the advertised option ids only — if
-// the CLI stops sending `ultra`, the bar simply stops drawing it.
+// Thinking and Ultra are one control, not two: the thinking slider
+// (ThinkingSlider.tsx), whose stop past Max is Ultra — thinking high plus
+// ultracode, where substantial tasks run as multi-agent workflows. It sits
+// where the thinking option comes in the CLI's order, as a chip that opens the
+// slider. There is deliberately no Ultra toggle anywhere: a second switch for
+// the same dial is how the two used to disagree. The special-casing keys off
+// the advertised option ids only — if the CLI stops sending `thinking`, the
+// bar simply stops drawing it.
 //
 // Workflow size is a plain select, but its tiers are labelled in agents ("~10
 // agents") rather than by the tier's bare name, which says nothing on its own.
@@ -29,47 +23,25 @@ import type { ChatDetail } from '@shared/model'
 import { call } from '@renderer/state/store'
 import { modeColor } from '@renderer/design/theme'
 import Popover from '@renderer/views/common/Popover'
+import { ThinkingChip } from './ThinkingSlider'
+import { THINKING_ID, ULTRA_ID } from './thinking'
 
 /** The CLI's option ids (internal/acp/config_options.go). */
-const ULTRA_ID = 'ultra'
-const PERMISSION_ID = 'permission'
 const WORKFLOW_SIZE_ID = 'workflow_size'
-/** The permission level workflows cannot run under. */
-const ASK_FIRST = 'ask-first'
-
-/** What Ultra is, in the words the rest of the app uses for it. */
-const ULTRA_DESCRIPTION =
-  'Ultracode — substantial tasks run as multi-agent workflows (uses more tokens)'
-
-/** Why the Ultra chip is unavailable. */
-const ULTRA_LOCKED_REASON =
-  'Workflows need the Restricted or YOLO permission level — change Permission first'
 
 export default function ConfigBar({ chat }: { chat: ChatDetail }): JSX.Element {
-  // Read the sibling permission select rather than remembering a level of our
-  // own: the two chips sit in the same bar and must never disagree.
-  const permission = chat.configOptions.find((o) => o.id === PERMISSION_ID)
-  const ultraLocked =
-    permission?.kind.type === 'select' && permission.kind.currentValue === ASK_FIRST
-
   return (
     <div className="config-bar">
       {chat.configOptions.map((option) =>
-        option.kind.type === 'select' ? (
+        option.id === THINKING_ID ? (
+          <ThinkingChip key={option.id} chat={chat} />
+        ) : option.id === ULTRA_ID ? null : option.kind.type === 'select' ? (
           <SelectChip
             key={option.id}
             option={option}
             kind={option.kind}
             hint={option.id === WORKFLOW_SIZE_ID ? workflowSizeHint : undefined}
             onSelect={(value) => void call('setSelectOption', chat.id, option.id, value)}
-          />
-        ) : option.id === ULTRA_ID ? (
-          <UltraChip
-            key={option.id}
-            option={option}
-            isOn={option.kind.currentValue}
-            locked={ultraLocked && !option.kind.currentValue}
-            onToggle={(value) => void call('setBoolOption', chat.id, option.id, value)}
           />
         ) : (
           <BooleanChip
@@ -244,66 +216,6 @@ function BooleanChip({
 }
 
 // ---------------------------------------------------------------------------
-// Ultra chip
-// ---------------------------------------------------------------------------
-
-/**
- * The Ultra toggle: same capsule as every other chip, amber and filled when
- * armed so workflows never run unannounced.
- *
- * Locked is `aria-disabled`, not `disabled`. A `disabled` button in Chromium
- * swallows the pointer events its own tooltip needs, which would leave the
- * user with a dead control and no explanation — the entire point of showing
- * it. So the chip stays focusable and hoverable, carries the reason in its
- * title, and simply does not fire.
- *
- * Turning Ultra *off* is never locked: the gate only exists to stop workflows
- * starting under per-action approvals, and a user who somehow arrived at
- * ultra-on with Permission back on "Ask first" must be able to get out.
- */
-function UltraChip({
-  option,
-  isOn,
-  locked,
-  onToggle
-}: {
-  option: ACPConfigOption
-  isOn: boolean
-  locked: boolean
-  onToggle: (value: boolean) => void
-}): JSX.Element {
-  const className =
-    'config-chip config-chip--ultra' +
-    (isOn ? ' config-chip--ultra-on' : '') +
-    (locked ? ' config-chip--locked' : '')
-  return (
-    <button
-      type="button"
-      className={className}
-      aria-disabled={locked}
-      aria-pressed={isOn}
-      title={
-        locked
-          ? ULTRA_LOCKED_REASON
-          : // The CLI says so in the description when Ask first suspends a
-            // saved Ultra (config_options.go ultraConfigOption).
-            (option.description ?? '').includes('suspended')
-            ? `${ULTRA_DESCRIPTION}. Paused under Ask first — workflows need Restricted or YOLO.`
-            : ULTRA_DESCRIPTION
-      }
-      onClick={() => {
-        if (locked) return
-        onToggle(!isOn)
-      }}
-    >
-      <BoltIcon filled={isOn} />
-      <span className="config-chip-label">{option.name}</span>
-      {locked && <LockIcon />}
-    </button>
-  )
-}
-
-// ---------------------------------------------------------------------------
 // Icons (symbol(for:) port + chrome)
 // ---------------------------------------------------------------------------
 
@@ -394,15 +306,6 @@ function CheckIcon(): JSX.Element {
   return (
     <svg width="11" height="11" viewBox="0 0 16 16" fill="none" aria-hidden>
       <path d="m2.5 8.5 3.7 3.7 7.3-8.4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  )
-}
-
-function LockIcon(): JSX.Element {
-  return (
-    <svg className="config-chip-lock" width="10" height="10" viewBox="0 0 16 16" fill="none" aria-hidden>
-      <rect x="3.5" y="7" width="9" height="7" rx="1.6" stroke="currentColor" strokeWidth="1.4" />
-      <path d="M5.6 7V5.2a2.4 2.4 0 0 1 4.8 0V7" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
     </svg>
   )
 }

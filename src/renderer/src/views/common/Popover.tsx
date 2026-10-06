@@ -62,8 +62,13 @@ export default function Popover({
       const panelW = panel.offsetWidth
       // offsetHeight, not scrollHeight: it already respects the panel's own
       // CSS max-height (the config menu caps itself at 60vh), so a 200-model
-      // list stays a menu instead of becoming a full-height wall.
+      // list stays a menu instead of becoming a full-height wall. The cap
+      // this function set last time is lifted first, or a panel that grew
+      // (the thinking slider's Ask first prompt) would stay its old height.
+      const inlineCap = panel.style.maxHeight
+      panel.style.maxHeight = ''
       const panelH = panel.offsetHeight
+      panel.style.maxHeight = inlineCap
 
       const spaceAbove = a.top - MARGIN - GAP
       const spaceBelow = vh - a.bottom - MARGIN - GAP
@@ -81,10 +86,19 @@ export default function Popover({
       setPos({ left, top, maxHeight })
     }
     place()
+    // Content that changes size while open is placed again. Its first child
+    // is watched too: a capped panel doesn't grow when its content does.
+    const panel = panelRef.current
+    const observer = typeof ResizeObserver === 'function' && panel ? new ResizeObserver(place) : null
+    if (observer && panel) {
+      observer.observe(panel)
+      if (panel.firstElementChild) observer.observe(panel.firstElementChild)
+    }
     window.addEventListener('resize', place)
     // Reposition while any ancestor scrolls (capture catches them all).
     window.addEventListener('scroll', place, true)
     return () => {
+      observer?.disconnect()
       window.removeEventListener('resize', place)
       window.removeEventListener('scroll', place, true)
     }

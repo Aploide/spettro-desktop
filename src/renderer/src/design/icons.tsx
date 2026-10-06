@@ -20,6 +20,7 @@ export type IconName =
   | 'magnifyingglass'
   | 'terminal'
   | 'brain'
+  | 'flame'
   | 'globe'
   | 'arrow.triangle.2.circlepath'
   | 'wrench.and.screwdriver'
@@ -165,6 +166,14 @@ const STROKE_ICONS: Record<string, ReactNode> = {
       <rect x="9.9" y="11.6" width="5" height="3" rx="0.8" />
       <path d="M8 4.4v3.2" />
       <path d="M3.6 11.6V7.6h8.8v4" />
+    </>
+  ),
+  // Ultra, the stop past Max on the thinking slider: a flame with its hot
+  // inner tongue.
+  flame: (
+    <>
+      <path d="M8 1.5c.5 2.4 4.3 4.2 4.3 8.2A4.3 4.3 0 0 1 8 14.5a4.3 4.3 0 0 1-4.3-4.8c.1-1.6.9-2.8 1.8-3.5.1 1.3.6 2.2 1.5 2.6C6.9 6.3 7.2 3.8 8 1.5z" />
+      <path d="M8 14.5c-1.2 0-2-.9-2-2.1 0-1.4 1.1-2.1 2-3.4.9 1.3 2 2 2 3.4 0 1.2-.8 2.1-2 2.1z" />
     </>
   ),
   // Ultra: substantial tasks run as multi-agent workflows.

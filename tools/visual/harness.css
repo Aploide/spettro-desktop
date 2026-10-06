@@ -101,3 +101,17 @@ body,
   gap: 6px;
   max-width: 760px;
 }
+
+/* The thinking slider's panels, as the popover draws them but inline. */
+.hz-panels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 24px 28px;
+}
+.hz-popover {
+  position: static;
+}
+.hz-chips {
+  display: flex;
+  gap: 12px;
+}

@@ -125,8 +125,15 @@ export interface RendererApi {
 
   // Prompting
   /** While the chat is busy this steers the running turn rather than
-   *  starting another (the message's `steering` field tracks it). */
-  send(chatId: string, text: string, attachments: { data: string; mimeType: string }[]): Promise<void>
+   *  starting another (the message's `steering` field tracks it).
+   *  `mentions` are project-relative paths the user @-mentioned; each one
+   *  still written in the text as `@<path>` goes to the agent as a file. */
+  send(
+    chatId: string,
+    text: string,
+    attachments: { data: string; mimeType: string }[],
+    mentions?: string[]
+  ): Promise<void>
   cancel(chatId: string): Promise<void>
   /** Sends the chat's newest prompt again (Try again after a failed turn);
    *  ignored while the chat is busy. */
@@ -214,6 +221,9 @@ export interface RendererApi {
   showItemInFolder(path: string): Promise<void>
   /** Uncommitted-change stats for the header's git chip (GitStatModel port). */
   gitStat(projectPath: string): Promise<GitStat>
+  /** The folder's files, project-relative, for the composer's @-mentions:
+   *  what git tracks or would track, else a capped walk. */
+  listProjectFiles(projectPath: string): Promise<string[]>
 }
 
 export type RendererApiMethod = keyof RendererApi

@@ -16,6 +16,11 @@ export type RPCID = number | string
 export type ACPContentBlock =
   | { type: 'text'; text: string }
   | { type: 'image'; data: string; mimeType: string }
+  /** A file the user @-mentioned. spettro reads it before the turn starts
+   *  (a RequiredRead) and writes it into the prompt as `@<path>` where the
+   *  link sits among the text blocks (internal/acp/content.go
+   *  readPromptContent). */
+  | { type: 'resource_link'; uri: string; name: string }
 
 // ---------------------------------------------------------------------------
 // Config options (the data-driven ConfigBar)

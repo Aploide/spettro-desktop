@@ -42,7 +42,7 @@ export default function NewSessionView(): JSX.Element {
     if (picked) choose(picked)
   }, [choose])
 
-  const submit = (text: string, attachments: SubmitAttachment[]): boolean => {
+  const submit = (text: string, attachments: SubmitAttachment[], mentions: string[]): boolean => {
     if (missing || needsConfirm) {
       // Keep the message and point at what needs answering first.
       setNudge((n) => n + 1)
@@ -50,7 +50,7 @@ export default function NewSessionView(): JSX.Element {
     }
     void (async () => {
       const chatId = await call('newChat', path)
-      if (chatId) await call('send', chatId, text, attachments)
+      if (chatId) await call('send', chatId, text, attachments, mentions)
     })()
     return true
   }

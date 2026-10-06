@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { AcpAgent, AcpConnection, parseAgentCapabilities, parseToolCallEvent } from '@main/acp'
 import { AppModel } from '@main/model/appModel'
 import type { ChatSession } from '@main/model/chatSession'
@@ -400,6 +401,29 @@ describe('sending', () => {
     ])
     const user = session.items.find((i) => i.kind === 'message' && i.message.role === 'user')
     expect(user?.kind === 'message' && user.message.text).toBe('')
+  })
+
+  it('sends an @-mentioned file as a resource link where it was typed', async () => {
+    // content.go readPromptContent joins the blocks in order and writes each
+    // link as "@<path>", so the link sits in the sentence instead of the
+    // mention's text, and the file becomes a required read.
+    liveModel()
+    const session = await liveChat()
+    fake.handlers['session/prompt'] = () => promptResult({})
+    model.send(session.id, 'compare @src/a.ts with @lib/b c.ts.', [], null, ['src/a.ts', 'lib/b c.ts', 'gone.ts'])
+    await settle()
+
+    const prompt = (fake.calls('session/prompt')[0].params as { prompt: JSONValue[] }).prompt
+    expect(prompt).toEqual([
+      { type: 'text', text: 'compare ' },
+      { type: 'resource_link', uri: pathToFileURL(join(dir, 'src/a.ts')).href, name: 'src/a.ts' },
+      { type: 'text', text: ' with ' },
+      { type: 'resource_link', uri: pathToFileURL(join(dir, 'lib/b c.ts')).href, name: 'lib/b c.ts' },
+      { type: 'text', text: '.' }
+    ])
+    // The bubble keeps what the user wrote.
+    const user = session.items.find((i) => i.kind === 'message' && i.message.role === 'user')
+    expect(user?.kind === 'message' && user.message.text).toBe('compare @src/a.ts with @lib/b c.ts.')
   })
 
   it('steers the running turn with a message sent while busy', async () => {

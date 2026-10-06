@@ -65,6 +65,14 @@ export type IconName =
   | 'doc.on.doc'
   | 'xmark'
   | 'arrow.clockwise'
+  | 'paperclip'
+  | 'slider.horizontal.3'
+  | 'arrow.up'
+  | 'stop.fill'
+  | 'at'
+  | 'circle'
+  | 'circle.lefthalf.filled'
+  | 'checklist'
 
 /** gearshape: eight teeth round a ring, computed once. */
 const GEAR_TEETH = Array.from({ length: 8 }, (_, i) => {
@@ -262,6 +270,32 @@ const STROKE_ICONS: Record<string, ReactNode> = {
     </>
   ),
   plus: <path d="M8 2.75v10.5M2.75 8h10.5" strokeWidth="1.8" />,
+  paperclip: (
+    <path d="M13.2 7.6 8.1 12.7a3.2 3.2 0 0 1-4.5-4.5l5.6-5.6a2.1 2.1 0 0 1 3 3L6.6 11.2a1.05 1.05 0 0 1-1.5-1.5l5-5" />
+  ),
+  // Three rails with a knob each: "adjust settings".
+  'slider.horizontal.3': (
+    <>
+      <path d="M2 4h4.2M9.8 4H14M2 8h1.8M7.4 8H14M2 12h6.6M12.2 12H14" />
+      <circle cx="8" cy="4" r="1.8" />
+      <circle cx="5.6" cy="8" r="1.8" />
+      <circle cx="10.4" cy="12" r="1.8" />
+    </>
+  ),
+  'arrow.up': <path d="M8 13.25V2.75M3.75 7 8 2.75 12.25 7" strokeWidth="1.9" />,
+  at: (
+    <>
+      <circle cx="8" cy="8" r="2.6" />
+      <path d="M10.6 8v1a1.9 1.9 0 0 0 3.8 0V8a6.4 6.4 0 1 0-2.6 5.2" />
+    </>
+  ),
+  circle: <circle cx="8" cy="8" r="5.5" />,
+  checklist: (
+    <>
+      <path d="M2 4.2l1.2 1.2 2-2.2M2 10.7l1.2 1.2 2-2.2" />
+      <path d="M7.5 4.5H14M7.5 11H14" />
+    </>
+  ),
   'exclamationmark.triangle': (
     <>
       <path d="M8 1.9L15 13.6c.3.5-.05 1.15-.65 1.15H1.65c-.6 0-.95-.65-.65-1.15z" />
@@ -323,6 +357,14 @@ const STROKE_ICONS: Record<string, ReactNode> = {
 }
 
 const FILLED_ICONS: Record<string, ReactNode> = {
+  'stop.fill': <rect x="3.5" y="3.5" width="9" height="9" rx="2" fill="currentColor" stroke="none" />,
+  // A task under way: half done, still going.
+  'circle.lefthalf.filled': (
+    <>
+      <circle cx="8" cy="8" r="5.5" fill="none" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M8 2.5a5.5 5.5 0 0 0 0 11z" fill="currentColor" stroke="none" />
+    </>
+  ),
   'checkmark.circle.fill': (
     <>
       <circle cx="8" cy="8" r="7" fill="currentColor" stroke="none" />

@@ -1,13 +1,15 @@
 // @vitest-environment jsdom
 //
-// The config bar draws whatever the CLI advertises, with two exceptions that
-// are one control: thinking and Ultra are the thinking slider, opened from a
-// chip (tests/thinkingSlider.test.tsx covers the slider). There is no Ultra
-// toggle anywhere — only a test can show that something is *absent*.
+// The composer toolbar's option cluster: the mode chip, the thinking chip and
+// the settings button, whose popover holds everything else the CLI
+// advertises. Thinking and Ultra are one control — the thinking slider, opened
+// from a chip (tests/thinkingSlider.test.tsx covers the slider) — and there is
+// no Ultra toggle anywhere, in the bar or the popover: only a test can show
+// that something is *absent*.
 
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { render, screen, cleanup, fireEvent } from '@testing-library/react'
-import ConfigBar from '@renderer/views/chat/ConfigBar'
+import ConfigBar, { nextMode } from '@renderer/views/chat/ConfigBar'
 import type { ChatDetail } from '@shared/model'
 import type { ACPConfigOption } from '@shared/acp'
 
@@ -91,15 +93,23 @@ describe('thinking and Ultra', () => {
     for (const on of [false, true]) {
       cleanup()
       render(<ConfigBar chat={chat([permission('restricted'), thinking('high'), ultra(on)])} />)
-      // Nothing toggles: no pressed-state button, no switch, no checkbox.
-      expect(document.querySelector('[aria-pressed]')).toBeNull()
-      expect(screen.queryByRole('switch')).toBeNull()
-      expect(screen.queryByRole('checkbox')).toBeNull()
-      // Besides the thinking chip, the only button is the permission chip.
+      // Besides the thinking chip, the only button is the settings button,
+      // which names the permission level.
       const others = screen
         .getAllByRole('button')
         .filter((b) => b.getAttribute('data-testid') !== 'thinking-chip')
-      expect(others.map((b) => b.textContent)).toEqual(['Restricted'])
+      expect(others.map((b) => b.getAttribute('data-testid'))).toEqual(['session-settings'])
+      expect(others[0].textContent).toBe('Restricted')
+      // Nor inside the settings popover: nothing pressed, no switch, no
+      // checkbox — Ultra is the slider's last stop and nothing else.
+      fireEvent.click(others[0])
+      expect(document.querySelector('[aria-pressed]')).toBeNull()
+      expect(screen.queryByRole('switch')).toBeNull()
+      expect(screen.queryByRole('checkbox')).toBeNull()
+      const ultraWords = screen
+        .queryAllByText(/^Ultra(code)?$/)
+        .filter((n) => !n.closest('.thinking-slider, [data-testid="thinking-chip"]'))
+      expect(ultraWords).toEqual([])
     }
   })
 
@@ -130,7 +140,7 @@ describe('thinking and Ultra', () => {
   })
 })
 
-describe('the workflow size chip', () => {
+describe('the settings popover', () => {
   // internal/acp/config_options.go workflowSizeConfigOption: names are the
   // capitalised tiers, descriptions carry the agent guideline.
   function size(value: string, describe = true): ACPConfigOption {
@@ -153,36 +163,129 @@ describe('the workflow size chip', () => {
     }
   }
 
-  it('labels the tier in agents, read from the tier’s own description', () => {
-    const { container } = render(<ConfigBar chat={chat([size('large')])} />)
-    expect(container.querySelector('.config-chip-label')?.textContent).toBe('Large · ~30 agents')
+  function open(options: ACPConfigOption[]): void {
+    render(<ConfigBar chat={chat(options)} />)
+    fireEvent.click(screen.getByTestId('session-settings'))
+  }
+
+  function segments(): string[] {
+    return Array.from(
+      screen.getByRole('radiogroup', { name: 'Workflow size' }).querySelectorAll('.session-segment-hint'),
+      (n) => n.textContent ?? ''
+    )
+  }
+
+  it('labels workflow size tiers in agents, read from the tier’s own description', () => {
+    open([size('large')])
+    expect(segments()).toEqual(['~5 agents', '~10 agents', '~30 agents', 'No limit'])
+    const on = screen.getByRole('radio', { checked: true })
+    expect(on.textContent).toBe('Large~30 agents')
   })
 
-  it('says "No limit" for unbounded, and falls back to the known tiers', () => {
-    const { container } = render(<ConfigBar chat={chat([size('unbounded')])} />)
-    expect(container.querySelector('.config-chip-label')?.textContent).toBe('Unbounded · No limit')
-    cleanup()
-    const bare = render(<ConfigBar chat={chat([size('medium', false)])} />)
-    expect(bare.container.querySelector('.config-chip-label')?.textContent).toBe('Medium · ~10 agents')
+  it('falls back to the known tiers when the CLI gives no descriptions', () => {
+    open([size('medium', false)])
+    expect(segments()).toEqual(['~5 agents', '~10 agents', '~30 agents', 'No limit'])
   })
 
   it('sets the size through the ordinary select path', () => {
-    render(<ConfigBar chat={chat([size('medium')])} />)
-    fireEvent.click(screen.getByText('Medium'))
-    fireEvent.click(screen.getByText('Small'))
+    open([size('medium')])
+    fireEvent.click(screen.getByRole('radio', { name: /Small/ }))
     expect(calls).toEqual([['setSelectOption', ['chat-1', 'workflow_size', 'small']]])
+  })
+
+  it('names the permission levels plainly, with the CLI’s descriptions', () => {
+    open([permission('yolo')])
+    const radios = screen.getAllByRole('radio').map((r) => r.querySelector('.session-settings-name')?.textContent)
+    expect(radios).toEqual([
+      'Ask first · Ask before acting',
+      'Restricted · Act within the project',
+      'Don’t ask (YOLO) · Act without asking'
+    ])
+    fireEvent.click(screen.getAllByRole('radio')[1])
+    expect(calls).toEqual([['setSelectOption', ['chat-1', 'permission', 'restricted']]])
+  })
+
+  it('lists each choice once, as the parser hands them over (groups and their union)', () => {
+    // parse.ts fills `flat` with every grouped choice as well.
+    const parsed = permission('restricted')
+    if (parsed.kind.type === 'select') parsed.kind.groups = [{ name: '', options: parsed.kind.flat }]
+    open([parsed])
+    expect(screen.getAllByRole('radio')).toHaveLength(3)
+  })
+
+  it('says the settings are shared by every session', () => {
+    open([permission('restricted')])
+    expect(screen.getByText('Applies to all sessions')).toBeTruthy()
+  })
+
+  it('shows thinking as the slider, permission first, then size', () => {
+    open([size('medium'), thinking('high'), ultra(false), permission('restricted')])
+    const sections = Array.from(document.querySelectorAll('.session-settings-section'))
+    expect(sections[0].getAttribute('aria-label')).toBe('Permission')
+    expect(sections[1].querySelector('[role="slider"]')).not.toBeNull()
+    expect(sections[2].getAttribute('aria-label')).toBe('Workflow size')
+  })
+
+  it('stays data-driven — an unknown boolean renders as a switch and toggles', () => {
+    open([{ id: 'auto-compact', name: 'Auto-compact', kind: { type: 'boolean', currentValue: false } }])
+    fireEvent.click(screen.getByRole('switch'))
+    expect(calls).toEqual([['setBoolOption', ['chat-1', 'auto-compact', true]]])
+  })
+
+  it('stays data-driven — an unknown select renders its choices', () => {
+    open([
+      {
+        id: 'verbosity',
+        name: 'Verbosity',
+        kind: {
+          type: 'select',
+          currentValue: 'terse',
+          groups: [],
+          flat: [
+            { value: 'terse', name: 'Terse', description: 'Short answers' },
+            { value: 'chatty', name: 'Chatty' }
+          ]
+        }
+      }
+    ])
+    expect(screen.getByRole('radiogroup', { name: 'Verbosity' })).toBeTruthy()
+    expect(screen.getByText('Short answers')).toBeTruthy()
+    fireEvent.click(screen.getByRole('radio', { name: /Chatty/ }))
+    expect(calls).toEqual([['setSelectOption', ['chat-1', 'verbosity', 'chatty']]])
   })
 })
 
 describe('the rest of the bar', () => {
-  it('stays data-driven — an unknown boolean still renders and still toggles', () => {
-    render(
-      <ConfigBar
-        chat={chat([{ id: 'auto-compact', name: 'Auto-compact', kind: { type: 'boolean', currentValue: false } }])}
-      />
-    )
-    fireEvent.click(screen.getByText('Auto-compact'))
-    expect(calls).toEqual([['setBoolOption', ['chat-1', 'auto-compact', true]]])
+  function mode(value: string): ACPConfigOption {
+    return {
+      id: 'mode',
+      name: 'Mode',
+      category: 'mode',
+      kind: {
+        type: 'select',
+        currentValue: value,
+        groups: [],
+        flat: [
+          { value: 'plan', name: 'Plan' },
+          { value: 'coding', name: 'Coding' },
+          { value: 'ask', name: 'Ask' }
+        ]
+      }
+    }
+  }
+
+  it('draws the mode as a chip in its own colour', () => {
+    render(<ConfigBar chat={chat([mode('plan')])} />)
+    const chip = screen.getByTestId('mode-chip')
+    expect(chip.textContent).toBe('Plan')
+    expect(chip.getAttribute('style')).toContain('--mode-plan')
+    expect(chip.getAttribute('title')).toMatch(/Shift\+Tab/)
+  })
+
+  it('steps through the modes in the CLI’s order, wrapping', () => {
+    expect(nextMode([mode('plan')])).toBe('coding')
+    expect(nextMode([mode('ask')])).toBe('plan')
+    expect(nextMode([])).toBeNull()
   })
 
   it('draws nothing at all when the agent advertises nothing', () => {

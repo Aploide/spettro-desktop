@@ -1,12 +1,24 @@
-// Port of Platforms/macOS/Views/ComposerView.swift (docs 25 + 14): the growing
-// text field with slash-command palette, image attachments, config bar, and
-// the send/stop button.
+// Port of Platforms/macOS/Views/ComposerView.swift (docs 25 + 14), reshaped
+// after the Claude app's composer: one raised card holding the text, the
+// attachments and a toolbar — attach, mode and thinking, settings on the
+// left; the model and the send button on the right.
+//
+// The field never locks. While the agent works, what you type goes to it as
+// guidance it reads at its next step (steering — the button says "Guide"),
+// and Stop (or Esc) interrupts. A field that greys out while the agent runs
+// is a field that loses the thought you had while watching it.
+//
+// "/" opens the slash commands and "@" the project's files, both as a menu
+// floating above the card and driven by the same keys (↑/↓, Tab or Enter,
+// Esc to dismiss). A chosen file stays in the text as "@path", drawn as a
+// chip, and goes to the agent as a file it must read (promptBlocks.ts).
 //
 // It also serves the new-session view, where no chat exists yet: there it is
 // handed a draft (see draftChat) and an `onSubmit`, and the caller creates the
 // chat with the first message.
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import type { JSX } from 'react'
 import { ActivationTextarea, WorkflowHint } from './ActivationGlow'
 import type { ACPCommand, ACPConfigOption } from '@shared/acp'
 import { workflowRequested } from '@shared/workflowActivation'
@@ -14,14 +26,24 @@ import { budgetDirectivesLive, parseBudgetDirective } from '@shared/workflowBudg
 import type { ChatDetail } from '@shared/model'
 import { call, useApp } from '@renderer/state/store'
 import { FOCUS_COMPOSER_EVENT } from '@renderer/state/shell'
-import ConfigBar from './ConfigBar'
-import { projectName } from './ChatHeader'
+import { Icon } from '@renderer/design/icons'
+import ConfigBar, { nextMode } from './ConfigBar'
+import ModelMenu from './ModelMenu'
+import MentionMenu from './MentionMenu'
+import TodoList from './TodoList'
+import { MODE_ID } from './SessionSettingsPopover'
+import { insertMention, liveMentions, mentionAt, projectFiles, rankFiles } from './mentions'
 
 // ImageAttachment.swift downsampling constants: longest edge kept after
 // downsampling (`maxDimension`) and the JPEG re-encode quality
 // (`kCGImageDestinationLossyCompressionQuality`).
 const MAX_DIMENSION = 1568
 const JPEG_QUALITY = 0.85
+
+/** How long the "only images" hint stays up. */
+const HINT_MS = 4000
+
+const IMAGES_ONLY_HINT = 'Only images can be attached for now'
 
 interface PendingAttachment {
   id: string
@@ -47,7 +69,11 @@ interface ComposerProps {
   promptSeed?: PromptSeed | null
   /** New-session mode: there is no chat to send to yet, so the message goes
    *  to the caller instead of `send`. Returning false keeps it in the field. */
-  onSubmit?: (text: string, attachments: SubmitAttachment[]) => boolean | void
+  onSubmit?: (
+    text: string,
+    attachments: SubmitAttachment[],
+    mentions: string[]
+  ) => boolean | void
 }
 
 /** The stand-in a chat-less composer renders against: nothing is busy, no
@@ -77,12 +103,22 @@ export default function Composer({ chat, promptSeed, onSubmit }: ComposerProps):
   const app = useApp()
   const [draft, setDraft] = useState('')
   const [attachments, setAttachments] = useState<PendingAttachment[]>([])
+  const [mentions, setMentions] = useState<string[]>([])
   const [commandIndex, setCommandIndex] = useState(0)
   const [focused, setFocused] = useState(false)
+  const [caret, setCaret] = useState(0)
+  const [mentionIndex, setMentionIndex] = useState(0)
+  // Esc closes a menu without clearing what was typed; it stays closed for
+  // that "@" (by its position) or that exact "/" text.
+  const [mentionDismissed, setMentionDismissed] = useState<number | null>(null)
+  const [paletteDismissed, setPaletteDismissed] = useState<string | null>(null)
+  const [files, setFiles] = useState<{ path: string; list: string[] } | null>(null)
+  const [hint, setHint] = useState<string | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const ready = app?.phase.kind === 'ready'
+  const busy = chat.isBusy && !onSubmit
   const gate = workflowGate(chat.configOptions)
   const requested = workflowRequested(draft)
   const budgets = budgetDirectivesLive(draft, gate.ultraOn && !gate.askFirst)
@@ -93,13 +129,25 @@ export default function Composer({ chat, promptSeed, onSubmit }: ComposerProps):
   // there would be honoured.
   const pausedByAskFirst =
     gate.askFirst && (requested || (gate.ultraOn && parseBudgetDirective(draft) !== null))
-  const matching = matchingCommands(draft, chat.commands)
-  const paletteVisible = matching.length > 0 && focused
 
-  // Non-empty text OR at least one image, agent idle, app connected. There is
-  // deliberately no check on acpSessionId — fresh chats get one lazily.
-  const canSend =
-    (draft.trim().length > 0 || attachments.length > 0) && !chat.isBusy && ready
+  const mention = focused ? mentionAt(draft, caret) : null
+  const mentionVisible = mention !== null && mention.start !== mentionDismissed
+  const projectPath = chat.projectPath
+  const filesHere = files?.path === projectPath ? files.list : null
+  const ranked = useMemo(
+    () => (mentionVisible && filesHere ? rankFiles(filesHere, mention.query) : []),
+    [mentionVisible, filesHere, mention?.query]
+  )
+
+  const matching = matchingCommands(draft, chat.commands)
+  const paletteVisible =
+    matching.length > 0 && focused && !mentionVisible && paletteDismissed !== draft
+
+  const hasContent = draft.trim().length > 0 || attachments.length > 0
+  // Non-empty text OR at least one image, app connected. Busy is fine: the
+  // message then guides the running turn. There is deliberately no check on
+  // acpSessionId — fresh chats get one lazily.
+  const canSend = hasContent && ready
 
   // Auto-focus on appear / chat switch.
   useEffect(() => {
@@ -113,7 +161,10 @@ export default function Composer({ chat, promptSeed, onSubmit }: ComposerProps):
     if (!el) return
     el.focus()
     // Caret at the end, ready to add detail to the starter prompt.
-    requestAnimationFrame(() => el.setSelectionRange(el.value.length, el.value.length))
+    requestAnimationFrame(() => {
+      el.setSelectionRange(el.value.length, el.value.length)
+      setCaret(el.value.length)
+    })
   }, [promptSeed])
 
   // Ctrl/Cmd+L and New session ask for the composer by event.
@@ -123,12 +174,31 @@ export default function Composer({ chat, promptSeed, onSubmit }: ComposerProps):
     return () => window.removeEventListener(FOCUS_COMPOSER_EVENT, focus)
   }, [])
 
-  // Auto-grow: 2–12 lines (lineLimit(2...12) on the vertical TextField).
+  // The project's files, the first time an "@" asks for them.
+  const wantFiles = mentionVisible && filesHere === null
+  useEffect(() => {
+    if (!wantFiles || !projectPath) return
+    let live = true
+    void projectFiles(projectPath, (path) => call('listProjectFiles', path)).then((list) => {
+      if (live) setFiles({ path: projectPath, list })
+    })
+    return () => {
+      live = false
+    }
+  }, [wantFiles, projectPath])
+
+  useEffect(() => {
+    if (!hint) return
+    const id = setTimeout(() => setHint(null), HINT_MS)
+    return () => clearTimeout(id)
+  }, [hint])
+
+  // Auto-grow: 1–12 lines; the CSS max-height stops it and scrolls.
   useLayoutEffect(() => {
     const el = textareaRef.current
     if (!el) return
     el.style.height = 'auto'
-    el.style.height = `${Math.min(el.scrollHeight, 12 * 20)}px`
+    el.style.height = `${el.scrollHeight}px`
   }, [draft])
 
   const addAttachment = useCallback(async (blob: Blob): Promise<void> => {
@@ -136,6 +206,16 @@ export default function Composer({ chat, promptSeed, onSubmit }: ComposerProps):
     // Failures are silent and local, per the spec: no thumbnail, no error.
     if (attachment) setAttachments((prev) => [...prev, attachment])
   }, [])
+
+  const syncCaret = (): void => {
+    const el = textareaRef.current
+    if (el) setCaret(el.selectionStart ?? el.value.length)
+  }
+
+  const putCaret = (at: number): void => {
+    setCaret(at)
+    requestAnimationFrame(() => textareaRef.current?.setSelectionRange(at, at))
+  }
 
   const send = (): void => {
     let text = draft
@@ -145,52 +225,86 @@ export default function Composer({ chat, promptSeed, onSubmit }: ComposerProps):
       const command = matching[commandIndex]
       if (command.inputHint) {
         setDraft('/' + command.name + ' ')
+        putCaret(command.name.length + 2)
         return
       }
       text = '/' + command.name
     }
     const trimmed = text.trim()
-    if (!((trimmed.length > 0 || attachments.length > 0) && !chat.isBusy && ready)) return
+    if (!((trimmed.length > 0 || attachments.length > 0) && ready)) return
     const toSend = attachments.map((a) => ({ data: a.data, mimeType: a.mimeType }))
+    const mentioned = liveMentions(trimmed, mentions)
     if (onSubmit) {
       // The caller may decline (a folder it wants confirmed first); the
       // message then stays put rather than vanishing.
-      if (onSubmit(trimmed, toSend) === false) return
+      if (onSubmit(trimmed, toSend, mentioned) === false) return
     } else {
-      void call('send', chat.id, trimmed, toSend)
+      void call('send', chat.id, trimmed, toSend, mentioned)
     }
     setDraft('')
     setAttachments([])
+    setMentions([])
+    setCaret(0)
   }
 
-  const moveCommand = (delta: number): void => {
-    const count = matching.length
-    if (count === 0) return
-    setCommandIndex((i) => (i + delta + count) % count)
+  const pickMention = (path: string): void => {
+    if (!mention) return
+    const next = insertMention(draft, mention.start, caret, path)
+    setDraft(next.text)
+    setMentions((prev) => (prev.includes(path) ? prev : [...prev, path]))
+    setMentionIndex(0)
+    putCaret(next.caret)
   }
 
-  const acceptCommand = (): void => {
-    const command = matching[commandIndex]
-    if (command) setDraft('/' + command.name + ' ')
+  const acceptCommand = (index = commandIndex): void => {
+    const command = matching[index]
+    if (!command) return
+    setDraft('/' + command.name + ' ')
+    putCaret(command.name.length + 2)
   }
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>): void => {
-    if (paletteVisible) {
-      if (e.key === 'ArrowUp') {
+    const menu = mentionVisible ? ranked.length : paletteVisible ? matching.length : 0
+    if (mentionVisible || paletteVisible) {
+      const move = (delta: number): void => {
+        if (menu === 0) return
+        if (mentionVisible) setMentionIndex((i) => (i + delta + menu) % menu)
+        else setCommandIndex((i) => (i + delta + menu) % menu)
+      }
+      if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
         e.preventDefault()
-        moveCommand(-1)
+        move(e.key === 'ArrowUp' ? -1 : 1)
         return
       }
-      if (e.key === 'ArrowDown') {
+      if (e.key === 'Escape') {
+        // Close the menu, and only that: the chat must not read this Esc as
+        // "interrupt the agent".
         e.preventDefault()
-        moveCommand(1)
+        if (mentionVisible && mention) setMentionDismissed(mention.start)
+        else setPaletteDismissed(draft)
         return
       }
-      if (e.key === 'Tab') {
+      if (mentionVisible && (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey))) {
+        e.preventDefault()
+        const path = ranked[Math.min(mentionIndex, ranked.length - 1)]
+        if (path) pickMention(path)
+        return
+      }
+      if (paletteVisible && e.key === 'Tab' && !e.shiftKey) {
         e.preventDefault()
         acceptCommand()
         return
       }
+    }
+    // Shift+Tab steps through the modes (Plan → Coding → Ask), as in the
+    // Claude app; the field keeps the focus.
+    if (e.key === 'Tab' && e.shiftKey && !onSubmit) {
+      const next = nextMode(chat.configOptions)
+      if (next) {
+        e.preventDefault()
+        void call('setSelectOption', chat.id, MODE_ID, next)
+      }
+      return
     }
     // Enter sends, Shift+Enter inserts a newline; Ctrl/Cmd+Enter also sends.
     if (e.key === 'Enter' && (!e.shiftKey || e.ctrlKey || e.metaKey)) {
@@ -200,12 +314,20 @@ export default function Composer({ chat, promptSeed, onSubmit }: ComposerProps):
   }
 
   // Paste: only intercept when the clipboard actually holds an image — text
-  // paste keeps flowing through the textarea's own handling.
+  // paste keeps flowing through the textarea's own handling. A file that
+  // isn't one (a PDF) gets the hint instead of vanishing without a word.
   const onPaste = (e: React.ClipboardEvent): void => {
-    const images = Array.from(e.clipboardData.items).filter(
-      (item) => item.kind === 'file' && item.type.startsWith('image/')
-    )
-    if (images.length === 0) return
+    const items = Array.from(e.clipboardData.items)
+    const fileItems = items.filter((item) => item.kind === 'file')
+    const images = fileItems.filter((item) => item.type.startsWith('image/'))
+    if (images.length === 0) {
+      const hasText = items.some((item) => item.kind === 'string')
+      if (fileItems.length > 0 && !hasText) {
+        e.preventDefault()
+        setHint(IMAGES_ONLY_HINT)
+      }
+      return
+    }
     e.preventDefault()
     for (const item of images) {
       const file = item.getAsFile()
@@ -215,9 +337,12 @@ export default function Composer({ chat, promptSeed, onSubmit }: ComposerProps):
 
   const onDrop = (e: React.DragEvent): void => {
     e.preventDefault()
+    let refused = false
     for (const file of Array.from(e.dataTransfer.files)) {
       if (file.type.startsWith('image/')) void addAttachment(file)
+      else refused = true
     }
+    if (refused) setHint(IMAGES_ONLY_HINT)
   }
 
   const onFilesPicked = (e: React.ChangeEvent<HTMLInputElement>): void => {
@@ -228,143 +353,202 @@ export default function Composer({ chat, promptSeed, onSubmit }: ComposerProps):
   // The new-session view names the folder right under the field, so there
   // the placeholder says what to type instead of where.
   const placeholder = !ready
-    ? 'Connecting…'
+    ? 'Reconnecting…'
     : onSubmit
       ? 'Describe a task, or ask about your code…'
-      : `Message Spettro — working in ${projectName(chat.projectPath)}`
+      : 'Ask Spettro to build, fix, or explain…'
 
   return (
     <div className="composer-outer">
-      <div
-        className={'composer-card' + (focused ? ' composer-card--focused' : '')}
-        onDragOver={(e) => e.preventDefault()}
-        onDrop={onDrop}
-      >
-        {paletteVisible && (
-          <div className="command-palette">
-            {matching.map((command, index) => (
-              <button
-                type="button"
-                key={command.name}
-                className={
-                  'command-row' + (index === commandIndex ? ' command-row--selected' : '')
-                }
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => {
-                  setDraft('/' + command.name + ' ')
-                  setCommandIndex(index)
-                }}
-              >
-                <span className="command-name">/{command.name}</span>
-                {command.inputHint && <span className="command-hint">{command.inputHint}</span>}
-                <span className="command-spacer" />
-                {command.description && (
-                  <span className="command-description">{command.description}</span>
-                )}
-              </button>
-            ))}
-            <div className="command-palette-divider" />
-          </div>
-        )}
+      <div className="composer-column">
+        {!onSubmit && <TodoList plan={chat.plan} busy={chat.isBusy} />}
 
-        {attachments.length > 0 && (
-          <div className="attachments-row">
-            {attachments.map((attachment) => (
-              <div className="attachment-thumb" key={attachment.id}>
-                <img
-                  src={`data:${attachment.mimeType};base64,${attachment.data}`}
-                  alt=""
-                  className="attachment-thumb-img"
-                />
+        <div className="composer-anchor">
+          {mentionVisible && (
+            <MentionMenu
+              files={ranked}
+              selected={Math.min(mentionIndex, Math.max(0, ranked.length - 1))}
+              loading={filesHere === null && projectPath !== ''}
+              query={mention.query}
+              onPick={pickMention}
+              onHover={setMentionIndex}
+            />
+          )}
+          {paletteVisible && (
+            <div className="composer-menu command-palette" role="listbox" aria-label="Commands">
+              {matching.map((command, index) => (
                 <button
                   type="button"
-                  className="attachment-remove"
-                  title="Remove"
-                  onClick={() =>
-                    setAttachments((prev) => prev.filter((a) => a.id !== attachment.id))
+                  key={command.name}
+                  role="option"
+                  aria-selected={index === commandIndex}
+                  className={
+                    'composer-menu-row command-row' +
+                    (index === commandIndex ? ' composer-menu-row--selected' : '')
                   }
+                  onMouseDown={(e) => e.preventDefault()}
+                  onMouseMove={() => setCommandIndex(index)}
+                  onClick={() => {
+                    setCommandIndex(index)
+                    acceptCommand(index)
+                  }}
                 >
-                  <XMarkCircleIcon />
+                  <span className="command-name">/{command.name}</span>
+                  {command.inputHint && <span className="command-hint">{command.inputHint}</span>}
+                  {command.description && (
+                    <span className="command-description">{command.description}</span>
+                  )}
                 </button>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* Not a plain textarea: a phrase like "ultracode" or "use a workflow"
-            arms multi-agent orchestration for the turn, and the input has to
-            say so while it is being typed rather than after the fact. */}
-        <ActivationTextarea
-          textareaRef={textareaRef}
-          className="composer-input"
-          rows={2}
-          value={draft}
-          placeholder={placeholder}
-          onChange={(next) => {
-            setDraft(next)
-            setCommandIndex(0)
-          }}
-          onKeyDown={onKeyDown}
-          onPaste={onPaste}
-          onFocus={() => setFocused(true)}
-          onBlur={() => setFocused(false)}
-          budgets={budgets}
-          muted={gate.askFirst}
-        />
-
-        <div className="composer-options-row">
-          <button
-            type="button"
-            className="composer-btn"
-            title="Attach an image"
-            onClick={() => fileInputRef.current?.click()}
-          >
-            <PlusIcon />
-          </button>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/*"
-            multiple
-            hidden
-            onChange={onFilesPicked}
-          />
-
-          {!onSubmit && <ConfigBar chat={chat} />}
-
-          <div className="composer-options-spacer" />
-
-          {chat.isBusy ? (
-            <button
-              type="button"
-              className="composer-btn"
-              title="Stop"
-              onClick={() => void call('cancel', chat.id)}
-            >
-              <StopIcon />
-            </button>
-          ) : (
-            <button
-              type="button"
-              className={'composer-btn send-btn' + (canSend ? ' send-btn--active' : '')}
-              title="Send"
-              disabled={!canSend}
-              onClick={send}
-            >
-              <ArrowUpIcon />
-            </button>
+              ))}
+            </div>
           )}
+
+          <div
+            className={'composer-card' + (focused ? ' composer-card--focused' : '')}
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={onDrop}
+          >
+            {attachments.length > 0 && (
+              <div className="attachments-row">
+                {attachments.map((attachment, i) => (
+                  <div className="attachment-thumb" key={attachment.id}>
+                    <img
+                      src={`data:${attachment.mimeType};base64,${attachment.data}`}
+                      alt={`Attached image ${i + 1}`}
+                      className="attachment-thumb-img"
+                    />
+                    <button
+                      type="button"
+                      className="attachment-remove"
+                      title="Remove"
+                      aria-label={`Remove image ${i + 1}`}
+                      onClick={() =>
+                        setAttachments((prev) => prev.filter((a) => a.id !== attachment.id))
+                      }
+                    >
+                      <Icon name="xmark" size={10} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Not a plain textarea: a phrase like "ultracode" or "use a workflow"
+                arms multi-agent orchestration for the turn, and the input has to
+                say so while it is being typed rather than after the fact. */}
+            <ActivationTextarea
+              textareaRef={textareaRef}
+              className="composer-input"
+              rows={1}
+              value={draft}
+              placeholder={placeholder}
+              label="Message"
+              testId="composer-input"
+              onChange={(next) => {
+                setDraft(next)
+                setCommandIndex(0)
+                setMentionIndex(0)
+                syncCaret()
+              }}
+              onKeyDown={onKeyDown}
+              onPaste={onPaste}
+              onSelect={syncCaret}
+              onClick={syncCaret}
+              onFocus={() => {
+                setFocused(true)
+                syncCaret()
+              }}
+              onBlur={() => setFocused(false)}
+              budgets={budgets}
+              muted={gate.askFirst}
+              mentions={mentions}
+            />
+
+            <div className="composer-toolbar">
+              <button
+                type="button"
+                className="composer-tool"
+                title="Attach images"
+                aria-label="Attach images"
+                onClick={() => fileInputRef.current?.click()}
+              >
+                <Icon name="paperclip" size={15} />
+              </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                multiple
+                hidden
+                onChange={onFilesPicked}
+              />
+
+              {!onSubmit && <ConfigBar chat={chat} />}
+
+              <div className="composer-toolbar-spacer" />
+
+              {!onSubmit && <ModelMenu chat={chat} />}
+
+              {busy && (
+                <button
+                  type="button"
+                  className="composer-send composer-send--stop"
+                  title="Stop (Esc)"
+                  aria-label="Stop"
+                  data-testid="stop"
+                  onClick={() => void call('cancel', chat.id)}
+                >
+                  <Icon name="stop.fill" size={12} />
+                </button>
+              )}
+              {busy ? (
+                hasContent && (
+                  <button
+                    type="button"
+                    className="composer-send composer-send--guide"
+                    title="Send to guide Spettro while it works"
+                    disabled={!canSend}
+                    data-testid="send"
+                    onClick={send}
+                  >
+                    <Icon name="arrow.up" size={13} />
+                    <span>Guide</span>
+                  </button>
+                )
+              ) : (
+                <button
+                  type="button"
+                  className="composer-send"
+                  title="Send (Enter)"
+                  aria-label="Send"
+                  disabled={!canSend}
+                  data-testid="send"
+                  onClick={send}
+                >
+                  <Icon name="arrow.up" size={15} />
+                </button>
+              )}
+            </div>
+          </div>
         </div>
+
+        {hint ? (
+          <div className="composer-hint" role="status">
+            <Icon name="info.circle.fill" size={12} />
+            <span>{hint}</span>
+          </div>
+        ) : (
+          <WorkflowHint
+            pausedByAskFirst={pausedByAskFirst}
+            budgetTokens={budget}
+            onSwitchPermission={
+              gate.canRestrict && !onSubmit
+                ? () => void call('setSelectOption', chat.id, 'permission', 'restricted')
+                : undefined
+            }
+          />
+        )}
       </div>
-      <WorkflowHint
-        pausedByAskFirst={pausedByAskFirst}
-        budgetTokens={budget}
-        onSwitchPermission={
-          gate.canRestrict && !onSubmit
-            ? () => void call('setSelectOption', chat.id, 'permission', 'restricted')
-            : undefined
-        }
-      />
     </div>
   )
 }
@@ -460,41 +644,4 @@ async function attachmentFrom(blob: Blob): Promise<PendingAttachment | null> {
   } finally {
     bitmap.close()
   }
-}
-
-// ---------------------------------------------------------------------------
-// Icons (SF Symbol stand-ins)
-// ---------------------------------------------------------------------------
-
-function PlusIcon(): JSX.Element {
-  return (
-    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden>
-      <path d="M8 2.5v11M2.5 8h11" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-    </svg>
-  )
-}
-
-function ArrowUpIcon(): JSX.Element {
-  return (
-    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden>
-      <path d="M8 13V3.5M3.5 8 8 3.5 12.5 8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  )
-}
-
-function StopIcon(): JSX.Element {
-  return (
-    <svg width="13" height="13" viewBox="0 0 16 16" aria-hidden>
-      <rect x="3" y="3" width="10" height="10" rx="2" fill="currentColor" />
-    </svg>
-  )
-}
-
-function XMarkCircleIcon(): JSX.Element {
-  return (
-    <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden>
-      <circle cx="8" cy="8" r="7" fill="rgba(0, 0, 0, 0.6)" />
-      <path d="m5.6 5.6 4.8 4.8m0-4.8-4.8 4.8" stroke="#fff" strokeWidth="1.4" strokeLinecap="round" />
-    </svg>
-  )
 }

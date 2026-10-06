@@ -317,3 +317,18 @@
   font-variant-numeric: tabular-nums;
   color: var(--text-primary);
 }
+
+/* Opened from a chat, a row chooses its model. */
+.form-card .model-row--choosable {
+  cursor: pointer;
+  border-radius: var(--rad-xs);
+}
+
+.form-card .model-row--choosable:hover {
+  background: var(--hover-fill);
+}
+
+.form-card .model-row--choosable:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 60%, transparent);
+  outline-offset: -2px;
+}

@@ -56,6 +56,12 @@ SCENES=(
   app:chat-error
   app:chat-steering
   app:busy
+  app:guide
+  app:ultra
+  app:slash
+  app:mention
+  app:model-menu
+  app:session-settings
   app:thinking
   app:thinking-paused
   app:sidebar-many

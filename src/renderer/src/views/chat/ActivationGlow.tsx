@@ -26,6 +26,8 @@
 //     mirror is only honest while the two share every metric that affects
 //     wrapping, which is why they share a class rather than two lists of
 //     matching declarations, and why the mirror is scrolled in lockstep.
+//     The same mirror draws @-mentioned files as chips: a textarea can't hold
+//     an element, so the chip is painted under the mention's own characters.
 
 import { Fragment, useCallback, useEffect, useLayoutEffect, useRef } from 'react'
 import type {
@@ -39,6 +41,7 @@ import type {
 import { workflowRequested } from '@shared/workflowActivation'
 import { compactTokens, splitWorkflowInput } from '@shared/workflowBudget'
 import { Icon } from '@renderer/design/icons'
+import { splitMentions } from './mentions'
 import './activation.css'
 
 /**
@@ -90,6 +93,13 @@ interface Props {
   budgets?: boolean
   /** Workflows cannot run right now (Ask first): mark, but quietly. */
   muted?: boolean
+  /** Project-relative files @-mentioned in the text, drawn as chips. */
+  mentions?: string[]
+  onSelect?: () => void
+  onClick?: () => void
+  /** The input's accessible name. */
+  label?: string
+  testId?: string
 }
 
 export function ActivationTextarea({
@@ -104,7 +114,12 @@ export function ActivationTextarea({
   onBlur,
   textareaRef,
   budgets = false,
-  muted = false
+  muted = false,
+  mentions = [],
+  onSelect,
+  onClick,
+  label,
+  testId
 }: Props): JSX.Element {
   const ownRef = useRef<HTMLTextAreaElement>(null)
   const area = textareaRef ?? ownRef
@@ -136,10 +151,13 @@ export function ActivationTextarea({
   // textarea renders its own text normally, so the overwhelmingly common case
   // pays nothing and cannot be misaligned.
   const lit = value !== '' && splitWorkflowInput(value, budgets).some((p) => p.active)
+  const pieces = value !== '' && mentions.length > 0 ? splitMentions(value, mentions) : []
+  const chips = pieces.some((p) => p.mention)
+  const mirrored = lit || chips
 
   return (
     <div className="glow-wrap">
-      {lit && (
+      {mirrored && (
         <div
           ref={mirrorRef}
           className={`${className} glow-mirror`}
@@ -148,13 +166,25 @@ export function ActivationTextarea({
           // the mirror's height matches the textarea's exactly.
           data-testid="activation-mirror"
         >
-          <ActivationText text={value} budgets={budgets} muted={muted} />
+          {chips ? (
+            pieces.map((piece, i) =>
+              piece.mention ? (
+                <span className="mention-chip" key={i}>
+                  {piece.text}
+                </span>
+              ) : (
+                <ActivationText key={i} text={piece.text} budgets={budgets} muted={muted} />
+              )
+            )
+          ) : (
+            <ActivationText text={value} budgets={budgets} muted={muted} />
+          )}
           {'\n'}
         </div>
       )}
       <textarea
         ref={area}
-        className={`${className}${lit ? ' glow-input' : ''}`}
+        className={`${className}${mirrored ? ' glow-input' : ''}`}
         rows={rows}
         value={value}
         placeholder={placeholder}
@@ -170,6 +200,10 @@ export function ActivationTextarea({
         onPaste={onPaste}
         onFocus={onFocus}
         onBlur={onBlur}
+        onSelect={onSelect}
+        onClick={onClick}
+        aria-label={label}
+        data-testid={testId}
       />
     </div>
   )

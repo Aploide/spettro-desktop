@@ -714,3 +714,23 @@ export function sessionList(entries: { id: string; cwd: string; title?: string; 
     })
   }
 }
+
+/**
+ * A `plan` update (internal/acp/content.go planEntriesFromTodos): the whole
+ * task list in dependency order, every time. ACP plans have no blocked
+ * status, so a pending task waiting on unfinished prerequisites carries it
+ * in its text as a " (blocked)" suffix; cancelled tasks are reported as
+ * completed. An empty list is still sent, to clear the plan.
+ */
+export function planUpdate(
+  todos: { content: string; status: 'pending' | 'in_progress' | 'completed'; blocked?: boolean; priority?: string }[]
+): JSON {
+  return {
+    sessionUpdate: 'plan',
+    entries: todos.map((t) => ({
+      content: t.blocked && t.status === 'pending' ? `${t.content} (blocked)` : t.content,
+      priority: t.priority ?? 'medium',
+      status: t.status
+    }))
+  }
+}

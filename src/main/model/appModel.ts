@@ -68,6 +68,7 @@ import { CLIInstaller } from './cliInstaller'
 import { locateCLI } from './cliLocator'
 import { ExtensionStores } from './extensionStores'
 import { Prefs } from './prefs'
+import { promptBlocks, type PromptAttachment } from './promptBlocks'
 import { SessionStore } from './sessionStore'
 import { SubscriptionStore } from './subscriptionStore'
 import { UpdateManager } from './updater'
@@ -89,16 +90,7 @@ interface PendingQuestion {
   transport: 'ask' | 'permission'
 }
 
-export interface PromptAttachment {
-  data: string
-  mimeType: string
-}
-
-/** What a prompt with images and no words says, so the agent has text to
- *  work from: spettro refuses a prompt with no text content (bridge.go). The
- *  user's bubble keeps showing just the images. */
-const IMAGE_ONLY_TEXT = '(see the attached image)'
-const IMAGES_ONLY_TEXT = '(see the attached images)'
+export type { PromptAttachment }
 
 /** How long the agent gets to answer `initialize` before we give up on it. */
 const HANDSHAKE_TIMEOUT_MS = 20_000
@@ -949,12 +941,17 @@ export class AppModel extends EventEmitter {
    *  A message sent while the chat is busy steers the running turn instead of
    *  waiting for it: the CLI queues it for the agent's next step and answers
    *  that prompt at once (bridge.go steerRunningTurn). The message carries
-   *  its steering state, and the chat stays busy for the turn it steers. */
+   *  its steering state, and the chat stays busy for the turn it steers.
+   *
+   *  `mentions` are the project-relative files the user @-mentioned; each
+   *  one still in the text goes to the agent as a resource link in its
+   *  place (promptBlocks). */
   send(
     chatId: string,
     text: string,
     attachments: PromptAttachment[],
-    sourceDeviceId: string | null = null
+    sourceDeviceId: string | null = null,
+    mentions: string[] = []
   ): void {
     const session = this.sessionById(chatId)
     if (!session) return
@@ -982,13 +979,7 @@ export class AppModel extends EventEmitter {
     this.emit('chat-user', session.id, trimmed, wireAttachments, Date.now(), sourceDeviceId)
     this.emit('chat-state', session.summary())
 
-    const blocks: ACPContentBlock[] = []
-    const promptText =
-      trimmed !== '' ? trimmed : attachments.length > 1 ? IMAGES_ONLY_TEXT : IMAGE_ONLY_TEXT
-    blocks.push({ type: 'text', text: promptText })
-    for (const a of attachments) {
-      blocks.push({ type: 'image', data: a.data, mimeType: a.mimeType })
-    }
+    const blocks = promptBlocks(trimmed, attachments, mentions, session.projectPath)
     void this.runTurn(session, blocks, steering ? message.id : null)
   }
 

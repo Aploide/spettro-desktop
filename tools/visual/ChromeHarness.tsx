@@ -1,5 +1,7 @@
-// The chat chrome: the config bar, the thinking slider and the activation
-// glow.
+// The chat chrome: the composer toolbar's chips, the thinking slider and the
+// activation glow. (The whole composer — menus open, busy, the todo list —
+// is photographed in the real app: app:busy, app:guide, app:slash,
+// app:mention, app:model-menu, app:session-settings.)
 //
 // All are states that only exist while someone is interacting — a stop just
 // reached, a phrase mid-typing — so none shows up in the transcript scenes.
@@ -7,7 +9,7 @@
 // reason enough to be able to photograph them.
 //
 // Pick the page with `?mode=`:
-//   (none)    the config bar and the composer's glow
+//   (none)    the toolbar chips and the composer's glow
 //   thinking  the slider in every state it can be in, and its chip
 //   meteor    the meteor frozen at points of its flight, from Max and from
 //             Low; `&meteorProgress=0.3` (and `&meteorFrom=<stop>`) freezes
@@ -16,7 +18,8 @@
 import type { JSX } from 'react'
 import { createRoot } from 'react-dom/client'
 import ConfigBar from '@renderer/views/chat/ConfigBar'
-import ThinkingSlider from '@renderer/views/chat/ThinkingSlider'
+import ModelMenu from '@renderer/views/chat/ModelMenu'
+import ThinkingSlider, { ThinkingChip } from '@renderer/views/chat/ThinkingSlider'
 import {
   ActivationText,
   ActivationTextarea,
@@ -173,25 +176,43 @@ function Row({ label, children }: { label: string; children: JSX.Element }): JSX
   )
 }
 
+/** The composer's toolbar as it sits in the card: chips left, model right. */
+function Toolbar({ o }: { o: Options }): JSX.Element {
+  const c = chat(options(o))
+  return (
+    <div className="composer-card hz-composer">
+      <div className="composer-toolbar">
+        <ConfigBar chat={c} />
+        <div className="composer-toolbar-spacer" />
+        <ModelMenu chat={c} />
+      </div>
+    </div>
+  )
+}
+
 function Harness(): JSX.Element {
   if (MODE === 'thinking') return <ThinkingPage />
   if (MODE === 'meteor') return <MeteorPage />
   return (
     <div className="hz-root hz-root--chrome">
-      <Row label="Thinking High — the chip opens the slider">
-        <div className="hz-bar">
-          <ConfigBar chat={chat(options({ permission: 'yolo', ultra: false }))} />
-        </div>
+      <Row label="Mode · thinking High · settings (Restricted) … model">
+        <Toolbar o={{ permission: 'restricted', ultra: false }} />
       </Row>
-      <Row label="Ultra lit · workflow size Large">
-        <div className="hz-bar">
-          <ConfigBar chat={chat(options({ permission: 'yolo', ultra: true, size: 'large' }))} />
-        </div>
+      <Row label="Ultra lit · Don’t ask (YOLO) is called out">
+        <Toolbar o={{ permission: 'yolo', ultra: true, size: 'large' }} />
       </Row>
-      <Row label="Ultra paused (Ask first) · workflow size Unbounded">
-        <div className="hz-bar">
-          <ConfigBar
-            chat={chat(options({ permission: 'ask-first', ultra: true, size: 'unbounded' }))}
+      <Row label="Ultra paused (Ask first)">
+        <Toolbar o={{ permission: 'ask-first', ultra: true, size: 'unbounded' }} />
+      </Row>
+
+      <Row label="Composer — an @-mentioned file is a chip in the text">
+        <div className="composer-card hz-composer">
+          <ActivationTextarea
+            className="composer-input"
+            rows={1}
+            value={'Compare @src/components/SaveButton.tsx with @src/views/SettingsForm.tsx and use a workflow'}
+            onChange={() => undefined}
+            mentions={['src/components/SaveButton.tsx', 'src/views/SettingsForm.tsx']}
           />
         </div>
       </Row>
@@ -307,10 +328,10 @@ function ThinkingPage(): JSX.Element {
       </div>
       <Row label="The chip: High · Ultra lit · Ultra paused · Off">
         <div className="hz-bar hz-chips">
-          <ConfigBar chat={chat(only({ permission: 'yolo', ultra: false }))} />
-          <ConfigBar chat={chat(only({ permission: 'yolo', ultra: true }))} />
-          <ConfigBar chat={chat(only({ permission: 'ask-first', ultra: true }))} />
-          <ConfigBar chat={chat(only({ permission: 'yolo', ultra: false, thinking: 'off' }))} />
+          <ThinkingChip chat={chat(only({ permission: 'yolo', ultra: false }))} />
+          <ThinkingChip chat={chat(only({ permission: 'yolo', ultra: true }))} />
+          <ThinkingChip chat={chat(only({ permission: 'ask-first', ultra: true }))} />
+          <ThinkingChip chat={chat(only({ permission: 'yolo', ultra: false, thinking: 'off' }))} />
         </div>
       </Row>
     </div>

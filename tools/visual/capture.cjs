@@ -118,6 +118,21 @@ async function shoot(theme) {
       : ''
   const url = `file://${path.join(DIST, page)}${query}`
   await load(win, url)
+  // An offscreen window never has the focus, so a page in it never sees a
+  // focus event: the composer's menus (slash commands, @-files), which open
+  // only while the field is focused, could not be photographed at all. The
+  // app's scenes run with the page told it is focused, as it is on a desk.
+  // (Turned on once the page has loaded: before that there is no page for
+  // the command to reach, and it never answers. The scenes that type wait
+  // for it.)
+  if (appScene) {
+    try {
+      if (!win.webContents.debugger.isAttached()) win.webContents.debugger.attach('1.3')
+      await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true })
+    } catch (err) {
+      console.warn(`focus emulation unavailable (${err.message})`)
+    }
+  }
   // One rAF is not enough: fonts and the CSS transitions on the cards settle
   // a frame or two later, and a screenshot taken before they do is a lie.
   await new Promise((r) => setTimeout(r, Number(process.env.SHOT_WAIT || 1200)))

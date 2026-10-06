@@ -32,9 +32,10 @@ are built with `tests/wire.ts` `workflowCard` (a port of `render()` and the
 `workflow-continued` (a card a later turn took over, then its successor) and
 `workflow-detail` (every line the text can carry, read without `_meta`).
 
-The `chrome` page shows the config bar (the thinking chip at High, Ultra lit
-and Ultra paused, the workflow size chip) and the composer's glow: a lit
-phrase, a `+500k` budget directive with its hint, and the muted Ask-first
+The `chrome` page shows the composer toolbar (mode, the thinking chip at
+High, Ultra lit and Ultra paused, the settings chip naming the permission —
+amber for Don't ask — and the model button), an @-mentioned file drawn as a
+chip, and the composer's glow: a lit phrase, a `+500k` budget directive with its hint, and the muted Ask-first
 variant with its "switch permission" line. `chrome:thinking` lays out the
 thinking slider in every state (High, Ultra lit, Ultra paused with its
 "Switch to Restricted?" prompt, Extra high, Off, a model that doesn't reason)
@@ -68,7 +69,13 @@ Pick the screen with `?mode=`:
 | `sidebar-menu` | the same, with a row's menu open (Rename… / Pin / Archive / Delete…) |
 | `collapsed` | the sidebar collapsed (Ctrl/Cmd+B), its reopen button leading the header |
 | `switcher` | the Ctrl/Cmd+K quick switcher over many sessions |
-| `busy` | the same turn still running: a live row, and the ticker ("Working… 3s · Esc to interrupt") |
+| `busy` | the same turn still running: a live row, the ticker ("Working… 3s · Esc to interrupt"), the todo list open above the composer (one task under way, one blocked) and the Stop button |
+| `guide` | running, with words typed: Stop steps back and "Guide" sends them to the running agent |
+| `ultra` | Ultra lit: the thinking chip wears it |
+| `slash` | "/" typed: the command menu floating above the card |
+| `mention` | one file picked with "@" (now a chip in the text) and the menu open for a second |
+| `model-menu` | the model menu: favourites first, then each provider, capabilities in words, Manage models… |
+| `session-settings` | the settings popover: permission, the thinking slider, workflow size |
 | `permission-bash`, `permission-diff` | the approval sheet for a command and for an edit |
 | `question` | the ask-user sheet |
 | `settings` | Settings, opened the way a user does (Ctrl+,) |
@@ -80,6 +87,12 @@ The window layout (sidebar width and collapse, terminal drawer) lives in
 localStorage, which persists across scenes in the capture's profile, so
 `appPrelude.ts` resets it before the app loads and applies only what the
 mode asks for.
+
+The modes that type into the composer do it the way a user does — through
+the textarea's value setter React listens behind, then keys — and wait for
+the focus first: the composer's menus open only while it is focused, and an
+offscreen window never is, so the capture turns DevTools focus emulation on
+for `app` scenes once the page has loaded.
 
 `shoot.sh` shoots the main ones as `app:<mode>` scenes. They are taken at the
 real window's size (1280×840, `SHOT_APP_HEIGHT` to change) rather than as a

@@ -10,7 +10,8 @@
 //
 //   app.html?mode=welcome | welcome-empty | welcome-folders | chat | chat-one |
 //                 chat-tools | chat-error | chat-steering |
-//                 busy | sidebar-many | sidebar-menu | collapsed | switcher |
+//                 busy | guide | ultra | model-menu | session-settings | slash |
+//                 mention | sidebar-many | sidebar-menu | collapsed | switcher |
 //                 permission-bash | permission-diff | question | settings |
 //                 onboarding | installing | install-failed | gate | failure |
 //                 reconnecting
@@ -20,7 +21,7 @@ import { createRoot } from 'react-dom/client'
 import App from '@renderer/App'
 import type { ACPConfigOption, ACPPermissionRequest, ACPQuestionRequest } from '@shared/acp'
 import type { MainEvent } from '@shared/ipc'
-import { EMPTY_EXTENSIONS, type ExtensionsState } from '@shared/extensions'
+import { EMPTY_EXTENSIONS, type ExtensionsState, type ModelEntry } from '@shared/extensions'
 import type {
   AppStateDTO,
   ChatDetail,
@@ -266,6 +267,48 @@ function select(
 /** The thinking slider, opened over the composer: at High, or with Ultra
  *  saved under Ask first (paused, offering Restricted). */
 const THINKING_PAUSED = MODE === 'thinking-paused'
+/** Ultra lit: the toolbar's thinking chip wears it. */
+const ULTRA_LIT = MODE === 'ultra'
+
+/** The model option as the CLI groups it (config_options.go
+ *  modelConfigOption): one group per connected provider, `provider:model`
+ *  values. */
+const MODEL_OPTION: ACPConfigOption = {
+  id: 'model',
+  name: 'Model',
+  description: 'Active model for this session',
+  category: 'model',
+  kind: {
+    type: 'select',
+    currentValue: 'anthropic:sonnet',
+    flat: [],
+    groups: [
+      {
+        name: 'Anthropic',
+        options: [
+          { value: 'anthropic:haiku', name: 'Claude Haiku' },
+          { value: 'anthropic:opus', name: 'Claude Opus' },
+          { value: 'anthropic:sonnet', name: 'Claude Sonnet' }
+        ]
+      },
+      {
+        name: 'OpenAI',
+        options: [
+          { value: 'openai:gpt-5', name: 'GPT-5' },
+          { value: 'openai:gpt-5-mini', name: 'GPT-5 mini' },
+          { value: 'openai:gpt-4.1', name: 'GPT-4.1' }
+        ]
+      },
+      {
+        name: 'Ollama',
+        options: [
+          { value: 'ollama:qwen3-coder', name: 'qwen3-coder:30b' },
+          { value: 'ollama:llama3.2', name: 'llama3.2:3b' }
+        ]
+      }
+    ]
+  }
+}
 
 const OPTIONS: ACPConfigOption[] = [
   select('mode', 'Mode', 'coding', [
@@ -273,12 +316,16 @@ const OPTIONS: ACPConfigOption[] = [
     { value: 'coding', name: 'Coding' },
     { value: 'ask', name: 'Ask' }
   ]),
-  select('model', 'Model', 'anthropic:sonnet', [{ value: 'anthropic:sonnet', name: 'Claude Sonnet' }]),
-  select('permission', 'Permission', THINKING_PAUSED ? 'ask-first' : 'restricted', [
-    { value: 'ask-first', name: 'Ask first' },
-    { value: 'restricted', name: 'Restricted' },
-    { value: 'yolo', name: 'YOLO' }
-  ]),
+  MODEL_OPTION,
+  {
+    ...select('permission', 'Permission', THINKING_PAUSED ? 'ask-first' : 'restricted', [
+      { value: 'ask-first', name: 'Ask first', description: 'Prompt before running tools, edits, or commands' },
+      { value: 'restricted', name: 'Restricted', description: 'Allow safe actions; prompt for sensitive ones' },
+      { value: 'yolo', name: 'YOLO', description: 'Automatically approve all tool, path, and command requests' }
+    ]),
+    category: undefined,
+    description: 'How Spettro requests approval for actions'
+  },
   // config_options.go thinkingConfigOption / ultraConfigOption.
   select('thinking', 'Thinking', 'high', [
     { value: 'off', name: 'Off' },
@@ -294,11 +341,27 @@ const OPTIONS: ACPConfigOption[] = [
     description: THINKING_PAUSED
       ? 'Ultracode: substantive tasks run as dynamic workflows (suspended under Ask first — workflows need Restricted or YOLO)'
       : 'Ultracode: substantive tasks run as dynamic workflows',
-    kind: { type: 'boolean', currentValue: THINKING_PAUSED }
+    kind: { type: 'boolean', currentValue: THINKING_PAUSED || ULTRA_LIT }
+  },
+  {
+    id: 'workflow_size',
+    name: 'Workflow size',
+    description: 'How many agents a workflow run plans around (a guideline, not a cap)',
+    kind: {
+      type: 'select',
+      currentValue: 'medium',
+      groups: [],
+      flat: [
+        { value: 'small', name: 'Small', description: '~5 agents per run · fan-outs up to ~3 wide' },
+        { value: 'medium', name: 'Medium', description: '~10 agents per run · fan-outs up to ~6 wide' },
+        { value: 'large', name: 'Large', description: '~30 agents per run · fan-outs up to ~16 wide' },
+        { value: 'unbounded', name: 'Unbounded', description: 'no agent guideline · fan-outs up to ~64 wide' }
+      ]
+    }
   }
 ]
 
-const BUSY = MODE === 'busy' || MODE === 'chat-steering'
+const BUSY = MODE === 'busy' || MODE === 'chat-steering' || MODE === 'guide'
 
 const CHAT: ChatDetail = {
   id: 'c1',
@@ -311,15 +374,32 @@ const CHAT: ChatDetail = {
   createdAt: NOW - 25 * MIN,
   items: transcript(MODE),
   configOptions: OPTIONS,
+  // A slice of what the CLI advertises (internal/acp/commands.go).
   commands: [
     { name: 'help', description: 'Show available commands' },
-    { name: 'compact', description: 'Summarise the conversation to free up context' }
+    { name: 'mode', description: 'Switch the agent mode', inputHint: '<plan|coding|ask>' },
+    { name: 'models', description: 'List and pick models' },
+    { name: 'thinking', description: 'Set the thinking level', inputHint: '<off|low|medium|high|x-high|max>' },
+    { name: 'ultra', description: 'Turn ultracode on or off', inputHint: '<on|off>' },
+    { name: 'compact', description: 'Summarise the conversation to free up context' },
+    { name: 'diff', description: 'Show the uncommitted changes' },
+    { name: 'memory', description: 'Show or edit what Spettro remembers' }
   ],
-  plan: [
-    { content: 'Find where the double submit comes from', status: 'completed' },
-    { content: 'Disable SaveButton while saving', status: 'completed' },
-    { content: 'Run the tests and lint', status: BUSY ? 'in_progress' : 'completed' }
-  ],
+  // planEntriesFromTodos (content.go): dependency order, "(blocked)" folded
+  // into the text of a pending task whose prerequisites aren't done.
+  plan: BUSY
+    ? [
+        { content: 'Find where the double submit comes from', status: 'completed' },
+        { content: 'Disable SaveButton while saving', status: 'completed' },
+        { content: 'Run the tests and lint', status: 'in_progress' },
+        { content: 'Apply the same fix to ProfileForm', status: 'pending' },
+        { content: 'Update the changelog (blocked)', status: 'pending' }
+      ]
+    : [
+        { content: 'Find where the double submit comes from', status: 'completed' },
+        { content: 'Disable SaveButton while saving', status: 'completed' },
+        { content: 'Run the tests and lint', status: 'completed' }
+      ],
   usage: { used: 38_400, size: 200_000, tokensUsed: 51_200 },
   lastTurn: null,
   sessionTokens: 51_200
@@ -405,6 +485,28 @@ const NO_SELECTION = MODE === 'welcome' || MODE === 'welcome-empty' || MODE === 
 
 // --------------------------------------------------------------- extensions
 
+function catalog(
+  provider: string,
+  providerName: string,
+  name: string,
+  displayName: string,
+  o: { vision?: boolean; reasoning?: boolean; local?: boolean; favorite?: boolean; active?: boolean }
+): ModelEntry {
+  return {
+    provider,
+    providerName,
+    name,
+    displayName,
+    vision: o.vision ?? false,
+    reasoning: o.reasoning ?? false,
+    toolCall: true,
+    context: o.local ? 32_000 : 200_000,
+    local: o.local ?? false,
+    favorite: o.favorite ?? false,
+    active: o.active ?? false
+  }
+}
+
 const EXTENSIONS: ExtensionsState = {
   ...EMPTY_EXTENSIONS,
   account: {
@@ -426,19 +528,14 @@ const EXTENSIONS: ExtensionsState = {
   },
   models: {
     models: [
-      {
-        provider: 'anthropic',
-        providerName: 'Anthropic',
-        name: 'sonnet',
-        displayName: 'Claude Sonnet',
-        vision: true,
-        reasoning: true,
-        toolCall: true,
-        context: 200_000,
-        local: false,
-        favorite: true,
-        active: true
-      }
+      catalog('anthropic', 'Anthropic', 'sonnet', 'Claude Sonnet', { vision: true, reasoning: true, favorite: true, active: true }),
+      catalog('anthropic', 'Anthropic', 'opus', 'Claude Opus', { vision: true, reasoning: true }),
+      catalog('anthropic', 'Anthropic', 'haiku', 'Claude Haiku', { vision: true }),
+      catalog('openai', 'OpenAI', 'gpt-5', 'GPT-5', { vision: true, reasoning: true, favorite: true }),
+      catalog('openai', 'OpenAI', 'gpt-5-mini', 'GPT-5 mini', { reasoning: true }),
+      catalog('openai', 'OpenAI', 'gpt-4.1', 'GPT-4.1', { vision: true }),
+      catalog('ollama', 'Ollama', 'qwen3-coder', 'qwen3-coder:30b', { local: true, favorite: true }),
+      catalog('ollama', 'Ollama', 'llama3.2', 'llama3.2:3b', { local: true })
     ],
     activeProvider: 'anthropic',
     activeModel: 'sonnet'
@@ -610,7 +707,20 @@ const ANSWERS: Record<string, unknown> = {
   getChat: CHAT,
   gitStat: GIT,
   terminalList: [],
-  loadMemory: '- Prefers small, focused commits.\n- Uses pnpm in this repo.\n'
+  loadMemory: '- Prefers small, focused commits.\n- Uses pnpm in this repo.\n',
+  listProjectFiles: [
+    'package.json',
+    'README.md',
+    'src/App.tsx',
+    'src/components/SaveButton.tsx',
+    'src/components/SaveButton.test.tsx',
+    'src/components/Button.tsx',
+    'src/views/SettingsForm.tsx',
+    'src/views/SettingsForm.test.tsx',
+    'src/views/ProfileForm.tsx',
+    'src/lib/api.ts',
+    'src/lib/settings.ts'
+  ]
 }
 
 // Several views subscribe (the store, the terminal drawer, …), so this keeps
@@ -664,6 +774,43 @@ function pushEvents(): void {
   if (MODE === 'chat-error') {
     setTimeout(() => click('button[aria-label^="Bash npm test"]'), 60)
   }
+  // The composer, driven the way a user drives it: typed into (through the
+  // value setter React listens behind), keys pressed, buttons clicked.
+  const type = (text: string): void => {
+    const el = document.querySelector<HTMLTextAreaElement>('[data-testid="composer-input"]')
+    if (!el) return
+    el.focus()
+    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set
+    setter?.call(el, text)
+    el.setSelectionRange(text.length, text.length)
+    el.dispatchEvent(new Event('input', { bubbles: true }))
+  }
+  const key = (k: string): void => {
+    document
+      .querySelector('[data-testid="composer-input"]')
+      ?.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true }))
+  }
+  // The menus open only while the field has the focus, which an offscreen
+  // page gets once the capture turns focus emulation on, just after load.
+  const focused = (then: () => void, waited = 0): void => {
+    if (document.hasFocus() || waited > 2000) then()
+    else setTimeout(() => focused(then, waited + 25), 25)
+  }
+  if (MODE === 'guide') setTimeout(() => type('Also make ProfileForm await the save the same way.'), 60)
+  if (MODE === 'slash') focused(() => setTimeout(() => type('/'), 60))
+  if (MODE === 'mention') {
+    // One file chosen (now a chip), and the menu open for a second.
+    focused(() => {
+      setTimeout(() => type('Compare @savebut'), 60)
+      setTimeout(() => key('Enter'), 260)
+      setTimeout(() => {
+        const el = document.querySelector<HTMLTextAreaElement>('[data-testid="composer-input"]')
+        if (el) type(el.value + 'with @sett')
+      }, 420)
+    })
+  }
+  if (MODE === 'model-menu') setTimeout(() => click('[data-testid="model-button"]'), 60)
+  if (MODE === 'session-settings') setTimeout(() => click('[data-testid="session-settings"]'), 60)
   if (MODE === 'thinking' || MODE === 'thinking-paused') {
     setTimeout(() => click('[data-testid="thinking-chip"]'), 60)
   }

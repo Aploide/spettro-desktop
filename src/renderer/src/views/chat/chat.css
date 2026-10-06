@@ -469,7 +469,7 @@
 .composer-outer {
   position: relative;
   flex: none;
-  padding: var(--sp-sm) var(--sp-lg) var(--sp-md);
+  padding: var(--sp-xs) var(--sp-lg) var(--sp-md);
 }
 
 /* The transcript fades out above the composer instead of stopping at a
@@ -486,21 +486,42 @@
   pointer-events: none;
 }
 
-/* Rounded card on the raised surface (white 0.14 in dark / white in light in
-   the Swift original). */
+/* The composer shares the transcript's measure, so the card lines up with
+   the messages above it instead of spanning a wide window edge to edge. */
+.composer-column {
+  max-width: var(--measure);
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* What the floating menus hang from. */
+.composer-anchor {
+  position: relative;
+}
+
 .composer-card {
   display: flex;
   flex-direction: column;
   background: var(--surface-raised);
   border: 1px solid var(--hairline);
   border-radius: var(--rad-lg);
+  box-shadow: var(--shadow-composer);
+  transition:
+    border-color 160ms ease,
+    box-shadow 160ms ease;
 }
 
 .composer-card--focused {
-  border-color: color-mix(in srgb, var(--accent) 50%, transparent);
-  box-shadow: 0 0 0 0.5px color-mix(in srgb, var(--accent) 50%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--hairline));
+  box-shadow:
+    var(--shadow-composer),
+    0 0 0 3px color-mix(in srgb, var(--accent) 10%, transparent);
 }
 
+/* 1 to 12 lines of 22px; the component sets the height from the content
+   and max-height stops it, after which the field scrolls. */
 .composer-input {
   width: 100%;
   border: none;
@@ -509,73 +530,132 @@
   background: transparent;
   color: var(--text-primary);
   font: inherit;
-  font-size: 15px;
-  line-height: 20px;
-  padding: var(--sp-md);
-  min-height: calc(2 * 20px + 2 * var(--sp-md));
-  max-height: calc(12 * 20px + 2 * var(--sp-md));
+  font-size: var(--fs-body);
+  line-height: 22px;
+  padding: 14px 16px 6px;
+  min-height: calc(22px + 20px);
+  max-height: calc(12 * 22px + 20px);
   overflow-y: auto;
   user-select: text;
 }
 
 .composer-input::placeholder {
-  color: var(--text-secondary);
+  color: var(--text-tertiary);
 }
 
-/* Slash-command palette */
-.command-palette {
-  display: flex;
-  flex-direction: column;
-  padding-top: 4px;
+/* An @-mentioned file, painted in the mirror under its own characters. No
+   padding and no weight change: either would shift every glyph after it
+   out from under the caret. The ring fakes the padding. */
+.mention-chip {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 13%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 13%, transparent);
+  border-radius: 4px;
 }
 
-.command-row {
+/* Toolbar inside the card */
+.composer-toolbar {
   display: flex;
   align-items: center;
-  gap: var(--sp-sm);
-  width: 100%;
-  padding: 6px var(--sp-md);
+  gap: 2px;
+  padding: 4px var(--sp-sm) var(--sp-sm);
+  min-width: 0;
+}
+
+.composer-toolbar-spacer {
+  flex: 1;
+  min-width: var(--sp-sm);
+}
+
+.composer-tool {
+  flex: none;
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border: none;
+  border-radius: var(--rad-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 0;
+}
+
+.composer-tool:hover {
+  background: var(--hover-fill);
+  color: var(--text-primary);
+}
+
+/* Send: a filled circle in the text colour with an up arrow — the Claude
+   app's button. Busy, it becomes a stop square; with words typed while
+   busy, a "Guide" pill joins it. */
+.composer-send {
+  flex: none;
+  height: 32px;
+  min-width: 32px;
+  margin-left: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 0;
+  border: none;
+  border-radius: 16px;
+  background: var(--text-primary);
+  color: var(--canvas);
+  font: inherit;
+  font-size: var(--fs-md);
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    opacity 120ms ease,
+    transform 120ms ease;
+}
+
+.composer-send:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--text-primary) 86%, var(--canvas));
+}
+
+.composer-send:active:not(:disabled) {
+  transform: scale(0.94);
+}
+
+.composer-send:disabled {
+  opacity: 0.25;
+  cursor: default;
+}
+
+.composer-send--guide {
+  padding: 0 14px 0 10px;
+}
+
+/* Beside Guide, Stop steps back to an outline so the two don't compete. */
+.composer-send--stop:not(:last-child) {
   background: transparent;
   color: var(--text-primary);
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
+  box-shadow: inset 0 0 0 1px var(--hairline);
 }
 
-.command-row--selected {
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
+.composer-send--stop:not(:last-child):hover {
+  background: var(--hover-fill);
 }
 
-.command-name {
-  font-family: var(--font-mono);
-  font-size: 13px;
-  font-weight: 500;
+.composer-send:focus-visible,
+.composer-tool:focus-visible,
+.config-chip:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 60%, transparent);
+  outline-offset: 1px;
 }
 
-.command-hint {
-  font-family: var(--font-mono);
-  font-size: 12px;
-  color: color-mix(in srgb, var(--text-secondary) 65%, transparent);
-}
-
-.command-spacer {
-  flex: 1;
-}
-
-.command-description {
-  font-size: 12px;
+/* A short line under the card ("Only images can be attached for now"). */
+.composer-hint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 var(--sp-md);
+  font-size: var(--fs-sm);
   color: var(--text-secondary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 50%;
-}
-
-.command-palette-divider {
-  height: 1px;
-  background: var(--hairline);
-  margin-top: 4px;
 }
 
 /* Attachments row */
@@ -584,140 +664,397 @@
   gap: var(--sp-sm);
   overflow-x: auto;
   scrollbar-width: none;
-  padding: var(--sp-sm) var(--sp-md) 0;
+  padding: var(--sp-md) var(--sp-md) 0;
 }
 
 .attachment-thumb {
   position: relative;
   flex: none;
-  width: 52px;
-  height: 52px;
-  margin-top: 6px;
-  margin-right: 6px;
+  width: 56px;
+  height: 56px;
+  margin: 4px 4px 0 0;
 }
 
 .attachment-thumb-img {
-  width: 52px;
-  height: 52px;
+  width: 56px;
+  height: 56px;
   object-fit: cover;
-  border-radius: var(--rad-sm);
+  border-radius: 10px;
   display: block;
-  background: var(--hairline);
+  background: var(--surface-sunken);
+  box-shadow: inset 0 0 0 1px var(--hairline);
 }
 
 .attachment-remove {
   position: absolute;
   top: -6px;
   right: -6px;
-  width: 16px;
-  height: 16px;
+  width: 20px;
+  height: 20px;
   padding: 0;
-  border: none;
-  background: transparent;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-/* Options row */
-.composer-options-row {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-sm);
-  padding: 0 var(--sp-sm) var(--sp-sm);
-  min-width: 0;
-}
-
-.composer-options-spacer {
-  flex: 1;
-  min-width: var(--sp-sm);
-}
-
-/* 34×34 circular glass buttons. Named for the composer on purpose: the
-   shell's `.icon-btn` is a bare glyph button, and a shared global name let
-   whichever stylesheet loaded last restyle the other's buttons. */
-.composer-btn {
-  flex: none;
-  width: 34px;
-  height: 34px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+  border: 2px solid var(--surface-raised);
   border-radius: 50%;
-  border: 1px solid var(--hairline);
-  background: var(--surface-raised);
-  color: var(--text-secondary);
+  background: var(--text-primary);
+  color: var(--canvas);
   cursor: pointer;
-  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 120ms ease;
 }
 
-.composer-btn:hover {
-  background: color-mix(in srgb, var(--surface-raised) 85%, var(--text-primary));
+.attachment-thumb:hover .attachment-remove,
+.attachment-remove:focus-visible {
+  opacity: 1;
 }
 
-.send-btn:disabled {
-  color: color-mix(in srgb, var(--text-secondary) 50%, transparent);
-  cursor: default;
-}
-
-.send-btn:disabled:hover {
-  background: var(--surface-raised);
-}
-
-.send-btn--active {
-  background: var(--accent);
-  border-color: transparent;
-  color: var(--accent-contrast); /* Swift: Color.white glyph on the accent-tinted circle */
-}
-
-.send-btn--active:hover {
-  background: color-mix(in srgb, var(--accent) 88%, var(--accent-contrast));
+/* With no hover there is nothing to reveal it: keep it shown. */
+@media (hover: none) {
+  .attachment-remove {
+    opacity: 1;
+  }
 }
 
 /* ------------------------------------------------------------------ */
-/* ConfigBar                                                           */
+/* Floating menus: slash commands and @-files                          */
+/* ------------------------------------------------------------------ */
+
+.composer-menu {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 8px);
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-height: 320px;
+  overflow-y: auto;
+  padding: var(--sp-xs);
+  background: var(--surface-raised);
+  border: 1px solid var(--hairline);
+  border-radius: var(--rad-md);
+  box-shadow: var(--shadow-md);
+}
+
+.composer-menu-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-sm);
+  width: 100%;
+  min-width: 0;
+  padding: 7px 10px;
+  border: none;
+  border-radius: var(--rad-sm);
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: var(--fs-md);
+  text-align: left;
+  cursor: pointer;
+}
+
+.composer-menu-row--selected {
+  background: var(--selected-fill);
+}
+
+.composer-menu-empty {
+  padding: 10px 12px;
+  font-size: var(--fs-md);
+  color: var(--text-secondary);
+}
+
+.command-name {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: var(--fs-md);
+  font-weight: 500;
+}
+
+.command-hint {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  color: var(--text-tertiary);
+}
+
+.command-description {
+  margin-left: auto;
+  padding-left: var(--sp-md);
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.mention-menu-icon {
+  flex: none;
+  color: var(--text-tertiary);
+}
+
+.mention-menu-name {
+  flex: none;
+  font-weight: 500;
+  max-width: 60%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mention-menu-dir {
+  min-width: 0;
+  font-size: var(--fs-sm);
+  color: var(--text-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ------------------------------------------------------------------ */
+/* Todo list (the agent's plan), pinned above the composer             */
+/* ------------------------------------------------------------------ */
+
+/* Inset from the card's edges and tucked behind its top edge, a tab the
+   card sits on, so it reads as part of the composer rather than one more
+   message in the thread. */
+.todo-list {
+  margin: 0 var(--sp-lg) -6px;
+  padding-bottom: 6px;
+  background: color-mix(in srgb, var(--surface-raised) 60%, var(--canvas));
+  border: 1px solid var(--hairline);
+  border-bottom: none;
+  border-radius: var(--rad-md) var(--rad-md) 0 0;
+  overflow: hidden;
+}
+
+/* Over the tab: its bottom edge disappears under the card. */
+.composer-anchor {
+  z-index: 1;
+}
+
+.todo-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-sm);
+  width: 100%;
+  padding: 7px var(--sp-md);
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: var(--fs-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.todo-head:hover {
+  background: var(--hover-fill);
+}
+
+.todo-head:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 60%, transparent);
+  outline-offset: -2px;
+}
+
+.todo-head-icon {
+  flex: none;
+}
+
+.todo-summary {
+  flex: none;
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.todo-current {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.todo-chevron {
+  flex: none;
+  margin-left: auto;
+  color: var(--text-tertiary);
+  transform: rotate(180deg);
+  transition: transform 160ms ease;
+}
+
+.todo-list--open .todo-chevron {
+  transform: none;
+}
+
+.todo-items {
+  list-style: none;
+  margin: 0;
+  padding: 0 var(--sp-md) var(--sp-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  /* About seven rows, then it scrolls: the transcript stays the point. */
+  max-height: 188px;
+  overflow-y: auto;
+}
+
+.todo-item {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-sm);
+  font-size: var(--fs-md);
+  line-height: 20px;
+  padding: 2px 0;
+  color: var(--text-primary);
+}
+
+.todo-glyph {
+  flex: none;
+  display: inline-flex;
+  height: 20px;
+  align-items: center;
+  color: var(--text-tertiary);
+}
+
+.todo-item--in_progress .todo-glyph {
+  color: var(--accent);
+}
+
+.todo-item--completed .todo-glyph {
+  color: var(--success);
+}
+
+.todo-text {
+  min-width: 0;
+}
+
+.todo-item--completed .todo-text {
+  color: var(--text-tertiary);
+  text-decoration: line-through;
+  text-decoration-color: color-mix(in srgb, var(--text-tertiary) 70%, transparent);
+}
+
+/* The task under way shimmers, the way "Thinking…" does in the transcript. */
+.todo-item--in_progress .todo-text {
+  font-weight: 500;
+  background-image: linear-gradient(
+    90deg,
+    var(--text-primary) 0%,
+    var(--text-primary) 35%,
+    var(--text-tertiary) 50%,
+    var(--text-primary) 65%,
+    var(--text-primary) 100%
+  );
+  background-size: 300% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: todo-shimmer 2.4s linear infinite;
+}
+
+@keyframes todo-shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: 0 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .todo-item--in_progress .todo-text {
+    animation: none;
+    background: none;
+    color: var(--text-primary);
+  }
+}
+
+.todo-item--blocked .todo-text {
+  color: var(--text-secondary);
+}
+
+.todo-tag {
+  flex: none;
+  margin-top: 2px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--hover-fill);
+  color: var(--text-secondary);
+  font-size: var(--fs-xs);
+  line-height: 16px;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* ------------------------------------------------------------------ */
+/* Toolbar chips: mode, thinking, settings, model                      */
 /* ------------------------------------------------------------------ */
 
 .config-bar {
   display: flex;
   align-items: center;
-  gap: var(--sp-sm);
+  gap: 2px;
   min-width: 0;
-  overflow-x: auto;
-  scrollbar-width: none;
 }
 
-/* Glass chip: subtle raised surface, hairline border, capsule-rounded. */
+/* 28px, borderless, quiet until hovered. The border is kept (transparent)
+   so the thinking chip's Ultra and Paused states can draw one without the
+   chip changing size. */
 .config-chip {
   flex: none;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 8px var(--sp-lg);
-  border-radius: var(--rad-lg);
-  background: var(--surface-raised);
-  border: 1px solid var(--hairline);
-  color: var(--text-primary);
+  gap: 5px;
+  height: 28px;
+  min-width: 0;
+  padding: 0 var(--sp-sm);
+  border-radius: var(--rad-sm);
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-secondary);
   font: inherit;
-  font-size: 13px;
+  font-size: var(--fs-md);
   font-weight: 500;
   cursor: pointer;
   white-space: nowrap;
 }
 
-.config-chip:hover {
-  background: color-mix(in srgb, var(--surface-raised) 85%, var(--text-primary));
+.config-chip:hover,
+.config-chip[aria-expanded='true'] {
+  background: var(--hover-fill);
+  color: var(--text-primary);
 }
 
-.config-chip--on {
-  background: var(--accent);
-  border-color: transparent;
-  color: var(--accent-contrast); /* Swift: white foreground on accent-tinted glass */
+/* The mode wears its own colour: Plan, Coding and Ask look different at a
+   glance, so the bar says which agent is running. */
+.config-chip--tinted,
+.config-chip--tinted:hover,
+.config-chip--tinted[aria-expanded='true'] {
+  color: var(--chip-tint);
 }
 
-.config-chip--on:hover {
-  background: color-mix(in srgb, var(--accent) 88%, var(--accent-contrast));
+.config-chip--tinted:hover,
+.config-chip--tinted[aria-expanded='true'] {
+  background: color-mix(in srgb, var(--chip-tint) 12%, transparent);
+}
+
+.config-chip.thinking-chip--paused {
+  border-color: var(--hairline);
+}
+
+/* Don't ask (YOLO) is the one setting worth a second look before sending. */
+.settings-chip--warn,
+.settings-chip--warn:hover {
+  color: var(--warning);
 }
 
 .config-chip-label {
@@ -727,10 +1064,15 @@
 }
 
 .config-chip-chevron {
-  opacity: 0.5;
+  flex: none;
+  opacity: 0.6;
 }
 
-/* Select popover menu */
+.model-button .config-chip-label {
+  max-width: 200px;
+}
+
+/* Select popover menu (the mode chip) */
 .config-menu {
   min-width: 220px;
   max-width: 340px;
@@ -764,7 +1106,7 @@
   align-items: flex-start;
   gap: 6px;
   width: 100%;
-  padding: var(--sp-xs) var(--sp-sm);
+  padding: 6px var(--sp-sm);
   border: none;
   border-radius: var(--rad-sm);
   background: transparent;
@@ -775,7 +1117,7 @@
 }
 
 .config-menu-row:hover {
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  background: var(--hover-fill);
 }
 
 .config-menu-check {
@@ -812,4 +1154,364 @@
 .config-menu-hint {
   margin-left: 6px;
   font-size: 12px;
+}
+
+/* ------------------------------------------------------------------ */
+/* Model menu                                                          */
+/* ------------------------------------------------------------------ */
+
+/* The search stays put and the list scrolls: the popover is a column whose
+   one flexible child is the list. */
+.model-menu {
+  width: 320px;
+  max-height: min(480px, 70vh);
+  padding: 0;
+  gap: 0;
+  overflow: hidden;
+}
+
+.model-menu-panel {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.model-menu-search {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-sm);
+  padding: 10px var(--sp-md);
+  border-bottom: 1px solid var(--hairline);
+  color: var(--text-tertiary);
+}
+
+.model-menu-search input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: var(--fs-md);
+}
+
+.model-menu-search input::placeholder {
+  color: var(--text-tertiary);
+}
+
+.model-menu-list {
+  scrollbar-width: thin;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: var(--sp-xs);
+}
+
+.model-menu-heading {
+  padding: var(--sp-sm) var(--sp-sm) var(--sp-xs);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--text-tertiary);
+}
+
+.model-menu-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-sm);
+  width: 100%;
+  padding: 6px var(--sp-sm);
+  border: none;
+  border-radius: var(--rad-sm);
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.model-menu-row--active {
+  background: var(--hover-fill);
+}
+
+.model-menu-texts {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.model-menu-name {
+  font-size: var(--fs-md);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-menu-hint {
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+}
+
+.model-menu-check {
+  flex: none;
+  color: var(--accent);
+}
+
+.model-menu-empty {
+  padding: var(--sp-md);
+  font-size: var(--fs-md);
+  color: var(--text-secondary);
+}
+
+.model-menu-manage {
+  flex: none;
+  padding: 10px var(--sp-md);
+  border: none;
+  border-top: 1px solid var(--hairline);
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: var(--fs-md);
+  text-align: left;
+  cursor: pointer;
+}
+
+.model-menu-manage:hover {
+  background: var(--hover-fill);
+  color: var(--text-primary);
+}
+
+/* ------------------------------------------------------------------ */
+/* Session settings popover                                            */
+/* ------------------------------------------------------------------ */
+
+.session-settings {
+  width: 360px;
+  padding: 0;
+  gap: 0;
+}
+
+.session-settings-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-lg);
+  padding: var(--sp-md) var(--sp-lg) var(--sp-lg);
+}
+
+.session-settings-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp-sm);
+}
+
+.session-settings-title {
+  font-size: var(--fs-md);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.session-settings-caption {
+  font-size: var(--fs-xs);
+  color: var(--text-tertiary);
+}
+
+.session-settings-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.session-settings-section + .session-settings-section {
+  border-top: 1px solid var(--hairline);
+  padding-top: var(--sp-md);
+}
+
+.session-settings-label {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.session-choices {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 0 calc(-1 * var(--sp-sm));
+}
+
+.session-choice {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  padding: 6px var(--sp-sm);
+  border: none;
+  border-radius: var(--rad-sm);
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.session-choice:hover {
+  background: var(--hover-fill);
+}
+
+.session-choice:focus-visible,
+.session-segment:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 60%, transparent);
+  outline-offset: -2px;
+}
+
+.session-choice-dot {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  margin-top: 2px;
+  border-radius: 50%;
+  border: 1.5px solid var(--text-tertiary);
+}
+
+.session-choice--on .session-choice-dot {
+  border-color: var(--accent);
+  background: var(--accent);
+  box-shadow: inset 0 0 0 3px var(--surface-raised);
+}
+
+.session-settings-texts {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.session-settings-name {
+  font-size: var(--fs-md);
+  font-weight: 500;
+}
+
+.session-settings-gloss {
+  font-weight: 400;
+  color: var(--text-secondary);
+}
+
+.session-settings-description {
+  font-size: var(--fs-xs);
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+
+.session-segments {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  gap: 2px;
+  padding: 2px;
+  border-radius: 10px;
+  background: var(--surface-sunken);
+}
+
+.session-segment {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  min-width: 0;
+  padding: 5px 4px;
+  border: none;
+  border-radius: var(--rad-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  cursor: pointer;
+}
+
+.session-segment:hover {
+  color: var(--text-primary);
+}
+
+.session-segment--on {
+  background: var(--surface-raised);
+  color: var(--text-primary);
+  box-shadow: var(--shadow-sm);
+}
+
+.session-segment-name {
+  font-size: var(--fs-sm);
+  font-weight: 500;
+}
+
+.session-segment-hint {
+  font-size: var(--fs-xs);
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
+
+.session-switch-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-md);
+  cursor: pointer;
+}
+
+.session-switch {
+  appearance: none;
+  flex: none;
+  position: relative;
+  width: 32px;
+  height: 20px;
+  margin: 0;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--text-primary) 18%, transparent);
+  cursor: pointer;
+  transition: background 160ms ease;
+}
+
+.session-switch::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-sm);
+  transition: transform 160ms ease;
+}
+
+.session-switch:checked {
+  background: var(--accent);
+}
+
+.session-switch:checked::after {
+  transform: translateX(12px);
+}
+
+/* Lit Ultra keeps the slider's fire on the toolbar chip: tinted like the
+   mode chip, so the one setting that changes what a turn *is* reads at a
+   glance. (Stated here, after the chip's quiet defaults above.) */
+.config-chip.thinking-chip--ultra {
+  background: color-mix(in srgb, var(--ultra-flame) 10%, transparent);
+  border-color: color-mix(in srgb, var(--ultra-flame) 30%, transparent);
+}
+
+.config-chip.thinking-chip--ultra:hover,
+.config-chip.thinking-chip--ultra[aria-expanded='true'] {
+  background: color-mix(in srgb, var(--ultra-flame) 16%, transparent);
+}
+
+/* No model yet: the button asks for one, in the accent, rather than
+   standing there as a bare chevron. */
+.model-button--unset,
+.model-button--unset:hover {
+  color: var(--accent);
 }

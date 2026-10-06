@@ -147,7 +147,7 @@ export default function SettingsView({ initialPane = 'general', onClose }: Props
         />
       )}
       {showConnect && <ConnectProvidersView onClose={() => setShowConnect(false)} />}
-      {showModels && <ModelPickerView onClose={() => setShowModels(false)} />}
+      {showModels && <ModelPickerView chatId={app?.selectedSessionId ?? null} onClose={() => setShowModels(false)} />}
     </>
   )
 }

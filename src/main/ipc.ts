@@ -8,6 +8,7 @@ import { join } from 'path'
 import { EVENT_CHANNEL, INVOKE_CHANNEL, type MainEvent, type RendererApi } from '../shared/ipc'
 import type { AppModel } from './model/appModel'
 import { gitStat } from './model/gitStat'
+import { listProjectFiles } from './model/projectFiles'
 import { loadMemory, saveMemory } from './model/memoryStore'
 import type { RemoteHost } from './remote/host'
 import type { TerminalManager } from './terminal/panels'
@@ -94,7 +95,8 @@ export function registerIpc(
     importCLISession: (sessionId, projectPath) => model.importCLISession(sessionId, projectPath),
 
     // -- Prompting ----------------------------------------------------------
-    send: async (chatId, text, attachments) => model.send(chatId, text, attachments, null),
+    send: async (chatId, text, attachments, mentions) =>
+      model.send(chatId, text, attachments, null, Array.isArray(mentions) ? mentions : []),
     cancel: async (chatId) => model.cancel(chatId),
     retryLast: async (chatId) => model.retryLast(chatId),
 
@@ -192,7 +194,8 @@ export function registerIpc(
     showItemInFolder: async (path) => {
       shell.showItemInFolder(path)
     },
-    gitStat: (projectPath) => gitStat(projectPath)
+    gitStat: (projectPath) => gitStat(projectPath),
+    listProjectFiles: (projectPath) => listProjectFiles(projectPath)
   }
 
   ipcMain.handle(INVOKE_CHANNEL, (_event, method: string, ...args: unknown[]) => {

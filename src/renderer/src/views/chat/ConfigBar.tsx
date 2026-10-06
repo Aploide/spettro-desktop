@@ -1,59 +1,59 @@
-// Port of Spettro/Views/ConfigBar.swift (doc 26): the data-driven row of
-// glass chips for the agent-advertised session config options. Selects render
-// as a chip with a popover menu (grouped options get section headers);
-// booleans render as a toggle chip. Fully data-driven — whatever the CLI
-// advertises shows up without code changes.
+// The composer toolbar's option cluster: the mode chip, the thinking chip and
+// the settings button. Port of Spettro/Views/ConfigBar.swift (doc 26), which
+// drew every advertised option as a chip; the CLI now sends six, and six
+// chips under a text field read as a control panel. What changes from one
+// message to the next stays a chip here — the mode (Plan / Coding / Ask,
+// tinted with its colour) and how hard the model thinks — and the rest moves
+// behind the settings button (SessionSettingsPopover.tsx), still fully
+// data-driven. The model has its own button on the toolbar's right
+// (ModelMenu.tsx), the way the Claude app places it.
 //
 // Thinking and Ultra are one control, not two: the thinking slider
 // (ThinkingSlider.tsx), whose stop past Max is Ultra — thinking high plus
-// ultracode, where substantial tasks run as multi-agent workflows. It sits
-// where the thinking option comes in the CLI's order, as a chip that opens the
-// slider. There is deliberately no Ultra toggle anywhere: a second switch for
-// the same dial is how the two used to disagree. The special-casing keys off
-// the advertised option ids only — if the CLI stops sending `thinking`, the
-// bar simply stops drawing it.
-//
-// Workflow size is a plain select, but its tiers are labelled in agents ("~10
-// agents") rather than by the tier's bare name, which says nothing on its own.
+// ultracode, where substantial tasks run as multi-agent workflows. There is
+// deliberately no Ultra toggle anywhere: a second switch for the same dial is
+// how the two used to disagree. The special-casing keys off the advertised
+// option ids only — if the CLI stops sending `thinking`, the bar simply stops
+// drawing it.
 
 import { useCallback, useRef, useState } from 'react'
-import type { JSX } from 'react'
+import type { CSSProperties, JSX } from 'react'
 import type { ACPConfigChoice, ACPConfigGroup, ACPConfigOption } from '@shared/acp'
 import type { ChatDetail } from '@shared/model'
 import { call } from '@renderer/state/store'
 import { modeColor } from '@renderer/design/theme'
 import Popover from '@renderer/views/common/Popover'
 import { ThinkingChip } from './ThinkingSlider'
-import { THINKING_ID, ULTRA_ID } from './thinking'
-
-/** The CLI's option ids (internal/acp/config_options.go). */
-const WORKFLOW_SIZE_ID = 'workflow_size'
+import SessionSettingsButton, { MODE_ID, choicesOf } from './SessionSettingsPopover'
+import { THINKING_ID } from './thinking'
 
 export default function ConfigBar({ chat }: { chat: ChatDetail }): JSX.Element {
+  const mode = chat.configOptions.find((o) => o.id === MODE_ID)
+  const hasThinking = chat.configOptions.some((o) => o.id === THINKING_ID)
   return (
     <div className="config-bar">
-      {chat.configOptions.map((option) =>
-        option.id === THINKING_ID ? (
-          <ThinkingChip key={option.id} chat={chat} />
-        ) : option.id === ULTRA_ID ? null : option.kind.type === 'select' ? (
-          <SelectChip
-            key={option.id}
-            option={option}
-            kind={option.kind}
-            hint={option.id === WORKFLOW_SIZE_ID ? workflowSizeHint : undefined}
-            onSelect={(value) => void call('setSelectOption', chat.id, option.id, value)}
-          />
-        ) : (
-          <BooleanChip
-            key={option.id}
-            option={option}
-            isOn={option.kind.currentValue}
-            onToggle={(value) => void call('setBoolOption', chat.id, option.id, value)}
-          />
-        )
+      {mode?.kind.type === 'select' && (
+        <SelectChip
+          option={mode}
+          kind={mode.kind}
+          onSelect={(value) => void call('setSelectOption', chat.id, mode.id, value)}
+        />
       )}
+      {hasThinking && <ThinkingChip chat={chat} />}
+      <SessionSettingsButton chat={chat} />
     </div>
   )
+}
+
+/** The mode after the current one, for Shift+Tab in the composer: Plan →
+ *  Coding → Ask → Plan, in whatever order the CLI lists them. */
+export function nextMode(options: ACPConfigOption[]): string | null {
+  const mode = options.find((o) => o.id === MODE_ID)
+  if (mode?.kind.type !== 'select') return null
+  const values = choicesOf(mode).map((c) => c.value)
+  if (values.length < 2) return null
+  const at = values.indexOf(mode.kind.currentValue ?? '')
+  return values[(at + 1) % values.length]
 }
 
 // ---------------------------------------------------------------------------
@@ -67,7 +67,7 @@ interface SelectKind {
   flat: ACPConfigChoice[]
 }
 
-function SelectChip({
+export function SelectChip({
   option,
   kind,
   hint,
@@ -100,9 +100,16 @@ function SelectChip({
       <button
         ref={anchorRef}
         type="button"
-        className="config-chip"
-        title={option.description ?? option.name}
-        style={tint ? { color: tint } : undefined}
+        className={'config-chip' + (tint ? ' config-chip--tinted' : '')}
+        title={
+          isMode
+            ? `${option.description ?? option.name} (Shift+Tab switches)`
+            : option.description ?? option.name
+        }
+        style={tint ? ({ '--chip-tint': tint } as CSSProperties) : undefined}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        data-testid={isMode ? 'mode-chip' : undefined}
         onClick={() => setOpen((o) => !o)}
       >
         <CategoryIcon category={option.category ?? option.id} />
@@ -168,51 +175,6 @@ function currentChoice(kind: SelectKind): ACPConfigChoice | undefined {
   if (value == null) return undefined
   const all = kind.groups.flatMap((g) => g.options).concat(kind.flat)
   return all.find((c) => c.value === value)
-}
-
-/** The agent guideline of each size tier, for a CLI whose descriptions do
- *  not carry it (internal/workflow/size.go SizeTiers). */
-const WORKFLOW_SIZE_AGENTS: Record<string, number> = { small: 5, medium: 10, large: 30 }
-
-/**
- * "~10 agents" / "No limit" for a workflow size tier. Read from the tier's own
- * description ("~10 agents per run · fan-outs up to ~20 wide") so it follows
- * the CLI if a tier is retuned; the table is only the fallback.
- */
-export function workflowSizeHint(choice: ACPConfigChoice): string {
-  const described = /~(\d+) agents\b/.exec(choice.description ?? '')
-  if (described) return `~${described[1]} agents`
-  if (choice.value === 'unbounded' || /no agent guideline/.test(choice.description ?? '')) {
-    return 'No limit'
-  }
-  const known = WORKFLOW_SIZE_AGENTS[choice.value]
-  return known !== undefined ? `~${known} agents` : ''
-}
-
-// ---------------------------------------------------------------------------
-// Boolean chip (BooleanChip port)
-// ---------------------------------------------------------------------------
-
-function BooleanChip({
-  option,
-  isOn,
-  onToggle
-}: {
-  option: ACPConfigOption
-  isOn: boolean
-  onToggle: (value: boolean) => void
-}): JSX.Element {
-  return (
-    <button
-      type="button"
-      className={'config-chip' + (isOn ? ' config-chip--on' : '')}
-      title={option.description ?? option.name}
-      onClick={() => onToggle(!isOn)}
-    >
-      <BoltIcon filled={isOn} />
-      <span className="config-chip-label">{option.name}</span>
-    </button>
-  )
 }
 
 // ---------------------------------------------------------------------------
@@ -306,20 +268,6 @@ function CheckIcon(): JSX.Element {
   return (
     <svg width="11" height="11" viewBox="0 0 16 16" fill="none" aria-hidden>
       <path d="m2.5 8.5 3.7 3.7 7.3-8.4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  )
-}
-
-function BoltIcon({ filled }: { filled: boolean }): JSX.Element {
-  return (
-    <svg className="config-chip-bolt" width="13" height="13" viewBox="0 0 16 16" aria-hidden>
-      <path
-        d="M9.2 1.5 3.5 9h3.4l-.9 5.5L11.8 7H8.4l.8-5.5Z"
-        fill={filled ? 'currentColor' : 'none'}
-        stroke="currentColor"
-        strokeWidth="1.2"
-        strokeLinejoin="round"
-      />
     </svg>
   )
 }

@@ -128,6 +128,9 @@ export interface RendererApi {
    *  starting another (the message's `steering` field tracks it). */
   send(chatId: string, text: string, attachments: { data: string; mimeType: string }[]): Promise<void>
   cancel(chatId: string): Promise<void>
+  /** Sends the chat's newest prompt again (Try again after a failed turn);
+   *  ignored while the chat is busy. */
+  retryLast(chatId: string): Promise<void>
 
   // Config
   setSelectOption(chatId: string, configId: string, value: string): Promise<void>

@@ -331,13 +331,19 @@ export default function OrchestrationPanel({
   const liveCount = sections.filter((section) => !section.collapsed).length
 
   return (
-    <div className="orp" aria-label="Live orchestration">
+    <div className="orp" aria-label="Running in background">
       <header className="orp-head">
         <span className="orp-head-dot" aria-hidden="true" />
-        <span className="orp-head-title">Live</span>
-        <span className="orp-head-count">{liveCount > 0 ? liveCount : sections.length}</span>
+        <span className="orp-head-title">Running in background</span>
+        <span className="orp-head-count">· {liveCount > 0 ? liveCount : sections.length}</span>
         <span className="orp-head-spacer" />
-        <button className="orp-close" type="button" aria-label="Hide live panel" onClick={onClose}>
+        <button
+          className="orp-close"
+          type="button"
+          aria-label="Hide background panel"
+          title="Hide"
+          onClick={onClose}
+        >
           <Icon name="sidebar.right" size={14} />
         </button>
       </header>

@@ -58,14 +58,17 @@ Pick the screen with `?mode=`:
 | `welcome` | ready, no chat selected: the new-session view |
 | `welcome-empty` | first run: no sessions yet, working in the home folder (the warning shows) |
 | `welcome-folders` | the new-session view with its folder menu open, including a recent that no longer exists |
-| `chat` | a finished turn: reasoning, read/search/edit/bash calls, a sub-agent, a markdown answer with a code block, a plan |
+| `chat` | a finished turn: "Thought for 8s", two reads and a search folded into one line, a sub-agent, an edit, a command, a markdown answer with a code block |
+| `chat-tools` | the same turn with its rows opened: the folded reads, the edit's numbered unified diff, the command's `$ npm test` and output |
+| `chat-error` | a failed command (`exit 1`, opened), an "Interrupted" notice, and a turn the provider ended: the error card with Try again |
+| `chat-steering` | a running turn with a message sent mid-turn, queued for the agent's next step, and the run ticker |
 | `thinking`, `thinking-paused` | the same chat with the thinking slider open over the composer: at High, and Ultra saved under Ask first (paused, offering Restricted) |
 | `chat-one` | the same chat as the only session in the sidebar |
 | `sidebar-many` | twenty sessions across three projects: pinned, archived, one working, two finished while away |
 | `sidebar-menu` | the same, with a row's menu open (Rename… / Pin / Archive / Delete…) |
 | `collapsed` | the sidebar collapsed (Ctrl/Cmd+B), its reopen button leading the header |
 | `switcher` | the Ctrl/Cmd+K quick switcher over many sessions |
-| `busy` | the same turn still running |
+| `busy` | the same turn still running: a live row, and the ticker ("Working… 3s · Esc to interrupt") |
 | `permission-bash`, `permission-diff` | the approval sheet for a command and for an edit |
 | `question` | the ask-user sheet |
 | `settings` | Settings, opened the way a user does (Ctrl+,) |

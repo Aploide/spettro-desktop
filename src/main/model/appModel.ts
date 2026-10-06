@@ -992,6 +992,25 @@ export class AppModel extends EventEmitter {
     void this.runTurn(session, blocks, steering ? message.id : null)
   }
 
+  /** "Try again" on a turn that failed: sends the newest prompt again,
+   *  images and all, as a new message — the failed attempt stays above it,
+   *  so the transcript still says what happened. Does nothing while a turn
+   *  is running: that would steer it, which is not what the button says. */
+  retryLast(chatId: string): void {
+    const session = this.sessionById(chatId)
+    if (!session || session.isBusy) return
+    const last = session.items.findLast(
+      (item) => item.kind === 'message' && item.message.role === 'user'
+    )
+    if (last?.kind !== 'message') return
+    const { text, attachments } = last.message
+    this.send(
+      chatId,
+      text,
+      attachments.map((a) => ({ data: a.data, mimeType: a.mimeType }))
+    )
+  }
+
   /**
    * One `session/prompt`, start to finish: a turn, or with `steerId` (the
    * id of the message it carries) a steer into the turn already running.

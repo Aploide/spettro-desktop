@@ -11,12 +11,9 @@
 import type { JSX } from 'react'
 import { createRoot } from 'react-dom/client'
 import { groupTranscript, activeRuns } from '@renderer/views/chat/transcript/orchestration'
-import { WorkflowCard } from '@renderer/views/chat/transcript/WorkflowCard'
+import { groupToolRuns } from '@renderer/views/chat/transcript/toolGroups'
 import OrchestrationPanel from '@renderer/views/chat/OrchestrationPanel'
-import TranscriptItemView from '@renderer/views/chat/transcript/TranscriptItemView'
-import { SubAgentCallView } from '@renderer/views/chat/transcript/ToolCallView'
-import { subAgentCall } from '@renderer/views/chat/transcript/toolPresentation'
-import { ScriptCallRow } from '@renderer/views/chat/transcript/OrchestrationBits'
+import { TranscriptRowView } from '@renderer/views/chat/transcript/TranscriptItemView'
 import { SCENES, type Scene } from './fixtures'
 import { LIVE_SCENE } from './fixtures.live'
 import '@renderer/design/theme.css'
@@ -39,25 +36,9 @@ function SceneView({ scene }: { scene: Scene }): JSX.Element {
       <div className="hz-scene-body">
         <div className="hz-transcript">
           <div className="chat-transcript-inner">
-            {rows.map((row) => {
-              if (row.kind === 'run') return <WorkflowCard key={row.id} run={row.run} />
-              if (row.kind === 'script') {
-                return <ScriptCallRow key={row.id} script={row.script} />
-              }
-              if (row.kind === 'agent') {
-                const call = subAgentCall(row.member.tool)
-                if (!call) return null
-                return (
-                  <SubAgentCallView
-                    key={row.id}
-                    tool={row.member.tool}
-                    call={call}
-                    children={row.member.children}
-                  />
-                )
-              }
-              return <TranscriptItemView key={row.id} item={row.item} />
-            })}
+            {groupToolRuns(rows).map((row) => (
+              <TranscriptRowView key={row.id} row={row} />
+            ))}
           </div>
         </div>
         {live.length > 0 && (

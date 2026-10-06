@@ -52,6 +52,10 @@ SCENES=(
   app:welcome-empty
   app:welcome-folders
   app:chat
+  app:chat-tools
+  app:chat-error
+  app:chat-steering
+  app:busy
   app:thinking
   app:thinking-paused
   app:sidebar-many

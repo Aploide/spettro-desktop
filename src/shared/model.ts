@@ -49,6 +49,11 @@ export interface ChatMessage {
   timestamp: number
   /** Only on user messages sent mid-turn. */
   steering?: SteeringState
+  /** Reasoning only: when its first and latest chunks arrived (ms since
+   *  epoch), so a finished one can say "Thought for 12s". Absent on
+   *  reasoning saved before they were kept. */
+  startedAt?: number
+  endedAt?: number
 }
 
 export interface ToolDiff {

@@ -9,6 +9,7 @@
 // store reducer. Nothing about the views is faked.
 //
 //   app.html?mode=welcome | welcome-empty | welcome-folders | chat | chat-one |
+//                 chat-tools | chat-error | chat-steering |
 //                 busy | sidebar-many | sidebar-menu | collapsed | switcher |
 //                 permission-bash | permission-diff | question | settings |
 //                 onboarding | installing | install-failed | gate | failure |
@@ -23,6 +24,8 @@ import { EMPTY_EXTENSIONS, type ExtensionsState } from '@shared/extensions'
 import type {
   AppStateDTO,
   ChatDetail,
+  ChatMessage,
+  SteeringState,
   ChatSummary,
   GitStat,
   Phase,
@@ -60,21 +63,25 @@ function tool(partial: Partial<ToolCallItem> & { title: string }): TranscriptIte
 function say(
   role: 'user' | 'assistant' | 'reasoning' | 'notice',
   text: string,
-  o?: { streaming?: boolean; error?: boolean }
+  o?: { streaming?: boolean; error?: boolean; thoughtFor?: number; steering?: SteeringState }
 ): TranscriptItem {
   seq += 1
-  return {
-    kind: 'message',
-    message: {
-      id: `msg_${seq}`,
-      role,
-      text,
-      attachments: [],
-      isStreaming: o?.streaming ?? false,
-      noticeIsError: o?.error,
-      timestamp: NOW - 20 * MIN + seq * 1000
-    }
+  const timestamp = NOW - 20 * MIN + seq * 1000
+  const message: ChatMessage = {
+    id: `msg_${seq}`,
+    role,
+    text,
+    attachments: [],
+    isStreaming: o?.streaming ?? false,
+    noticeIsError: o?.error,
+    timestamp
   }
+  if (o?.thoughtFor !== undefined) {
+    message.startedAt = timestamp
+    message.endedAt = timestamp + o.thoughtFor * 1000
+  }
+  if (o?.steering) message.steering = o.steering
+  return { kind: 'message', message }
 }
 
 const OLD_BUTTON = `export function SaveButton({ onSave }: Props) {
@@ -105,13 +112,29 @@ const ANSWER = `The double submit came from the button staying enabled while the
 - **Fix:** the button is disabled and relabelled *Saving…* while pending.
 - **Tests:** \`npm test\` passes (42 tests).`
 
-function transcript(busy: boolean): TranscriptItem[] {
-  seq = 0
-  const items: TranscriptItem[] = [
+const SETTINGS_FORM = `import { SaveButton } from '../components/SaveButton'
+
+export function SettingsForm({ settings, onSave }: Props) {
+  const [status, setStatus] = useState<'idle' | 'saving'>('idle')
+  const save = async () => {
+    setStatus('saving')
+    await onSave(settings)
+    setStatus('idle')
+  }
+  return <SaveButton onSave={save} />
+}
+`
+
+/** The start of the turn every chat scene shares: the ask, the thinking,
+ *  the look-around (two reads and a search, which fold into one line), a
+ *  delegation and the edit it led to. */
+function opening(): TranscriptItem[] {
+  return [
     say('user', 'The settings form saves twice when I click Save quickly. Can you fix it?'),
     say(
       'reasoning',
-      'The form likely calls onSave on every click without guarding an in-flight request. Look at SaveButton and where the form wires it.'
+      'The form likely calls onSave on every click without guarding an in-flight request. Look at SaveButton and where the form wires it.',
+      { thoughtFor: 8 }
     ),
     tool({
       title: 'file-read {"path":"src/components/SaveButton.tsx"}',
@@ -120,10 +143,16 @@ function transcript(busy: boolean): TranscriptItem[] {
       output: OLD_BUTTON
     }),
     tool({
+      title: 'file-read {"path":"src/views/SettingsForm.tsx"}',
+      kind: 'read',
+      argsJSON: JSON.stringify({ path: `${PROJECT}/src/views/SettingsForm.tsx` }),
+      output: SETTINGS_FORM
+    }),
+    tool({
       title: 'grep {"pattern":"SaveButton"}',
       kind: 'search',
-      argsJSON: JSON.stringify({ pattern: 'SaveButton', path: 'src' }),
-      output: 'src/components/SaveButton.tsx:1\nsrc/views/SettingsForm.tsx:3\nsrc/views/SettingsForm.tsx:58'
+      argsJSON: JSON.stringify({ pattern: 'SaveButton', path: `${PROJECT}/src` }),
+      output: 'src/components/SaveButton.tsx:1\nsrc/views/SettingsForm.tsx:1\nsrc/views/SettingsForm.tsx:11'
     }),
     tool({
       title: 'agent explore: find every caller of SaveButton and how it handles errors',
@@ -142,28 +171,78 @@ function transcript(busy: boolean): TranscriptItem[] {
       title: 'file-edit {"path":"src/components/SaveButton.tsx"}',
       kind: 'edit',
       argsJSON: JSON.stringify({ path: `${PROJECT}/src/components/SaveButton.tsx` }),
-      diffs: [{ path: `${PROJECT}/src/components/SaveButton.tsx`, oldText: OLD_BUTTON, newText: NEW_BUTTON }]
-    }),
-    tool({
-      title: 'bash {"command":"npm test"}',
-      kind: 'execute',
-      argsJSON: JSON.stringify({ command: 'npm test' }),
-      output: ' ✓ src/components/SaveButton.test.tsx (6 tests) 41ms\n ✓ src/views/SettingsForm.test.tsx (36 tests) 212ms\n\n Test Files  2 passed (2)\n      Tests  42 passed (42)'
+      diffs: [{ path: `${PROJECT}/src/components/SaveButton.tsx`, oldText: OLD_BUTTON, newText: NEW_BUTTON }],
+      locations: [{ path: `${PROJECT}/src/components/SaveButton.tsx`, line: 1 }]
     })
   ]
-  if (busy) {
-    items.push(
-      tool({
-        title: 'bash {"command":"npm run lint"}',
-        kind: 'execute',
-        status: 'in_progress',
-        argsJSON: JSON.stringify({ command: 'npm run lint' })
-      })
-    )
-  } else {
-    items.push(say('assistant', ANSWER))
+}
+
+const TEST_OUTPUT = ' ✓ src/components/SaveButton.test.tsx (6 tests) 41ms\n ✓ src/views/SettingsForm.test.tsx (36 tests) 212ms\n\n Test Files  2 passed (2)\n      Tests  42 passed (42)'
+
+function transcript(mode: string): TranscriptItem[] {
+  seq = 0
+  const items = opening()
+  switch (mode) {
+    case 'busy':
+      items.push(
+        tool({
+          title: 'bash {"command":"npm test"}',
+          kind: 'execute',
+          argsJSON: JSON.stringify({ command: 'npm test' }),
+          output: TEST_OUTPUT
+        }),
+        tool({
+          title: 'bash {"command":"npm run lint"}',
+          kind: 'execute',
+          status: 'in_progress',
+          argsJSON: JSON.stringify({ command: 'npm run lint' })
+        })
+      )
+      return items
+    case 'chat-steering':
+      // A message sent while the agent works: queued for its next step.
+      items.push(
+        tool({
+          title: 'bash {"command":"npm test"}',
+          kind: 'execute',
+          status: 'in_progress',
+          argsJSON: JSON.stringify({ command: 'npm test' })
+        }),
+        say('user', 'Also make ProfileForm await the save the same way.', { steering: 'queued' })
+      )
+      return items
+    case 'chat-error':
+      // A command that failed, then a turn the provider ended.
+      items.push(
+        tool({
+          title: 'bash {"command":"npm test"}',
+          kind: 'execute',
+          status: 'failed',
+          argsJSON: JSON.stringify({ command: 'npm test' }),
+          output:
+            ' ✓ src/components/SaveButton.test.tsx (6 tests) 41ms\n ✗ src/views/SettingsForm.test.tsx > saves once\n   Expected onSave to be called 1 time, but it was called 2 times\n\n Test Files  1 failed | 1 passed (2)\n[exit status 1]'
+        }),
+        say('notice', 'Interrupted'),
+        say('user', 'Keep going — fix the failing test too.'),
+        say(
+          'notice',
+          "Anthropic is overloaded right now (529), so the reply stopped. Nothing was lost — try again in a moment.",
+          { error: true }
+        )
+      )
+      return items
+    default:
+      items.push(
+        tool({
+          title: 'bash {"command":"npm test"}',
+          kind: 'execute',
+          argsJSON: JSON.stringify({ command: 'npm test' }),
+          output: TEST_OUTPUT
+        }),
+        say('assistant', ANSWER)
+      )
+      return items
   }
-  return items
 }
 
 // ------------------------------------------------------------------ options
@@ -217,7 +296,7 @@ const OPTIONS: ACPConfigOption[] = [
   }
 ]
 
-const BUSY = MODE === 'busy'
+const BUSY = MODE === 'busy' || MODE === 'chat-steering'
 
 const CHAT: ChatDetail = {
   id: 'c1',
@@ -228,7 +307,7 @@ const CHAT: ChatDetail = {
   isArchived: false,
   isBusy: BUSY,
   createdAt: NOW - 25 * MIN,
-  items: transcript(BUSY),
+  items: transcript(MODE),
   configOptions: OPTIONS,
   commands: [
     { name: 'help', description: 'Show available commands' },
@@ -571,6 +650,18 @@ function pushEvents(): void {
   if (MODE === 'settings') setTimeout(() => press(','), 60)
   if (MODE === 'switcher') setTimeout(() => press('k'), 60)
   if (MODE === 'welcome-folders') setTimeout(() => click('[data-testid="project-chip"]'), 60)
+  // The tool rows open the way a reader opens them: the folded reads, the
+  // edit's diff and the command's output.
+  if (MODE === 'chat-tools') {
+    setTimeout(() => {
+      click('.tr-tool-group > .tr-tool-header')
+      click('button[aria-label^="Edit SaveButton.tsx"]')
+      click('button[aria-label^="Bash npm test"]')
+    }, 60)
+  }
+  if (MODE === 'chat-error') {
+    setTimeout(() => click('button[aria-label^="Bash npm test"]'), 60)
+  }
   if (MODE === 'thinking' || MODE === 'thinking-paused') {
     setTimeout(() => click('[data-testid="thinking-chip"]'), 60)
   }

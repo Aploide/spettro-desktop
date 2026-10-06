@@ -6,7 +6,7 @@
 // load-bearing on purpose rather than by accident. The current CLI sends the
 // whole run as `_meta` on every card update, which is kept whole.
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -134,6 +134,26 @@ describe('applyToolEvent', () => {
     s.applyToolEvent(toolEvent({ toolCallId: 'c1', title: 't' }), true)
     s.applyToolEvent(toolEvent({ toolCallId: 'c1', status: 'completed' }), false)
     expect(seen).toEqual(['c1', 'c1'])
+  })
+})
+
+describe('reasoning timing', () => {
+  it('stamps a reasoning bubble with its first and latest chunk, for "Thought for Ns"', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(1_000)
+    const s = session()
+    s.appendReasoning('Looking at ')
+    vi.setSystemTime(9_500)
+    s.appendReasoning('the form.')
+    vi.setSystemTime(12_000)
+    s.appendAssistant('Fixed.')
+    vi.useRealTimers()
+    const item = s.items[0]
+    if (item.kind !== 'message') throw new Error('expected the reasoning bubble')
+    expect(item.message).toMatchObject({ startedAt: 1_000, endedAt: 9_500, isStreaming: false })
+    // An answer is not reasoning, and is not stamped.
+    const answer = s.items[1]
+    expect(answer.kind === 'message' && answer.message.startedAt).toBeUndefined()
   })
 })
 
@@ -291,6 +311,19 @@ describe('AppModel sessions (rename, unread, recents)', () => {
     expect(remote).toHaveLength(1)
     // A fresh model over the same folder is what a relaunch sees.
     expect(load(dir).getState().sessions.find((s) => s.id === 'a')?.title).toBe('Login bug')
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('Try again resends the newest prompt, and never while a turn is running', async () => {
+    const { dir, model } = await setup([stored('a', 'hello')])
+    const send = vi.spyOn(model, 'send').mockImplementation(() => undefined)
+    model.retryLast('a')
+    expect(send).toHaveBeenCalledWith('a', 'hello', [])
+    send.mockClear()
+    model.sessionById('a')?.setBusy(true)
+    model.retryLast('a')
+    model.retryLast('nope')
+    expect(send).not.toHaveBeenCalled()
     rmSync(dir, { recursive: true, force: true })
   })
 

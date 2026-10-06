@@ -225,7 +225,7 @@
   min-width: 0;
   margin-bottom: var(--sp-sm);
   border-left: 1px solid var(--hairline);
-  padding-left: var(--sp-xs);
+  padding-left: var(--sp-md);
 }
 
 .orch-nested:last-child {

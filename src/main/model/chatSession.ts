@@ -474,12 +474,14 @@ export class ChatSession {
   /** Appends to (or starts) the current streaming reasoning bubble. */
   appendReasoning(delta: string): void {
     const last = this.items[this.items.length - 1]
+    const now = Date.now()
     if (last && last.kind === 'message' && last.message.role === 'reasoning' && last.message.isStreaming) {
       last.message.text += delta
+      last.message.endedAt = now
       this.emitItem(last)
       return
     }
-    this.pushStreamingMessage('reasoning', delta)
+    this.pushStreamingMessage('reasoning', delta, now)
   }
 
   /** Appends to (or starts) the current streaming assistant answer bubble.
@@ -542,14 +544,25 @@ export class ChatSession {
     return false
   }
 
-  private pushStreamingMessage(role: 'assistant' | 'reasoning', text: string): void {
+  private pushStreamingMessage(
+    role: 'assistant' | 'reasoning',
+    text: string,
+    now = Date.now()
+  ): void {
     const message: ChatMessage = {
       id: randomUUID(),
       role,
       text,
       attachments: [],
       isStreaming: true,
-      timestamp: Date.now()
+      timestamp: now
+    }
+    // The span a reasoning bubble covers, first chunk to latest: "Thought
+    // for Ns" once it closes. Time spent before the first chunk isn't the
+    // model's thinking we can see, so it doesn't count.
+    if (role === 'reasoning') {
+      message.startedAt = now
+      message.endedAt = now
     }
     const item: TranscriptItem = { kind: 'message', message }
     this.items.push(item)

@@ -11,9 +11,14 @@ import {
   diffStat,
   displayDetail,
   displayName,
+  exitCode,
   extractJSONString,
   isTerminal,
+  middleTruncate,
   parsedTitle,
+  ROW_ARGUMENT_MAX,
+  rowArgument,
+  rowMeta,
   shortPath,
   subAgentCall,
   subAgentResult
@@ -52,15 +57,111 @@ describe('parsedTitle', () => {
 })
 
 describe('displayName', () => {
+  const verb = (title: string, kind: string): string =>
+    displayName({ title, kind, argsJSON: undefined })
+
   it('names a tool by its ACP kind, not its id', () => {
-    expect(displayName({ title: 'bash {}', kind: 'execute', argsJSON: undefined })).toBe('Terminal')
-    expect(displayName({ title: 'file-read {}', kind: 'read', argsJSON: undefined })).toBe('Read')
-    expect(displayName({ title: 'ls {}', kind: 'search', argsJSON: undefined })).toBe('List')
+    // internal/acp/tools.go builtinToolKinds.
+    expect(verb('bash {}', 'execute')).toBe('Bash')
+    expect(verb('file-read {}', 'read')).toBe('Read')
+    expect(verb('grep {}', 'search')).toBe('Search')
+    expect(verb('glob {}', 'search')).toBe('Search')
+    expect(verb('web-fetch {}', 'fetch')).toBe('Fetch')
   })
 
-  it('tells a thinking agent call from a thinking plan call', () => {
-    expect(displayName({ title: 'agent code#1: x', kind: 'think', argsJSON: undefined })).toBe('Agent')
-    expect(displayName({ title: 'plan {}', kind: 'think', argsJSON: undefined })).toBe('Plan')
+  it('tells the members of a kind apart where they read differently', () => {
+    expect(verb('file-write {}', 'edit')).toBe('Write')
+    expect(verb('file-edit {}', 'edit')).toBe('Edit')
+    expect(verb('ls {}', 'search')).toBe('List')
+    expect(verb('web-search {}', 'fetch')).toBe('Web search')
+    expect(verb('pty-start {}', 'execute')).toBe('Terminal')
+    expect(verb('view-image {}', 'read')).toBe('View')
+  })
+
+  it('tells a thinking agent call from other thinking calls', () => {
+    expect(verb('agent code#1: x', 'think')).toBe('Agent')
+    expect(verb('todo-write {}', 'think')).toBe('Todos')
+    expect(verb('goal-complete {}', 'think')).toBe('Think')
+  })
+
+  it('capitalises an unknown tool’s own name', () => {
+    expect(verb('mcp-github_search {}', 'other')).toBe('Mcp-github_search')
+  })
+})
+
+describe('middleTruncate', () => {
+  it('leaves text that fits alone', () => {
+    expect(middleTruncate('npm test', 20)).toBe('npm test')
+  })
+
+  it('cuts the middle, keeping both ends, to exactly the limit', () => {
+    const cut = middleTruncate('src/components/settings/forms/SaveButton.tsx', 20)
+    expect(Array.from(cut)).toHaveLength(20)
+    expect(cut.startsWith('src/compo')).toBe(true)
+    expect(cut.endsWith('Button.tsx')).toBe(true)
+    expect(cut).toContain('…')
+  })
+
+  it('counts characters, not UTF-16 units, so it never splits a glyph', () => {
+    const cut = middleTruncate('🙂'.repeat(10), 5)
+    expect(Array.from(cut)).toHaveLength(5)
+    expect(cut).toBe('🙂🙂…🙂🙂')
+  })
+})
+
+describe('rowArgument', () => {
+  const row = (title: string, kind: string, args: object) =>
+    rowArgument({ title, kind, argsJSON: JSON.stringify(args), locations: [] })
+
+  it('shows a file by its name, the full path being in the panel', () => {
+    expect(row('file-read {}', 'read', { path: '/home/u/app/src/components/SaveButton.tsx' })).toBe(
+      'SaveButton.tsx'
+    )
+  })
+
+  it('shows a command’s first line, marking that there is more', () => {
+    expect(row('bash {}', 'execute', { command: 'npm test' })).toBe('npm test')
+    expect(row('bash {}', 'execute', { command: 'cd web\nnpm test' })).toBe('cd web …')
+  })
+
+  it('shows a search as its pattern and where it looked', () => {
+    expect(row('grep {}', 'search', { pattern: 'SaveButton', path: '/home/u/app/src' })).toBe(
+      'SaveButton in src'
+    )
+  })
+
+  it('drops the [agent#n] prefix — the row is already nested under that agent', () => {
+    expect(row('[code#3] web-fetch {}', 'fetch', { url: 'https://example.com' })).toBe(
+      'https://example.com'
+    )
+  })
+
+  it('cuts a long argument in the middle', () => {
+    const long = `npm run build -- --filter ${'x'.repeat(100)} --verbose`
+    const text = row('bash {}', 'execute', { command: long })
+    expect(Array.from(text)).toHaveLength(ROW_ARGUMENT_MAX)
+    expect(text.endsWith('--verbose')).toBe(true)
+  })
+})
+
+describe('rowMeta', () => {
+  const meta = (title: string, kind: string, status: ToolCallItem['status'], output: string) =>
+    rowMeta({ title, kind, status, output, argsJSON: undefined })
+
+  it('says how much a read or a search returned', () => {
+    expect(meta('file-read {}', 'read', 'completed', 'a\nb\nc\n')).toBe('3 lines')
+    expect(meta('grep {}', 'search', 'completed', 'a.ts:1\nb.ts:2')).toBe('2 results')
+    expect(meta('grep {}', 'search', 'completed', 'No matches found')).toBe('no results')
+  })
+
+  it('gives a failed command its exit status (llm_runtime_shell.go)', () => {
+    expect(meta('bash {}', 'execute', 'failed', 'FAIL src/a.test.ts\n[exit status 1]')).toBe('exit 1')
+    expect(meta('bash {}', 'execute', 'failed', 'killed')).toBe('failed')
+    expect(meta('bash {}', 'execute', 'completed', 'ok')).toBeNull()
+  })
+
+  it('says nothing while the call is still running', () => {
+    expect(meta('file-read {}', 'read', 'in_progress', 'a\nb')).toBeNull()
   })
 })
 
@@ -190,6 +291,19 @@ describe('diffs', () => {
       ]
     })
     expect(stat).toEqual({ added: 3, removed: 1 })
+  })
+
+  it('counts a real diff: unchanged lines between two edits are not churn', () => {
+    // The old head/tail strip counted "keep" as removed and added again.
+    const stat = diffStat({
+      diffs: [{ path: 'a', oldText: 'one\nkeep\nkeep\nkeep\ntwo\n', newText: 'ONE\nkeep\nkeep\nkeep\nTWO\n' }]
+    })
+    expect(stat).toEqual({ added: 2, removed: 2 })
+  })
+
+  it('reads the exit status off the end of a command’s output', () => {
+    expect(exitCode('boom\n[exit status 2]\n')).toBe(2)
+    expect(exitCode('all good')).toBeNull()
   })
 
   it('is null with no diffs, so a row shows no stat rather than +0 -0', () => {

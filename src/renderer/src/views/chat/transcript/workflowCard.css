@@ -24,21 +24,20 @@
   min-width: 0;
   border-radius: var(--rad-md);
   border: 1px solid var(--hairline);
-  background: color-mix(in srgb, var(--text-secondary) 5%, transparent);
+  background: var(--surface-raised);
 }
 
-.wfc--running {
-  border-color: color-mix(in srgb, var(--accent) 34%, transparent);
-}
-
+/* A running card says so with its mark and badge, not its outline: the
+   transcript's cards share one hairline. Only the states that are the
+   reader's business tint it. */
 .wfc--failed {
-  border-color: color-mix(in srgb, var(--diff-removed) 30%, transparent);
+  border-color: color-mix(in srgb, var(--diff-removed) 26%, var(--hairline));
 }
 
 /* Waiting at a checkpoint: amber, like anything that needs an answer. Still
    — a pulse here would say the run is working when it is waiting. */
 .wfc--paused {
-  border-color: color-mix(in srgb, var(--warning) 34%, transparent);
+  border-color: color-mix(in srgb, var(--warning) 30%, var(--hairline));
 }
 
 /* A card a later turn took over is history the card below repeats: it steps

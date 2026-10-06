@@ -8,8 +8,8 @@
 // a run is in flight the column can split, docking a live panel on the right.
 //
 // The panel is a *column*, not an overlay: it shares the row with the
-// transcript and stops above the divider, so it can never sit on top of the
-// composer or the terminal drawer, and the transcript's centred measure
+// transcript and ends where the composer begins, so it can never sit on top
+// of the composer or the terminal drawer, and the transcript's centred measure
 // simply narrows around it.
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
@@ -17,8 +17,11 @@ import type { JSX } from 'react'
 import { call, ensureChatLoaded, useChat } from '@renderer/state/store'
 import { setTerminalVisible, useShell } from '@renderer/state/shell'
 import TerminalDrawer from '@renderer/views/terminal/TerminalDrawer'
+import type { TranscriptItem } from '@shared/model'
 import { TranscriptRowView } from './transcript/TranscriptItemView'
 import { activeRuns, groupTranscript, type WorkflowRun } from './transcript/orchestration'
+import { groupToolRuns } from './transcript/toolGroups'
+import { TranscriptActionsProvider, type TranscriptActions } from './transcript/TranscriptActions'
 import { RunTicker } from './transcript/RunTicker'
 import { Icon } from './transcript/ToolCallView'
 import OrchestrationPanel from './OrchestrationPanel'
@@ -66,6 +69,7 @@ export default function ChatView({ chatId }: { chatId: string }): JSX.Element {
   // transcript changes, and never mutates it in place.
   const items = chat?.items
   const rows = useMemo(() => (items ? groupTranscript(items) : []), [items])
+  const displayRows = useMemo(() => groupToolRuns(rows), [rows])
   const live = useMemo(() => activeRuns(rows), [rows])
   const runsById = useMemo(() => {
     const out = new Map<string, WorkflowRun>()
@@ -156,12 +160,33 @@ export default function ChatView({ chatId }: { chatId: string }): JSX.Element {
     touchYRef.current = nextY
   }
 
+  const busy = chat?.isBusy ?? false
+  const actions = useMemo<TranscriptActions>(
+    () => ({
+      editMessage: (text) => setPromptSeed({ text, nonce: Date.now() }),
+      retry: () => void call('retryLast', chatId),
+      ...transcriptAnchors(items ?? [], busy)
+    }),
+    [chatId, items, busy]
+  )
+
+  // Esc interrupts a running turn from the composer or the transcript —
+  // never from inside a menu or popover (they take Escape for themselves),
+  // and never once something else has handled it.
+  const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>): void => {
+    if (event.key !== 'Escape' || event.defaultPrevented || !busy) return
+    const target = event.target as Element
+    if (!target.closest('.composer-input, .chat-transcript')) return
+    event.preventDefault()
+    void call('cancel', chatId)
+  }
+
   if (!chat) return <div className="chat-view" />
 
   const showReopen = !panelVisible && live.length > 0
 
   return (
-    <div className="chat-view">
+    <div className="chat-view" onKeyDown={onKeyDown}>
       <ChatHeader chat={chat} />
 
       <div className="chat-body">
@@ -185,9 +210,11 @@ export default function ChatView({ chatId }: { chatId: string }): JSX.Element {
                 onPrompt={(text) => setPromptSeed({ text, nonce: Date.now() })}
               />
             )}
-            {rows.map((row) => (
-              <TranscriptRowView row={row} key={row.id} />
-            ))}
+            <TranscriptActionsProvider value={actions}>
+              {displayRows.map((row) => (
+                <TranscriptRowView row={row} key={row.id} />
+              ))}
+            </TranscriptActionsProvider>
             {(chat.isBusy || showReopen) && (
               <div className="chat-run-ticker">
                 <RunTicker chat={chat} />
@@ -199,7 +226,7 @@ export default function ChatView({ chatId }: { chatId: string }): JSX.Element {
             <div className="chat-bottom-anchor" />
           </div>
         </div>
-        {chat.isBusy && showJumpToLatest && (
+        {showJumpToLatest && (
           <button
             type="button"
             className="chat-jump-latest"
@@ -221,8 +248,6 @@ export default function ChatView({ chatId }: { chatId: string }): JSX.Element {
         </aside>
       </div>
 
-      <div className="chat-divider" />
-
       <Composer chat={chat} promptSeed={promptSeed} />
 
       <TerminalDrawer
@@ -232,6 +257,34 @@ export default function ChatView({ chatId }: { chatId: string }): JSX.Element {
       />
     </div>
   )
+}
+
+/**
+ * The two messages the transcript's actions hang off: the newest user
+ * message (Edit & resend), and — once the turn it ended is over — the error
+ * notice after it (Try again). An error from an earlier turn has been
+ * answered by everything since, so it offers nothing.
+ */
+function transcriptAnchors(
+  items: TranscriptItem[],
+  busy: boolean
+): Pick<TranscriptActions, 'lastUserMessageId' | 'retryNoticeId'> {
+  let lastUserMessageId: string | null = null
+  let retryNoticeId: string | null = null
+  for (let i = items.length - 1; i >= 0; i--) {
+    const item = items[i]
+    if (item.kind !== 'message') continue
+    const { message } = item
+    if (message.role === 'user') {
+      lastUserMessageId = message.id
+      break
+    }
+    if (retryNoticeId === null && message.role === 'notice' && message.noticeIsError === true) {
+      retryNoticeId = message.id
+    }
+  }
+  if (busy || lastUserMessageId === null) retryNoticeId = null
+  return { lastUserMessageId, retryNoticeId }
 }
 
 /**
@@ -249,12 +302,10 @@ function ReopenPanelChip({ count, onShow }: { count: number; onShow: () => void 
       className="chat-live-chip"
       type="button"
       onClick={onShow}
-      title="Show the live orchestration panel"
+      title="Show what's running in the background"
     >
       <Icon name="sidebar.right" size={12} />
-      <span>
-        {count} run{count === 1 ? '' : 's'} live
-      </span>
+      <span>{count} running in background</span>
     </button>
   )
 }

@@ -61,6 +61,10 @@ export type IconName =
   | 'stop.circle.fill'
   | 'circle.dashed'
   | 'arrow.down'
+  | 'clock'
+  | 'doc.on.doc'
+  | 'xmark'
+  | 'arrow.clockwise'
 
 /** gearshape: eight teeth round a ring, computed once. */
 const GEAR_TEETH = Array.from({ length: 8 }, (_, i) => {
@@ -266,6 +270,29 @@ const STROKE_ICONS: Record<string, ReactNode> = {
     </>
   ),
   checkmark: <path d="M3.2 8.4 6.4 11.6 12.8 4.6" strokeWidth="1.8" />,
+  // ---- transcript actions
+  // A steer waiting for the agent's next step.
+  clock: (
+    <>
+      <circle cx="8" cy="8" r="6" />
+      <path d="M8 4.6V8l2.3 1.5" />
+    </>
+  ),
+  // Copy: two sheets, the front one whole.
+  'doc.on.doc': (
+    <>
+      <rect x="5.5" y="5.5" width="8" height="8.5" rx="1.5" />
+      <path d="M10.5 3.5V3a1.5 1.5 0 0 0-1.5-1.5H4A1.5 1.5 0 0 0 2.5 3v5.5A1.5 1.5 0 0 0 4 10h.5" />
+    </>
+  ),
+  xmark: <path d="M4 4l8 8M12 4l-8 8" strokeWidth="1.8" />,
+  // Try again: the counterclockwise arrow's mirror.
+  'arrow.clockwise': (
+    <>
+      <path d="M13.3 9.4A5.5 5.5 0 1 1 11.9 4.1" />
+      <path d="M8.9 3.9l3 .2-.3-3" />
+    </>
+  ),
   key: (
     <>
       <circle cx="5.2" cy="5.2" r="2.9" />

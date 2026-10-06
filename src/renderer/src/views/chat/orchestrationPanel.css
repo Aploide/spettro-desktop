@@ -56,7 +56,7 @@
   align-items: center;
   gap: 6px;
   flex: none;
-  height: 34px;
+  height: 40px;
   padding: 0 var(--sp-sm) 0 var(--sp-md);
   background: var(--orp-plane);
   border-bottom: 1px solid var(--hairline);
@@ -82,21 +82,14 @@
 }
 
 .orp-head-title {
-  font-size: 10.5px;
+  font-size: var(--fs-md);
   font-weight: 600;
-  letter-spacing: 0.7px;
-  text-transform: uppercase;
-  color: var(--text-secondary);
+  color: var(--text-primary);
 }
 
 .orp-head-count {
-  font-size: 10px;
-  font-weight: 600;
-  line-height: 15px;
-  padding: 0 5px;
-  border-radius: 999px;
-  color: color-mix(in srgb, var(--accent) 85%, var(--text-primary));
-  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  font-size: var(--fs-md);
+  color: var(--text-tertiary);
 }
 
 .orp-head-spacer {

@@ -96,6 +96,7 @@ export function registerIpc(
     // -- Prompting ----------------------------------------------------------
     send: async (chatId, text, attachments) => model.send(chatId, text, attachments, null),
     cancel: async (chatId) => model.cancel(chatId),
+    retryLast: async (chatId) => model.retryLast(chatId),
 
     // -- Config -------------------------------------------------------------
     setSelectOption: (chatId, configId, value) => model.setConfigValue(chatId, configId, value),

@@ -33,6 +33,7 @@ import type {
 import { EMPTY_WORKFLOW_LIST } from '@shared/extensions'
 import { call, useChat } from '@renderer/state/store'
 import { groupTranscript } from '@renderer/views/chat/transcript/orchestration'
+import { groupToolRuns } from '@renderer/views/chat/transcript/toolGroups'
 import { TranscriptRowView } from '@renderer/views/chat/transcript/TranscriptItemView'
 import { Icon } from '@renderer/views/chat/transcript/ToolCallView'
 import { SpettroSpinner } from '@renderer/views/chat/transcript/RunTicker'
@@ -494,7 +495,7 @@ function Verdict({ validation }: { validation: WorkflowValidation | null }): JSX
 function RunPane({ chatId }: { chatId: string }): JSX.Element {
   const chat = useChat(chatId)
   const items = chat?.items
-  const rows = useMemo(() => (items ? groupTranscript(items) : []), [items])
+  const rows = useMemo(() => (items ? groupToolRuns(groupTranscript(items)) : []), [items])
   return (
     <section className="wfs-run">
       <header className="wfs-run-head">

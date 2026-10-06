@@ -85,13 +85,13 @@ describe('Settings', () => {
     expect(PANES.map((p) => p.label)).toEqual([
       'General',
       'Account',
-      'Models & Providers',
+      'Models & providers',
       'Permissions',
       'Memory',
       'Remote',
       'Updates',
       'Advanced',
-      'Keyboard Shortcuts',
+      'Keyboard shortcuts',
       'About'
     ])
   })

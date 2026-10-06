@@ -254,7 +254,7 @@ export default function ThinkingSlider({
         aria-valuenow={Math.max(0, state.index)}
         aria-valuetext={
           state.paused
-            ? 'Ultra, paused — workflows need Restricted or YOLO permission'
+            ? 'Ultra, paused — workflows need Restricted or Don’t ask permission'
             : state.label
         }
         aria-disabled={disabled || undefined}
@@ -352,7 +352,7 @@ export default function ThinkingSlider({
         <div className="thinking-prompt" role="status">
           <Icon name="pause.circle.fill" size={13} className="thinking-prompt-icon" />
           <span className="thinking-prompt-text">
-            Workflows need Restricted or YOLO permission.
+            Workflows need Restricted or Don’t ask permission.
             {state.canRestrict ? ' Switch to Restricted?' : ''}
           </span>
           <div className="thinking-prompt-actions">
@@ -654,7 +654,7 @@ export function ThinkingChip({ chat }: { chat: ChatDetail }): JSX.Element | null
   const title = lit
     ? ULTRA_CAPTION
     : state.paused
-      ? 'Ultra is paused under Ask first — workflows need Restricted or YOLO permission'
+      ? 'Ultra is paused under Ask first — workflows need Restricted or Don’t ask permission'
       : `Thinking: ${state.label}`
   const className =
     'config-chip thinking-chip' +

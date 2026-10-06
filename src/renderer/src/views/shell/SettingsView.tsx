@@ -60,13 +60,13 @@ export type { SettingsPane }
 export const PANES: { id: SettingsPane; label: string; icon: IconName }[] = [
   { id: 'general', label: 'General', icon: 'gearshape' },
   { id: 'account', label: 'Account', icon: 'person.crop.circle' },
-  { id: 'models', label: 'Models & Providers', icon: 'key' },
+  { id: 'models', label: 'Models & providers', icon: 'key' },
   { id: 'permissions', label: 'Permissions', icon: 'lock.shield' },
   { id: 'memory', label: 'Memory', icon: 'brain' },
   { id: 'remote', label: 'Remote', icon: 'iphone' },
   { id: 'updates', label: 'Updates', icon: 'arrow.down.circle' },
   { id: 'advanced', label: 'Advanced', icon: 'wrench.and.screwdriver' },
-  { id: 'shortcuts', label: 'Keyboard Shortcuts', icon: 'keyboard' },
+  { id: 'shortcuts', label: 'Keyboard shortcuts', icon: 'keyboard' },
   { id: 'about', label: 'About', icon: 'info.circle' }
 ]
 

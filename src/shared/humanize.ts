@@ -141,7 +141,7 @@ const RULES: Rule[] = [
     test: /no API endpoint configured|no (?:active )?(?:provider|model) (?:is )?(?:configured|selected|set)/i,
     build: () => ({
       title: 'No model is connected',
-      detail: 'Connect a model in Settings › Models & Providers, then try again.',
+      detail: 'Connect a model in Settings › Models & providers, then try again.',
       action: action('connect', 'Connect a model')
     })
   },
@@ -157,8 +157,8 @@ const RULES: Rule[] = [
     test: /\b401\b|\b403\b|invalid[ _-]?(?:api[ _-]?)?key|incorrect api key|api key (?:is )?(?:invalid|missing|not valid)|unauthori[sz]ed|authentication[_ ]?error|forbidden/i,
     build: () => ({
       title: 'Your API key was rejected',
-      detail: 'Check the key in Settings › Models & Providers, or connect another provider.',
-      action: action('connect', 'Open Models & Providers')
+      detail: 'Check the key in Settings › Models & providers, or connect another provider.',
+      action: action('connect', 'Open Models & providers')
     })
   },
   {

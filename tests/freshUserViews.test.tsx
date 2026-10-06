@@ -111,7 +111,7 @@ describe('the error card', () => {
     const message: ChatMessage = {
       id: 'n1',
       role: 'notice',
-      text: 'No model is connected. Connect a model in Settings › Models & Providers, then try again.',
+      text: 'No model is connected. Connect a model in Settings › Models & providers, then try again.',
       detail,
       attachments: [],
       isStreaming: false,

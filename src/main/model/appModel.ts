@@ -19,13 +19,17 @@ import { EventEmitter } from 'events'
 import { randomUUID } from 'crypto'
 import { statSync } from 'fs'
 import { homedir } from 'os'
+import { basename } from 'path'
 import type {
   ACPConfigOption,
   ACPContentBlock,
   ACPPermissionRequest,
+  ACPPromptResult,
   ACPQuestionAnswer,
   ACPQuestionRequest,
   ACPSessionUpdate,
+  ACPToolCallEvent,
+  ACPToolStatus,
   JSONValue,
   RPCID
 } from '../../shared/acp'
@@ -35,10 +39,12 @@ import type {
   AppStateDTO,
   ChatDetail,
   CLIInfo,
+  CLISessionEntry,
   ImageAttachmentDTO,
   Phase,
   RemoteHostState,
-  SubscriptionState
+  SubscriptionState,
+  TurnSummary
 } from '../../shared/model'
 import { isAppearance } from '../../shared/model'
 import type {
@@ -56,6 +62,7 @@ import { EMPTY_WORKFLOW_LIST } from '../../shared/extensions'
 import type { UpdateState } from '../../shared/update'
 import { ExtensionMethod } from '../../shared/extensions'
 import { AcpAgent, AcpConnection, AcpError } from '../acp'
+import type { WorkflowTarget } from '../acp/extensions'
 import { ChatSession, type ConfigValue } from './chatSession'
 import { CLIInstaller } from './cliInstaller'
 import { locateCLI } from './cliLocator'
@@ -69,6 +76,10 @@ interface PendingPermission {
   request: ACPPermissionRequest
   rpcId: RPCID
   raw: JSONValue
+  /** What the request's card showed before the request turned it "pending",
+   *  put back if the request goes away unanswered. Null when the request
+   *  itself created the card (a `perm-N` with nothing open to attach to). */
+  priorToolStatus: ACPToolStatus | null
 }
 
 interface PendingQuestion {
@@ -82,6 +93,12 @@ export interface PromptAttachment {
   data: string
   mimeType: string
 }
+
+/** What a prompt with images and no words says, so the agent has text to
+ *  work from: spettro refuses a prompt with no text content (bridge.go). The
+ *  user's bubble keeps showing just the images. */
+const IMAGE_ONLY_TEXT = '(see the attached image)'
+const IMAGES_ONLY_TEXT = '(see the attached images)'
 
 /** How long the agent gets to answer `initialize` before we give up on it. */
 const HANDSHAKE_TIMEOUT_MS = 20_000
@@ -130,6 +147,21 @@ export class AppModel extends EventEmitter {
   private sessionsByACPID = new Map<string, ChatSession>()
   /** In-flight ACP attaches, keyed by chat id — see ensureLiveSession. */
   private ensureInFlight = new Map<string, Promise<string | null>>()
+  /** The connect under way, so a second caller waits for it instead of
+   *  giving up on an agent that is seconds from ready. */
+  private connectInFlight: Promise<void> | null = null
+  /** Prompts out per chat — the turn plus any steers sent into it — each
+   *  holding its own token, so a prompt of a torn-down agent unwinding late
+   *  can't count out one sent since. The chat stays busy until the last one
+   *  settles. */
+  private promptsInFlight = new Map<string, Set<symbol>>()
+  /** Per chat, settles once the running turn's own prompt is on the wire. A
+   *  steer waits for it — sent first, the steer would start a turn of its
+   *  own and the turn's prompt would become the steer. */
+  private turnLaunched = new Map<string, Promise<void>>()
+  /** How the latest real turn of a chat ended, held until its last prompt
+   *  settles, which is when paired phones hear that the chat went idle. */
+  private turnOutcome = new Map<string, { stopReason: string; notice: TurnNotice | null }>()
   private readonly installer = new CLIInstaller()
   private readonly store: SessionStore
   private readonly prefs: Prefs
@@ -359,7 +391,9 @@ export class AppModel extends EventEmitter {
   private loadPersistedSessions(): void {
     if (this.sessions.length > 0) return
     this.sessions = this.store.load().map((stored) => {
-      const session = ChatSession.restore(stored)
+      // The palette shows the folder's last known commands until the agent
+      // announces its own on resume.
+      const session = ChatSession.restore(stored, this.prefs.cachedCommands(stored.projectPath))
       this.attachSessionCallbacks(session)
       return session
     })
@@ -386,11 +420,20 @@ export class AppModel extends EventEmitter {
 
   /** Establishes the shared ACP connection and performs the handshake.
    *  `rootedAt` is the folder the agent process itself starts in; each
-   *  session still passes its own cwd when it is created. */
-  private async connect(rootedAt?: string): Promise<void> {
-    // A connect is already in flight (or the agent is live): don't spawn a
-    // second CLI process.
-    if (this.agent || this.phase.kind === 'connecting') return
+   *  session still passes its own cwd when it is created. A call while a
+   *  connect is under way waits for that one rather than spawning a second
+   *  CLI process. */
+  private connect(rootedAt?: string): Promise<void> {
+    if (this.agent) return Promise.resolve()
+    if (this.connectInFlight) return this.connectInFlight
+    const attempt = this.runConnect(rootedAt).finally(() => {
+      if (this.connectInFlight === attempt) this.connectInFlight = null
+    })
+    this.connectInFlight = attempt
+    return attempt
+  }
+
+  private async runConnect(rootedAt?: string): Promise<void> {
     // Never cache a stale locator result: if the CLI path changed (or the
     // binary moved) since `cli` was set, a reconnect must re-resolve, or
     // we'd happily "connect" to the wrong binary.
@@ -442,7 +485,10 @@ export class AppModel extends EventEmitter {
       this.setPhase(this.isProviderSetupNeeded ? { kind: 'needsProvider' } : { kind: 'ready' })
       void this.extensions.refreshAccount()
       this.emitHostState()
-      await this.resumePersistedSessions()
+      // Chats re-attach lazily, each as it is opened or sent to — at most the
+      // one on screen now. Resuming every saved chat here held startup on one
+      // round trip per chat, archived ones included.
+      this.warmSelected()
     } catch (err) {
       // Never leave a half-started process behind: it would hold the CLI's
       // session lock and keep answering nothing.
@@ -497,6 +543,7 @@ export class AppModel extends EventEmitter {
     const starting = this.pendingConnection
     this.connection = null
     this.pendingConnection = null
+    this.connectInFlight = null
     this.agent = null
     // Stops the login poller and forgets whether providers ever loaded: an
     // agent that isn't there tells us nothing about what's configured.
@@ -504,14 +551,18 @@ export class AppModel extends EventEmitter {
     live?.stop()
     starting?.stop()
     // Nothing is left waiting on these answers: the turn that asked them died
-    // with the process.
-    if (this.pendingQuestions.length > 0) {
-      this.pendingQuestions = []
-      this.emitQuestions()
-    }
+    // with the process. Answering them would reach a new process under ids
+    // it never issued.
+    this.withdrawPrompts(() => true, false)
     for (const session of this.sessions) {
       session.setBusy(false)
     }
+    // The prompts those turns were waiting on died with the process too; their
+    // runTurn calls unwind through the rejected requests and find nothing to
+    // count down.
+    this.promptsInFlight.clear()
+    this.turnLaunched.clear()
+    this.turnOutcome.clear()
     // The process is gone and its ACP sessions with it. Keep each session's
     // id (it's what session/resume needs) but drop the routing entries, so
     // nothing is prompted into the void before it's re-attached.
@@ -548,8 +599,8 @@ export class AppModel extends EventEmitter {
     this.lastAgentRestart = now
     this.banner = `The Spettro agent stopped (exit ${code}) — restarting…`
     this.setPhase({ kind: 'locating' })
-    // Because every session kept its acpSessionId and transcript, the
-    // reconnect transparently re-resumes them all.
+    // Every session kept its acpSessionId and transcript, so each is
+    // transparently resumed the next time it is opened or sent to.
     void this.connect()
   }
 
@@ -559,15 +610,21 @@ export class AppModel extends EventEmitter {
       this.handleUpdate(sessionId, update, raw)
     }
     connection.onPermissionRequest = ({ rpcId, request, raw }) => {
-      this.pendingPermissions.push({ request, rpcId, raw })
+      const priorToolStatus = this.adoptPermission(request)
+      this.pendingPermissions.push({ request, rpcId, raw, priorToolStatus })
       this.emitPermissions()
-      this.emit('permission-ask', request.id, this.chatIdForACPSession(request.sessionId), raw)
+      this.emit('permission-ask', request.id, request.chatId, raw)
     }
     connection.onQuestionRequest = ({ rpcId, request, raw, transport }) => {
+      request.chatId = request.sessionId ? this.chatIdForACPSession(request.sessionId) : null
       this.pendingQuestions.push({ request, rpcId, raw, transport })
       this.emitQuestions()
-      const chatId = request.sessionId ? this.chatIdForACPSession(request.sessionId) : null
-      this.emit('question-ask', request.id, chatId, raw)
+      this.emit('question-ask', request.id, request.chatId, raw)
+    }
+    connection.onCancelRequest = (rpcId) => {
+      // The agent stopped waiting (the tool's timeout passed, or its turn was
+      // cancelled): the prompt on screen would answer nothing.
+      this.withdrawPrompts((p) => p.rpcId === rpcId, false)
     }
     connection.onExtensionNotification = (method, params) => {
       // Attached phones run the same account and provider screens, so they get
@@ -603,55 +660,11 @@ export class AppModel extends EventEmitter {
   // Cold → live: resume vs. new session
   // -------------------------------------------------------------------------
 
-  /** Reconnects each restored session to the live agent. Uses session/resume
-   *  so the agent restores its memory of the conversation WITHOUT replaying
-   *  the transcript (we already display our persisted copy — session/load
-   *  would duplicate every message on each relaunch). */
-  private async resumePersistedSessions(): Promise<void> {
-    const agent = this.agent
-    if (!agent) return
-    for (const session of [...this.sessions]) {
-      const acpId = session.acpSessionId
-      if (!acpId) {
-        await this.startFreshSession(session)
-        continue
-      }
-      try {
-        const displayed = session.displayedConfigValues()
-        const result = await agent.resumeSession(acpId, session.projectPath)
-        // Register only after a successful resume: updates emitted before
-        // this point belong to no session the UI should show.
-        this.sessionsByACPID.set(acpId, session)
-        if (result.configOptions.length > 0) session.setConfigOptions(result.configOptions)
-        await this.syncDisplayedConfig(session, displayed, acpId)
-      } catch {
-        session.appendNotice(
-          "Couldn't restore this chat's earlier context — starting fresh.",
-          false
-        )
-        await this.startFreshSession(session)
-      }
-    }
-    this.persist()
-  }
-
-  /** Attaches a new live ACP session to an existing (cold or degraded) chat. */
-  private async startFreshSession(session: ChatSession): Promise<void> {
-    const agent = this.agent
-    if (!agent) return
-    const oldId = session.acpSessionId
-    if (oldId) this.sessionsByACPID.delete(oldId)
-    try {
-      const displayed = session.displayedConfigValues()
-      const result = await agent.newSession(session.projectPath)
-      session.setAcpSessionId(result.sessionId)
-      session.setConfigOptions(result.configOptions)
-      this.sessionsByACPID.set(result.sessionId, session)
-      await this.syncDisplayedConfig(session, displayed, result.sessionId)
-    } catch (err) {
-      session.setAcpSessionId(null)
-      session.appendNotice(`Couldn't start a session: ${errMessage(err)}`, true)
-    }
+  /** Brings the chat on screen live, so its chips and slash palette are the
+   *  session's own. Every other chat waits until it is opened or sent to. */
+  private warmSelected(): void {
+    const selected = this.selectedSessionId ? this.sessionById(this.selectedSessionId) : null
+    if (selected) this.warmSession(selected)
   }
 
   /** Pushes the config the user was shown (plus any changes queued while the
@@ -824,16 +837,17 @@ export class AppModel extends EventEmitter {
     // Inherit the last-used config so the ConfigBar is populated (and the
     // attach-time sync makes the agent match it) from the very first turn.
     session.configOptions = this.prefs.lastConfigOptions
-    session.commands = this.prefs.cachedCommands
+    session.commands = this.prefs.cachedCommands(projectPath)
     this.attachSessionCallbacks(session)
     this.sessions.unshift(session)
     this.selectedSessionId = session.id
     this.pushEvent({ type: 'chat-reset', chat: session.detail() })
     this.emitAppState()
     // If the agent isn't running (first launch, or it died), boot it rooted
-    // in this chat's folder. Either way the chat is warmed as soon as there
-    // is an agent, so its config chips are the session's own.
-    if (!this.agent && this.phase.kind !== 'connecting') {
+    // in this chat's folder — or wait for the boot already under way. Either
+    // way the chat is warmed as soon as there is an agent, so its config
+    // chips are the session's own.
+    if (!this.agent) {
       void this.connect(projectPath).then(() => this.warmSession(session))
     } else {
       this.warmSession(session)
@@ -850,7 +864,7 @@ export class AppModel extends EventEmitter {
     session.unread = false
     this.pushEvent({ type: 'chat-reset', chat: session.detail() })
     this.emitAppState()
-    if (!this.agent && this.phase.kind !== 'connecting') {
+    if (!this.agent) {
       void this.connect(session.projectPath).then(() => this.warmSession(session))
     } else {
       this.warmSession(session)
@@ -874,9 +888,14 @@ export class AppModel extends EventEmitter {
     this.emit('chat-state', session.summary())
   }
 
+  /** Deletes a chat. Its ACP session is closed too — a turn still running
+   *  would otherwise keep going (and asking for permissions nobody can see),
+   *  and a paused workflow would sit there until the CLI's idle reaper. The
+   *  CLI keeps the conversation on its own disk. Archiving doesn't close. */
   closeChat(chatId: string): void {
     const session = this.sessionById(chatId)
     if (!session) return
+    this.releaseSession(session)
     if (session.acpSessionId) this.sessionsByACPID.delete(session.acpSessionId)
     this.sessions = this.sessions.filter((s) => s.id !== chatId)
     if (this.selectedSessionId === chatId) {
@@ -925,7 +944,12 @@ export class AppModel extends EventEmitter {
 
   /** The only prompt entry point, local and remote alike. `sourceDeviceId`
    *  is set when the prompt arrived from a paired device, so the echo of the
-   *  user's own message skips the screen that already drew it. */
+   *  user's own message skips the screen that already drew it.
+   *
+   *  A message sent while the chat is busy steers the running turn instead of
+   *  waiting for it: the CLI queues it for the agent's next step and answers
+   *  that prompt at once (bridge.go steerRunningTurn). The message carries
+   *  its steering state, and the chat stays busy for the turn it steers. */
   send(
     chatId: string,
     text: string,
@@ -935,7 +959,8 @@ export class AppModel extends EventEmitter {
     const session = this.sessionById(chatId)
     if (!session) return
     const trimmed = text.trim()
-    if ((trimmed === '' && attachments.length === 0) || session.isBusy) return
+    if (trimmed === '' && attachments.length === 0) return
+    const steering = session.isBusy
 
     const dtos: ImageAttachmentDTO[] = attachments.map((a) => ({
       id: randomUUID(),
@@ -944,7 +969,7 @@ export class AppModel extends EventEmitter {
       width: 0,
       height: 0
     }))
-    session.appendUserMessage(trimmed, dtos)
+    const message = session.appendUserMessage(trimmed, dtos, steering ? 'sending' : undefined)
     session.setBusy(true)
     this.persist()
     // The user's own message is not an agent update, so it never comes back
@@ -958,72 +983,142 @@ export class AppModel extends EventEmitter {
     this.emit('chat-state', session.summary())
 
     const blocks: ACPContentBlock[] = []
-    if (trimmed !== '') blocks.push({ type: 'text', text: trimmed })
+    const promptText =
+      trimmed !== '' ? trimmed : attachments.length > 1 ? IMAGES_ONLY_TEXT : IMAGE_ONLY_TEXT
+    blocks.push({ type: 'text', text: promptText })
     for (const a of attachments) {
       blocks.push({ type: 'image', data: a.data, mimeType: a.mimeType })
     }
-    void this.runTurn(session, blocks)
+    void this.runTurn(session, blocks, steering ? message.id : null)
   }
 
-  private async runTurn(session: ChatSession, blocks: ACPContentBlock[]): Promise<void> {
-    const acpId = await this.ensureLiveSession(session)
-    // What the user is looking at must be what the turn runs. A fresh attach
-    // already synced (and cleared) its queue; anything still pending here was
-    // queued while the agent was down or was rejected mid-session, so it is
-    // replayed before the prompt goes out rather than after.
-    if (acpId && Object.keys(session.pendingConfigChanges).length > 0) {
-      await this.syncDisplayedConfig(session, session.displayedConfigValues(), acpId)
+  /**
+   * One `session/prompt`, start to finish: a turn, or with `steerId` (the
+   * id of the message it carries) a steer into the turn already running.
+   *
+   * Every prompt counts itself in and out of `promptsInFlight`, and the chat
+   * goes idle — unread mark, final persist, the phone's "chat-state" — only
+   * when the last one settles. A steer the agent queued answers with an
+   * immediate end_turn that ends nothing, so it neither clears busy nor
+   * leaves a stop notice. One that arrived after the turn it meant to steer
+   * had already finished ran as a turn of its own, and is treated as one.
+   */
+  private async runTurn(
+    session: ChatSession,
+    blocks: ACPContentBlock[],
+    steerId: string | null = null
+  ): Promise<void> {
+    const chatId = session.id
+    const token = Symbol('prompt')
+    const inFlight = this.promptsInFlight.get(chatId) ?? new Set<symbol>()
+    inFlight.add(token)
+    this.promptsInFlight.set(chatId, inFlight)
+    let launched = (): void => undefined
+    if (steerId !== null) {
+      await this.turnLaunched.get(chatId)
+    } else {
+      this.turnLaunched.set(chatId, new Promise<void>((resolve) => (launched = resolve)))
     }
-    if (!acpId) {
-      session.setBusy(false)
+
+    let result: ACPPromptResult | null = null
+    let failure: string | null = null
+    let reachedAgent = false
+    let startedAt = Date.now()
+    try {
+      const acpId = await this.ensureLiveSession(session)
+      // What the user is looking at must be what the turn runs. A fresh
+      // attach already synced (and cleared) its queue; anything still pending
+      // here was queued while the agent was down or was rejected mid-session,
+      // so it is replayed before the prompt goes out rather than after.
+      if (acpId && Object.keys(session.pendingConfigChanges).length > 0) {
+        await this.syncDisplayedConfig(session, session.displayedConfigValues(), acpId)
+      }
+      const agent = this.agent
+      if (acpId && agent) {
+        startedAt = Date.now()
+        reachedAgent = true
+        const prompt = agent.prompt(acpId, blocks)
+        launched()
+        result = await prompt
+      }
+    } catch (err) {
+      failure = errMessage(err)
+    } finally {
+      launched()
+    }
+
+    inFlight.delete(token)
+    const current = this.promptsInFlight.get(chatId)
+    if (current === inFlight && inFlight.size === 0) this.promptsInFlight.delete(chatId)
+    // A teardown since this prompt went out may have made way for prompts of
+    // a new agent; while they run, this one has no business idling the chat.
+    const left = current !== undefined && current !== inFlight ? current.size : inFlight.size
+
+    const steerState = steerId !== null ? session.messageById(steerId)?.steering : undefined
+    const steered = steerState === 'queued' || steerState === 'delivered'
+    if (steerId !== null && !steered) session.setSteering(steerId, undefined)
+
+    if (!reachedAgent && failure === null) {
+      // Nothing was sent: ensureLiveSession has already said why in the chat.
+      this.turnOutcome.set(chatId, { stopReason: 'error', notice: null })
+    } else if (!(steered && result?.stopReason === 'end_turn')) {
+      this.finishTurn(session, result, failure, Date.now() - startedAt)
+    }
+
+    if (left > 0) {
       this.persist()
-      this.emit('chat-state', session.summary(), { stopReason: 'error' })
       return
     }
-    let stopReason = 'end_turn'
-    // Mirrors whatever inline notice the local transcript gets, so a remote
-    // screen ends the turn in the same visible state.
-    let notice: { text: string; isError: boolean } | null = null
-    try {
-      const reason = this.agent ? await this.agent.prompt(acpId, blocks) : 'end_turn'
-      session.endStreaming()
-      stopReason = reason
-      switch (reason) {
-        case 'refusal':
-          notice = { text: 'The agent declined to continue.', isError: true }
-          break
-        case 'max_tokens':
-        case 'max_turn_requests':
-          notice = { text: 'The turn hit a limit before finishing.', isError: false }
-          break
-        case 'cancelled':
-          notice = { text: 'Turn cancelled.', isError: false }
-          break
-        default:
-          // end_turn / unknown are silent.
-          break
-      }
-      if (notice) session.appendNotice(notice.text, notice.isError)
-    } catch (err) {
-      session.endStreaming()
-      stopReason = 'error'
-      const message = errMessage(err)
-      notice = { text: message, isError: true }
-      session.appendNotice(message, true)
-    }
+    // A steer the agent never got to read (the turn was interrupted first)
+    // is just a message now; leaving it "queued" would wait forever.
+    session.clearPendingSteering()
+    this.turnLaunched.delete(chatId)
+    const outcome = this.turnOutcome.get(chatId) ?? { stopReason: 'end_turn', notice: null }
+    this.turnOutcome.delete(chatId)
     session.setBusy(false)
     // Finished out of sight: mark it so the sidebar can say so. The selected
     // chat is on screen, and the user has already seen it end.
-    if (this.selectedSessionId !== session.id) session.unread = true
+    if (this.selectedSessionId !== chatId) session.unread = true
     this.persist()
-    this.emit(
-      'chat-state',
-      session.summary(),
-      notice ? { stopReason, notice } : { stopReason }
-    )
+    const { stopReason, notice } = outcome
+    this.emit('chat-state', session.summary(), notice ? { stopReason, notice } : { stopReason })
   }
 
-  /** Lazily attaches a live ACP session the first time a chat is prompted,
+  /** The end of a real turn in the transcript: streaming stops, a stop
+   *  reason worth mentioning becomes a notice, and the turn's tokens are
+   *  filed. A failed turn's prompts go with it. */
+  private finishTurn(
+    session: ChatSession,
+    result: ACPPromptResult | null,
+    failure: string | null,
+    durationMs: number
+  ): void {
+    session.endStreaming()
+    const stopReason: TurnSummary['stopReason'] =
+      failure !== null ? 'error' : (result?.stopReason ?? 'end_turn')
+    // Mirrors whatever inline notice the local transcript gets, so a remote
+    // screen ends the turn in the same visible state.
+    const notice: TurnNotice | null =
+      failure !== null ? { text: failure, isError: true } : stopNotice(stopReason)
+    if (notice) session.appendNotice(notice.text, notice.isError)
+    if (failure !== null) {
+      // The turn is gone; whatever it was asking can't be answered usefully.
+      const acpId = session.acpSessionId
+      this.withdrawPrompts((p) => p.sessionId === acpId, true)
+    }
+    const usage = result?.usage
+    session.recordTurn({
+      stopReason,
+      inputTokens: usage?.inputTokens ?? 0,
+      outputTokens: usage?.outputTokens ?? 0,
+      cachedReadTokens: usage?.cachedReadTokens ?? 0,
+      totalTokens: usage?.totalTokens ?? result?.tokensUsed ?? 0,
+      durationMs
+    })
+    this.turnOutcome.set(session.id, { stopReason, notice })
+  }
+
+  /** Lazily attaches a live ACP session when a chat is opened or prompted,
    *  bringing the agent back up first if it died. */
   private ensureLiveSession(session: ChatSession, silent = false): Promise<string | null> {
     // The stored id only counts if it still routes to a live ACP session:
@@ -1031,9 +1126,11 @@ export class AppModel extends EventEmitter {
     // new process until it has been resumed.
     const liveId = this.liveACPSessionId(session)
     if (liveId) return Promise.resolve(liveId)
-    // One attach at a time per chat: warming (below) and the first prompt can
-    // race, and two session/new calls would strand the first ACP session —
-    // its streamed updates would route to a chat that no longer claims it.
+    // One attach at a time per chat: warming (below) and the first prompt
+    // race, and the prompt must wait for the resume rather than start a
+    // session/new of its own — that would strand the conversation's context,
+    // and two session/new calls would strand the first ACP session, its
+    // streamed updates routed to a chat that no longer claims it.
     const inFlight = this.ensureInFlight.get(session.id)
     if (inFlight) return inFlight
     const attach = this.attachLiveSession(session, silent).finally(() => {
@@ -1044,23 +1141,21 @@ export class AppModel extends EventEmitter {
   }
 
   /** Warms a chat the moment it is on screen: attaching the ACP session is
-   *  what produces the real config options, so the chips under the composer
-   *  show what the session will actually run instead of staying empty (or
-   *  showing only the last chat's cached set) until the first prompt. */
+   *  what produces the real config options and slash commands, so the chips
+   *  and the palette show what the session will actually run instead of the
+   *  last chat's cached set until the first prompt. */
   private warmSession(session: ChatSession): void {
     if (!this.agent) return
     if (this.liveACPSessionId(session)) return
     void this.ensureLiveSession(session, true)
   }
 
+  /** Resumes the chat's stored ACP session — the agent restores its memory
+   *  of the conversation without replaying it (session/load would duplicate
+   *  every message we already show) — or, for a chat that never had one or
+   *  whose session is gone, starts a new one. */
   private async attachLiveSession(session: ChatSession, silent: boolean): Promise<string | null> {
-    if (!this.agent) {
-      await this.connect(session.projectPath)
-      // Connecting resumes the persisted chats; if this one came back, keep
-      // its context instead of starting over.
-      const resumed = this.liveACPSessionId(session)
-      if (resumed) return resumed
-    }
+    if (!this.agent) await this.connect(session.projectPath)
     const agent = this.agent
     if (!agent) {
       if (!silent) {
@@ -1068,9 +1163,28 @@ export class AppModel extends EventEmitter {
       }
       return null
     }
+    const displayed = session.displayedConfigValues()
+    const storedId = session.acpSessionId
+    if (storedId) {
+      try {
+        const result = await agent.resumeSession(storedId, session.projectPath)
+        // The agent this resumed on was replaced meanwhile: the id routes to
+        // nothing live.
+        if (agent !== this.agent) return null
+        // Register only after a successful resume: updates emitted before
+        // this point belong to no session the UI should show.
+        this.sessionsByACPID.set(storedId, session)
+        if (result.configOptions.length > 0) session.setConfigOptions(result.configOptions)
+        await this.syncDisplayedConfig(session, displayed, storedId)
+        return storedId
+      } catch {
+        if (agent !== this.agent) return null
+        session.appendNotice("Couldn't restore this chat's earlier context — starting fresh.", false)
+      }
+    }
     try {
-      const displayed = session.displayedConfigValues()
       const result = await agent.newSession(session.projectPath)
+      if (agent !== this.agent) return null
       session.setAcpSessionId(result.sessionId)
       session.setConfigOptions(result.configOptions)
       this.sessionsByACPID.set(result.sessionId, session)
@@ -1079,6 +1193,7 @@ export class AppModel extends EventEmitter {
       await this.syncDisplayedConfig(session, displayed, result.sessionId)
       return result.sessionId
     } catch (err) {
+      if (storedId) session.setAcpSessionId(null)
       // A background warm must not spray notices into an empty chat; the
       // prompt path reports the same failure when the user actually sends.
       if (!silent) {
@@ -1096,11 +1211,91 @@ export class AppModel extends EventEmitter {
   }
 
   /** Fire-and-forget session/cancel; the in-flight prompt resolves with
-   *  'cancelled' and unwinds through the normal turn cleanup. */
+   *  'cancelled' and unwinds through the normal turn cleanup. Anything the
+   *  turn was waiting on the user for goes with it, answered "cancelled". */
   cancel(chatId: string): void {
     const session = this.sessionById(chatId)
-    if (!session || !this.agent || !session.acpSessionId) return
-    this.agent.cancel(session.acpSessionId)
+    if (!session || !session.acpSessionId) return
+    const acpId = session.acpSessionId
+    if (this.agent && this.liveACPSessionId(session)) this.agent.cancel(acpId)
+    this.withdrawPrompts((p) => p.sessionId === acpId, true)
+  }
+
+  /** Lets go of a chat's live ACP session before the chat itself goes: a
+   *  running turn is cancelled, then the session is closed on the agent,
+   *  which also stops any workflow paused in it. */
+  private releaseSession(session: ChatSession): void {
+    const acpId = this.liveACPSessionId(session)
+    if (session.isBusy) this.cancel(session.id)
+    const agent = this.agent
+    if (!acpId || !agent) return
+    agent.closeSession(acpId).catch((err) => {
+      this.agentLog.push(`session/close failed: ${errMessage(err)}`)
+    })
+  }
+
+  // -------------------------------------------------------------------------
+  // Sessions the CLI has that no chat is linked to
+  // -------------------------------------------------------------------------
+
+  /** Conversations the CLI keeps for `projectPath` that no chat here is
+   *  linked to — started in the terminal, say — newest first. Empty when the
+   *  agent isn't running or can't list. */
+  async listCLISessions(projectPath: string): Promise<CLISessionEntry[]> {
+    const agent = this.agent
+    if (!agent || !agent.capabilities.listSessions) return []
+    const linked = new Set(this.sessions.map((s) => s.acpSessionId).filter((id) => id !== null))
+    const entries = await agent.listSessions(projectPath)
+    return entries
+      .filter((e) => !linked.has(e.sessionId))
+      .map(({ sessionId, title, updatedAt }) => ({ sessionId, title, updatedAt }))
+  }
+
+  /** Opens one of those as a chat: `session/load` replays its conversation,
+   *  which streams in as ordinary updates — user messages included, the one
+   *  time the agent sends those. Resolves to the new chat's id (or the
+   *  existing one's, when it is already linked), or null when the agent can't
+   *  load sessions; rejects with the agent's reason when the load fails. */
+  async importCLISession(sessionId: string, projectPath: string): Promise<string | null> {
+    const existing = this.sessions.find((s) => s.acpSessionId === sessionId && !s.isScratch)
+    if (existing) {
+      this.openChat(existing.id)
+      return existing.id
+    }
+    if (!this.agent) await this.connect(projectPath)
+    const agent = this.agent
+    if (!agent || !agent.capabilities.loadSession) return null
+
+    const session = new ChatSession(projectPath)
+    session.configOptions = this.prefs.lastConfigOptions
+    session.commands = this.prefs.cachedCommands(projectPath)
+    session.acpSessionId = sessionId
+    this.attachSessionCallbacks(session)
+    // Routed before the call: the replay arrives before session/load answers.
+    this.sessionsByACPID.set(sessionId, session)
+    session.isReplaying = true
+    let configOptions: ACPConfigOption[]
+    try {
+      configOptions = (await agent.loadSession(sessionId, projectPath)).configOptions
+    } catch (err) {
+      if (this.sessionsByACPID.get(sessionId) === session) this.sessionsByACPID.delete(sessionId)
+      throw err
+    } finally {
+      session.isReplaying = false
+      session.endStreaming()
+    }
+    if (agent !== this.agent) return null
+    if (configOptions.length > 0) session.setConfigOptions(configOptions)
+    // A loaded session comes back in the CLI's default mode (Plan); steer it
+    // like any fresh session.
+    await this.syncDisplayedConfig(session, {}, sessionId)
+    session.isEmpty = false
+    this.sessions.unshift(session)
+    this.selectedSessionId = session.id
+    this.pushEvent({ type: 'chat-reset', chat: session.detail() })
+    this.persist()
+    this.emit('chat-state', session.summary())
+    return session.id
   }
 
   // -------------------------------------------------------------------------
@@ -1108,10 +1303,11 @@ export class AppModel extends EventEmitter {
   //
   // Scoped by chat rather than globally: a workflow lives in the repo it
   // automates, so "which workflows exist" is a question about a project, and
-  // the chat is what knows which project. Each call resolves the chat's live
-  // ACP session and lets the CLI derive the folder from it — the app never
-  // sends a path, so a script cannot land in the wrong repo because the two
-  // sides disagreed about the working directory.
+  // the chat is what knows which project. A live chat names its ACP session
+  // and lets the CLI derive the folder from it, so a script cannot land in
+  // the wrong repo because the two sides disagreed about the working
+  // directory. A cold chat names its own folder (the CLI takes an absolute
+  // `cwd` just as well) rather than showing the studio an empty project.
   //
   // Unlike the account calls these return their result instead of folding it
   // into app-state. The studio is one screen reading files it is about to
@@ -1119,27 +1315,26 @@ export class AppModel extends EventEmitter {
   // TUI, or the agent itself, wrote one.
   // -------------------------------------------------------------------------
 
-  /** The chat's live ACP session, or null when the chat is cold. */
-  private workflowSession(chatId: string): string | null {
+  /** Where a chat's workflows live: its live ACP session, else its folder. */
+  private workflowTarget(chatId: string): WorkflowTarget | null {
     const session = this.sessionById(chatId)
     if (!session) return null
-    return this.liveACPSessionId(session)
+    const acpId = this.liveACPSessionId(session)
+    return acpId ? { sessionId: acpId } : { cwd: session.projectPath }
   }
 
   async listWorkflows(chatId: string): Promise<WorkflowList> {
     const client = this.extensions.client
-    const acpId = this.workflowSession(chatId)
-    // A cold chat has no session to scope by. An empty list is the honest
-    // answer — the alternative is guessing at a project.
-    if (!client || !acpId) return EMPTY_WORKFLOW_LIST
-    return client.listWorkflows(acpId)
+    const target = this.workflowTarget(chatId)
+    if (!client || !target) return EMPTY_WORKFLOW_LIST
+    return client.listWorkflows(target)
   }
 
   async readWorkflow(chatId: string, name: string): Promise<WorkflowSource | null> {
     const client = this.extensions.client
-    const acpId = this.workflowSession(chatId)
-    if (!client || !acpId) return null
-    return client.readWorkflow(acpId, name)
+    const target = this.workflowTarget(chatId)
+    if (!client || !target) return null
+    return client.readWorkflow(target, name)
   }
 
   async writeWorkflow(
@@ -1149,23 +1344,23 @@ export class AppModel extends EventEmitter {
     script: string
   ): Promise<WorkflowInfo | null> {
     const client = this.extensions.client
-    const acpId = this.workflowSession(chatId)
-    if (!client || !acpId) return null
-    return client.writeWorkflow(acpId, name, scope, script)
+    const target = this.workflowTarget(chatId)
+    if (!client || !target) return null
+    return client.writeWorkflow(target, name, scope, script)
   }
 
   async deleteWorkflow(chatId: string, name: string, scope: WorkflowScope): Promise<boolean> {
     const client = this.extensions.client
-    const acpId = this.workflowSession(chatId)
-    if (!client || !acpId) return false
-    return client.deleteWorkflow(acpId, name, scope)
+    const target = this.workflowTarget(chatId)
+    if (!client || !target) return false
+    return client.deleteWorkflow(target, name, scope)
   }
 
   async validateWorkflow(chatId: string, script: string): Promise<WorkflowValidation | null> {
     const client = this.extensions.client
-    const acpId = this.workflowSession(chatId)
-    if (!client || !acpId) return null
-    return client.validateWorkflow(acpId, script)
+    const target = this.workflowTarget(chatId)
+    if (!client || !target) return null
+    return client.validateWorkflow(target, script)
   }
 
   /**
@@ -1204,12 +1399,13 @@ export class AppModel extends EventEmitter {
   }
 
   /** Drops a scratch chat once the studio is done with it. Anything still
-   *  running is cancelled first, so closing the editor cannot leave a fan-out
-   *  burning tokens against a session nobody is watching. */
+   *  running is cancelled and the session closed first, so closing the
+   *  editor cannot leave a fan-out burning tokens against a session nobody
+   *  is watching. */
   discardScratchChat(chatId: string): void {
     const session = this.sessionById(chatId)
     if (!session || !session.isScratch) return
-    if (session.isBusy) this.cancel(chatId)
+    this.releaseSession(session)
     this.sessions = this.sessions.filter((s) => s.id !== chatId)
     const acpId = session.acpSessionId
     if (acpId) this.sessionsByACPID.delete(acpId)
@@ -1218,9 +1414,9 @@ export class AppModel extends EventEmitter {
 
   async listWorkflowRuns(chatId: string): Promise<WorkflowRunInfo[]> {
     const client = this.extensions.client
-    const acpId = this.workflowSession(chatId)
-    if (!client || !acpId) return []
-    return client.listWorkflowRuns(acpId)
+    const target = this.workflowTarget(chatId)
+    if (!client || !target) return []
+    return client.listWorkflowRuns(target)
   }
 
   // -------------------------------------------------------------------------
@@ -1322,6 +1518,92 @@ export class AppModel extends EventEmitter {
     this.emit('question-resolved', requestId, resolvedBy)
   }
 
+  /**
+   * Fills in what an incoming permission request leaves to the app, and
+   * marks its card. Returns the card's status before the request turned it
+   * "pending" (null when the request made the card).
+   *
+   * spettro attaches a request to the card it is already drawing and then
+   * sends only the card's id, the pending status and the content — no title,
+   * no kind (permission.go requestApproval) — so the chat, the title and the
+   * kind come from that card here. A request with nothing open to attach to
+   * names a fresh `perm-N` card and describes it in full; that card is put in
+   * the transcript now, as the spec says to treat the request's toolCall, so
+   * the settle update that follows the answer lands on a titled card instead
+   * of creating an untitled one. The compaction prompt approves no tool and
+   * gets no settle update, so it gets no card.
+   */
+  private adoptPermission(request: ACPPermissionRequest): ACPToolStatus | null {
+    const session = this.sessionsByACPID.get(request.sessionId) ?? null
+    request.chatId = session?.id ?? null
+    const toolCallId = request.toolCallId
+    const card = session && toolCallId ? session.toolById(toolCallId) : null
+    if (request.toolKind === undefined && card?.kind !== undefined) request.toolKind = card.kind
+    if (request.title === '') request.title = card?.title || permissionSentence(request)
+    if (!session || !toolCallId || request.variant === 'compact') return null
+    if (card) return session.setToolStatus(toolCallId, 'pending')
+    const event: ACPToolCallEvent = {
+      toolCallId,
+      title: request.title,
+      status: 'pending',
+      texts: [],
+      diffs: [],
+      images: [],
+      locations: request.locations
+    }
+    if (request.toolKind !== undefined) event.kind = request.toolKind
+    if (request.rawInput !== undefined) event.rawInput = request.rawInput
+    session.applyToolEvent(event, true)
+    return null
+  }
+
+  /**
+   * Takes every queued permission and question that `match`es off screen —
+   * because the agent withdrew it, its turn was cancelled or failed, or the
+   * agent itself is gone — and tells paired phones it is resolved. With
+   * `answer`, each is also answered "cancelled", so a CLI still waiting on
+   * it stops waiting. A card a permission marked "pending" goes back to what
+   * it was, or to failed when the request made it: the CLI counts an
+   * unanswered request as a denial.
+   */
+  private withdrawPrompts(
+    match: (prompt: { rpcId: RPCID; sessionId: string | undefined }) => boolean,
+    answer: boolean
+  ): void {
+    const agent = answer ? this.agent : null
+    const permissions = this.pendingPermissions.filter((p) =>
+      match({ rpcId: p.rpcId, sessionId: p.request.sessionId })
+    )
+    const questions = this.pendingQuestions.filter((q) =>
+      match({ rpcId: q.rpcId, sessionId: q.request.sessionId })
+    )
+    if (permissions.length > 0) {
+      this.pendingPermissions = this.pendingPermissions.filter((p) => !permissions.includes(p))
+      for (const entry of permissions) {
+        agent?.cancelPermission(entry.rpcId)
+        this.releasePromptCard(entry)
+      }
+      this.emitPermissions()
+      for (const entry of permissions) this.emit('permission-resolved', entry.request.id, null)
+    }
+    if (questions.length > 0) {
+      this.pendingQuestions = this.pendingQuestions.filter((q) => !questions.includes(q))
+      for (const entry of questions) agent?.cancelQuestion(entry)
+      this.emitQuestions()
+      for (const entry of questions) this.emit('question-resolved', entry.request.id, null)
+    }
+  }
+
+  /** Undoes the "pending" a withdrawn permission put on its card, unless an
+   *  update has moved the card on since. */
+  private releasePromptCard(entry: PendingPermission): void {
+    const { chatId, toolCallId } = entry.request
+    const session = chatId ? this.sessionById(chatId) : null
+    if (!session || !toolCallId) return
+    if (session.toolById(toolCallId)?.status !== 'pending') return
+    session.setToolStatus(toolCallId, entry.priorToolStatus ?? 'failed')
+  }
+
   // -------------------------------------------------------------------------
   // Provider gate (needsProvider)
   // -------------------------------------------------------------------------
@@ -1368,7 +1650,7 @@ export class AppModel extends EventEmitter {
     if (this.phase.kind === 'needsProvider') {
       this.setPhase({ kind: 'ready' })
       this.emitHostState()
-      await this.resumePersistedSessions()
+      this.warmSelected()
     }
   }
 
@@ -1470,11 +1752,18 @@ export class AppModel extends EventEmitter {
     if (!session) return
     // Relay before applying: a remote screen rendering the same stream should
     // not wait on the local view work, and the payload is identical either
-    // way. Re-keyed by the app's own chat id.
-    this.emit('chat-update-raw', session.id, raw)
+    // way. Re-keyed by the app's own chat id. A load replay isn't relayed:
+    // the chat it fills isn't anyone's yet, and phones get it whole once the
+    // import finishes.
+    if (!session.isReplaying) this.emit('chat-update-raw', session.id, raw)
     switch (update.kind) {
       case 'agent_message_chunk':
         session.appendAssistant(update.text)
+        break
+      case 'user_message_chunk':
+        // Only ever legitimate inside session/load; anywhere else it would be
+        // the agent putting words in the user's mouth.
+        if (session.isReplaying) session.appendReplayedUserMessage(update.text)
         break
       case 'agent_thought_chunk':
         session.appendReasoning(update.text)
@@ -1487,7 +1776,7 @@ export class AppModel extends EventEmitter {
         break
       case 'available_commands_update':
         session.setCommands(update.commands)
-        this.prefs.cachedCommands = update.commands
+        this.prefs.setCachedCommands(session.projectPath, update.commands)
         break
       case 'config_option_update':
         if (update.options.length > 0) {
@@ -1537,4 +1826,55 @@ function isDirectory(path: string): boolean {
 
 function errMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
+}
+
+/** An inline notice the transcript gets at a turn's end, mirrored to phones. */
+interface TurnNotice {
+  text: string
+  isError: boolean
+}
+
+/** The muted line a turn's stop reason earns, if any. end_turn (and a reason
+ *  this build doesn't know) end silently. */
+function stopNotice(reason: TurnSummary['stopReason']): TurnNotice | null {
+  switch (reason) {
+    case 'max_tokens':
+      return { text: 'The reply hit the length limit.', isError: false }
+    case 'refusal':
+      return { text: 'The model declined this request.', isError: false }
+    case 'max_turn_requests':
+      return { text: 'The turn reached its step limit.', isError: false }
+    case 'cancelled':
+      return { text: 'Interrupted', isError: false }
+    default:
+      return null
+  }
+}
+
+/** A title for a permission request that came with none and whose card we
+ *  don't have — written from the tool kind, naming the file when there is
+ *  one. */
+function permissionSentence(request: ACPPermissionRequest): string {
+  const path = request.content.diffs[0]?.path ?? request.locations[0]?.path
+  const file = path ? basename(path) : null
+  switch (request.variant ?? request.toolKind) {
+    case 'compact':
+      return 'Compact the conversation'
+    case 'execute':
+      return 'Run a command'
+    case 'edit':
+      return file ? `Edit ${file}` : 'Edit a file'
+    case 'delete':
+      return file ? `Delete ${file}` : 'Delete a file'
+    case 'move':
+      return file ? `Move ${file}` : 'Move a file'
+    case 'read':
+      return file ? `Read ${file}` : 'Read a file'
+    case 'search':
+      return 'Search the project'
+    case 'fetch':
+      return 'Open a web page'
+    default:
+      return 'Allow this action'
+  }
 }

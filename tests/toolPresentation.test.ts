@@ -5,6 +5,7 @@
 // here as a row that reads slightly wrong, not as a crash.
 
 import { describe, expect, it } from 'vitest'
+import type { ToolCallItem } from '@shared/model'
 import {
   changedLines,
   diffStat,
@@ -18,7 +19,7 @@ import {
   subAgentResult
 } from '@renderer/views/chat/transcript/toolPresentation'
 
-const base = { locations: [] as string[], diffs: [], output: '' }
+const base = { locations: [] as ToolCallItem['locations'], diffs: [], output: '' }
 
 describe('parsedTitle', () => {
   it('splits the CLI’s `name {args}` form', () => {

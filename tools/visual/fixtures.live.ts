@@ -106,7 +106,7 @@ export const LIVE_SCENE: Scene = {
         "output": "alpha\n",
         "diffs": [],
         "locations": [
-          "/tmp/claude-1000/-home-carlo-Desktop-Spettro-Spettro-Desktop/febcdfcd-93e1-4a78-9149-1a475e52f0c7/scratchpad/liveproj/a.txt"
+          { "path": "/tmp/claude-1000/-home-carlo-Desktop-Spettro-Spettro-Desktop/febcdfcd-93e1-4a78-9149-1a475e52f0c7/scratchpad/liveproj/a.txt" }
         ],
         "timestamp": 1700000006000,
         "kind": "read",
@@ -122,7 +122,7 @@ export const LIVE_SCENE: Scene = {
         "output": "gamma\n",
         "diffs": [],
         "locations": [
-          "/tmp/claude-1000/-home-carlo-Desktop-Spettro-Spettro-Desktop/febcdfcd-93e1-4a78-9149-1a475e52f0c7/scratchpad/liveproj/c.txt"
+          { "path": "/tmp/claude-1000/-home-carlo-Desktop-Spettro-Spettro-Desktop/febcdfcd-93e1-4a78-9149-1a475e52f0c7/scratchpad/liveproj/c.txt" }
         ],
         "timestamp": 1700000007000,
         "kind": "read",
@@ -138,7 +138,7 @@ export const LIVE_SCENE: Scene = {
         "output": "beta\n",
         "diffs": [],
         "locations": [
-          "/tmp/claude-1000/-home-carlo-Desktop-Spettro-Spettro-Desktop/febcdfcd-93e1-4a78-9149-1a475e52f0c7/scratchpad/liveproj/b.txt"
+          { "path": "/tmp/claude-1000/-home-carlo-Desktop-Spettro-Spettro-Desktop/febcdfcd-93e1-4a78-9149-1a475e52f0c7/scratchpad/liveproj/b.txt" }
         ],
         "timestamp": 1700000008000,
         "kind": "read",

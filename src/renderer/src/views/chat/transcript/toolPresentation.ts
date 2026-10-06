@@ -194,7 +194,7 @@ export function displayDetail(
     default: {
       const path =
         argString(args, 'path', 'file', 'file_path', 'filename') ??
-        (tool.locations.length > 0 ? tool.locations[0] : null)
+        (tool.locations.length > 0 ? tool.locations[0].path : null)
       if (path !== null) {
         detail = shortPath(path)
         const pattern = argString(args, 'pattern', 'query', 'regex')

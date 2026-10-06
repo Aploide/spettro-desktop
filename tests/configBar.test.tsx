@@ -62,7 +62,9 @@ function chat(options: ACPConfigOption[]): ChatDetail {
     configOptions: options,
     commands: [],
     plan: [],
-    usage: null
+    usage: null,
+    lastTurn: null,
+    sessionTokens: 0
   }
 }
 

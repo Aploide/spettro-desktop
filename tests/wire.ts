@@ -308,3 +308,180 @@ export function renderedTree(o: {
   }
   return lines.join('\n')
 }
+
+// ---------------------------------------------------------------------------
+// Raw ACP payloads, for tests that drive the main process through the pipe
+// (AcpConnection.handleLine) rather than through transcript items.
+// ---------------------------------------------------------------------------
+
+type JSON = import('@shared/acp').JSONValue
+
+/**
+ * The `initialize` result (internal/acp/bridge.go Initialize): every session
+ * capability as an empty object, image and embedded-context prompts, and the
+ * `_spettro/*` surface under `_meta` (ext.go extensionMethods, version 4).
+ */
+export function initializeResult(o: { methods?: string[] } = {}): JSON {
+  return {
+    protocolVersion: 1,
+    agentInfo: { name: 'spettro', title: 'Spettro', version: 'dev' },
+    agentCapabilities: {
+      loadSession: true,
+      sessionCapabilities: { list: {}, resume: {}, close: {} },
+      promptCapabilities: { image: true, embeddedContext: true }
+    },
+    authMethods: [],
+    _meta: {
+      'spettro.app/extensions': {
+        version: 4,
+        methods: o.methods ?? ['_spettro/account/status', '_spettro/workflow/list'],
+        clientMethods: ['_spettro/question/ask']
+      }
+    }
+  }
+}
+
+/**
+ * A JSON-RPC error as acp-go-sdk writes one (errors.go): a plain Go error
+ * becomes -32603 "Internal error" with the real reason in `data.error`;
+ * NewInvalidParams is -32602 "Invalid params", reason likewise in `data`.
+ */
+export function rpcError(reason: string, code = -32603): { code: number; message: string; data: JSON } {
+  return {
+    code,
+    message: code === -32602 ? 'Invalid params' : 'Internal error',
+    data: { error: reason }
+  }
+}
+
+const ALLOW_ONCE = { optionId: 'allow-once', name: 'Allow once', kind: 'allow_once' }
+const DENY = { optionId: 'deny', name: 'Deny', kind: 'reject_once' }
+
+/**
+ * `session/request_permission` params for an approval the CLI ATTACHES to a
+ * card it is already drawing (internal/acp/permission.go requestApproval):
+ * only the card's id, `status: "pending"` and the content — the command
+ * fenced (approvalTextBlock), any diff (fileChangeContent), then the reason.
+ * No title, no kind, no rawInput: those are on the card.
+ */
+export function permissionAttached(o: {
+  sessionId: string
+  toolCallId: string
+  command?: string
+  diff?: { path: string; oldText?: string; newText: string }
+  reason?: string
+}): JSON {
+  const content: JSON[] = []
+  if (o.diff) content.push({ type: 'diff', ...o.diff })
+  else if (o.command) {
+    content.push({ type: 'content', content: { type: 'text', text: '```sh\n' + o.command + '\n```' } })
+  }
+  if (o.reason) content.push({ type: 'content', content: { type: 'text', text: o.reason } })
+  return {
+    sessionId: o.sessionId,
+    toolCall: { toolCallId: o.toolCallId, status: 'pending', content },
+    options: [ALLOW_ONCE, DENY]
+  }
+}
+
+/**
+ * The same request when no card was open to attach to (permission.go): a
+ * fresh `perm-N` id, described in full — title, kind, and rawInput
+ * `{command, reason}` — because nothing else will ever describe that card.
+ * The CLI settles it with a tool_call_update after the answer
+ * (settleApprovalCard).
+ */
+export function permissionFresh(o: {
+  sessionId: string
+  n: number
+  title: string
+  command: string
+  reason?: string
+}): JSON {
+  return {
+    sessionId: o.sessionId,
+    toolCall: {
+      toolCallId: `perm-${o.n}`,
+      status: 'pending',
+      title: o.title,
+      kind: 'execute',
+      rawInput: { command: o.command, reason: o.reason ?? '' },
+      content: [{ type: 'content', content: { type: 'text', text: '```sh\n' + o.command + '\n```' } }]
+    },
+    options: [
+      ALLOW_ONCE,
+      { optionId: 'allow-always', name: 'Always allow this command', kind: 'allow_always' },
+      DENY
+    ]
+  }
+}
+
+/** The "context nearly full" prompt (internal/acp/compaction.go
+ *  askCompactPermission): its own `compact-N` id and options. */
+export function compactRequest(sessionId: string): JSON {
+  return {
+    sessionId,
+    toolCall: {
+      toolCallId: 'compact-1',
+      title: 'Context nearly full (~180000/200000 tokens). Compact conversation history now?',
+      kind: 'think',
+      status: 'pending'
+    },
+    options: [
+      { optionId: 'compact', name: 'Compact now', kind: 'allow_once' },
+      { optionId: 'continue', name: 'Continue without compacting', kind: 'reject_once' }
+    ]
+  }
+}
+
+/** An `agent_message_chunk` update. */
+export function agentChunk(text: string): JSON {
+  return { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text } }
+}
+
+/** A `user_message_chunk`, which spettro sends only while `session/load`
+ *  replays a stored conversation, one whole message per chunk
+ *  (internal/acp/sessions.go LoadSession). */
+export function userChunk(text: string): JSON {
+  return { sessionUpdate: 'user_message_chunk', content: { type: 'text', text } }
+}
+
+/** The acknowledgement a prompt sent mid-turn gets before its own turn ends
+ *  with end_turn (internal/acp/bridge.go steerRunningTurn), verbatim. */
+export const STEERING_QUEUED_TEXT =
+  '→ steering queued: the running agent will see this message at its next step'
+
+/** The agent has read a steer (internal/acp/content.go, from llm_runtime.go's
+ *  "steering delivered: <text clipped to 200>" comment trace). */
+export function steeringDeliveredText(steer: string): string {
+  return `✔ steering delivered: ${steer}`
+}
+
+/**
+ * A `session/prompt` result (bridge.go Prompt / turnUsageResponse): usage is
+ * the turn's provider accounting, `_meta["spettro.app/tokensUsed"]` the
+ * runtime's own count.
+ */
+export function promptResult(o: {
+  stopReason?: string
+  usage?: { inputTokens: number; outputTokens: number; totalTokens: number; cachedReadTokens?: number }
+  tokensUsed?: number
+}): JSON {
+  const result: { [key: string]: JSON } = { stopReason: o.stopReason ?? 'end_turn' }
+  if (o.usage) result['usage'] = o.usage
+  if (o.tokensUsed !== undefined) result['_meta'] = { 'spettro.app/tokensUsed': o.tokensUsed }
+  return result
+}
+
+/** A `session/list` result (sessions.go ListSessions): newest first, one
+ *  page, the title being the first prompt's preview, updatedAt RFC 3339. */
+export function sessionList(entries: { id: string; cwd: string; title?: string; updatedAt?: string }[]): JSON {
+  return {
+    sessions: entries.map((e) => {
+      const info: { [key: string]: JSON } = { sessionId: e.id, cwd: e.cwd }
+      if (e.title !== undefined) info['title'] = e.title
+      if (e.updatedAt !== undefined) info['updatedAt'] = e.updatedAt
+      return info
+    })
+  }
+}

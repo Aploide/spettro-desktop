@@ -324,7 +324,7 @@ export const SCENES: Scene[] = [
     note: 'A plain delegation, an ordinary tool row and two runs in one turn — checks that grouping preserves order and that nothing leaks into the flat rows.',
     items: [
       say('user', 'audit the ACP layer, then port the views'),
-      tool({ title: 'read {"file_path":"src/main/acp/parse.ts"}', kind: 'read', argsJSON: '{"file_path":"src/main/acp/parse.ts"}', output: '449 lines', locations: ['src/main/acp/parse.ts'] }),
+      tool({ title: 'read {"file_path":"src/main/acp/parse.ts"}', kind: 'read', argsJSON: '{"file_path":"src/main/acp/parse.ts"}', output: '449 lines', locations: [{ path: 'src/main/acp/parse.ts' }] }),
       tool({
         title: 'agent explore: map the ACP surface',
         kind: 'think',

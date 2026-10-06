@@ -394,7 +394,8 @@ export function transcriptItemToWire(item: TranscriptItem): JSONValue {
       if (d.oldText !== null && d.oldText !== undefined) diff.oldText = d.oldText
       return diff
     }),
-    locations: [...t.locations],
+    // The Swift StoredTool keeps bare paths.
+    locations: t.locations.map((l) => l.path),
     timestamp: rfc3339(t.timestamp)
   }
   if (t.kind !== undefined) stored.kind = t.kind

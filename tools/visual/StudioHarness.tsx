@@ -100,7 +100,9 @@ const RUN_CHAT = {
   configOptions: [],
   commands: [],
   plan: [],
-  usage: null
+  usage: null,
+  lastTurn: null,
+  sessionTokens: 0
 }
 
 const MODE = new URLSearchParams(location.search).get('mode') ?? 'editing'

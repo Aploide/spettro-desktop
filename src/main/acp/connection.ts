@@ -30,13 +30,33 @@ import {
 export class AcpError extends Error {
   kind: 'rpc' | 'decode' | 'terminated' | 'transport'
   code?: number
+  /** A JSON-RPC error's `data`, verbatim — where the real reason lives. */
+  data?: JSONValue
 
-  constructor(kind: AcpError['kind'], message: string, code?: number) {
+  constructor(kind: AcpError['kind'], message: string, code?: number, data?: JSONValue) {
     super(message)
     this.name = 'AcpError'
     this.kind = kind
     if (code !== undefined) this.code = code
+    if (data !== undefined) this.data = data
   }
+}
+
+/**
+ * The human half of a JSON-RPC error.
+ *
+ * The SDK the CLI is built on turns every plain Go error into
+ * `{code: -32603, message: "Internal error", data: {error: "<the reason>"}}`,
+ * and invalid params into `-32602 "Invalid params"` with the reason in `data`
+ * likewise (acp-go-sdk errors.go). `message` is the JSON-RPC category; the
+ * sentence a person can act on ("invalid api key", "prompt has no text
+ * content") is only ever in `data`.
+ */
+export function rpcErrorMessage(message: string, data: JSONValue | undefined): string {
+  if (typeof data === 'string' && data.trim() !== '') return data
+  const obj = objectValue(data)
+  const reason = stringValue(obj?.['error']) ?? stringValue(obj?.['message'])
+  return reason !== null && reason.trim() !== '' ? reason : message
 }
 
 interface PendingRequest {
@@ -72,6 +92,10 @@ export class AcpConnection {
    *  raw: the app decodes what it models, and the remote host relays the same
    *  payload verbatim to attached phones. */
   onExtensionNotification: ((method: string, params: JSONValue) => void) | null = null
+  /** The agent withdrew one of its own requests (`$/cancel_request`) — a
+   *  permission prompt that timed out, or whose turn was cancelled. Carries
+   *  the id of the request being withdrawn. */
+  onCancelRequest: ((rpcId: RPCID) => void) | null = null
   onTerminate: ((code: number) => void) | null = null
   onLog: ((line: string) => void) | null = null
 
@@ -282,14 +306,24 @@ export class AcpConnection {
     const error = objectValue(obj['error'])
     if (error) {
       const code = intValue(error['code']) ?? -1
-      const message = stringValue(error['message']) ?? 'unknown error'
-      continuation.reject(new AcpError('rpc', message, code))
+      const data = error['data']
+      const message = rpcErrorMessage(stringValue(error['message']) ?? 'unknown error', data)
+      continuation.reject(new AcpError('rpc', message, code, data))
     } else {
       continuation.resolve(obj['result'] ?? null)
     }
   }
 
   private handleNotification(method: string, params: JSONValue | undefined): void {
+    // JSON-RPC's own cancellation, which the SDK sends when the context of a
+    // request it made of us ends: the prompt it was waiting on is moot.
+    if (method === '$/cancel_request') {
+      const rpcId = decodeRpcId(objectValue(params)?.['requestId'])
+      if (rpcId === null) return
+      this.questionCustomOptions.delete(rpcKey(rpcId))
+      this.onCancelRequest?.(rpcId)
+      return
+    }
     // ACP extension methods are namespaced with a leading underscore. These
     // used to be dropped on the floor, which is why an account change made in
     // the TUI (or a login completing in the browser) never reached the app.

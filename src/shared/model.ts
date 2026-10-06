@@ -6,6 +6,9 @@ import type {
   ACPCommand,
   ACPConfigOption,
   ACPPlanEntry,
+  ACPStopReason,
+  ACPToolImage,
+  ACPToolLocation,
   ACPToolStatus,
   ACPUsage,
   JSONValue
@@ -28,6 +31,12 @@ export interface ImageAttachmentDTO {
 
 export type ChatRole = 'user' | 'assistant' | 'reasoning' | 'notice'
 
+/** Where a message sent while the agent was working stands. Such a message
+ *  steers the running turn instead of starting one: `sending` until the CLI
+ *  acknowledges it, `queued` until the agent reaches its next step and reads
+ *  it, then `delivered`. */
+export type SteeringState = 'sending' | 'queued' | 'delivered'
+
 export interface ChatMessage {
   id: string
   role: ChatRole
@@ -38,6 +47,8 @@ export interface ChatMessage {
   isStreaming: boolean
   /** ms since epoch */
   timestamp: number
+  /** Only on user messages sent mid-turn. */
+  steering?: SteeringState
 }
 
 export interface ToolDiff {
@@ -54,7 +65,14 @@ export interface ToolCallItem {
   status: ACPToolStatus
   output: string
   diffs: ToolDiff[]
-  locations: string[]
+  /** Files the call touches. Sessions saved before line numbers were kept
+   *  stored bare paths; ChatSession.restore upgrades them. */
+  locations: ACPToolLocation[]
+  /** Images the tool returned (screenshots, viewed images), at most four. */
+  images?: ACPToolImage[]
+  /** The tool's own result text (`rawOutput.output`), which `output` — the
+   *  card's display excerpt — may have clipped. */
+  rawOutput?: string
   /** The full ACP rawInput re-encoded as JSON — the reliable argument source. */
   argsJSON?: string
   timestamp: number
@@ -89,6 +107,26 @@ export interface ChatSummary {
   unread: boolean
 }
 
+/** How the most recent turn ended and what it cost. Token fields are 0 when
+ *  the agent reported no accounting. */
+export interface TurnSummary {
+  stopReason: ACPStopReason | 'error'
+  inputTokens: number
+  outputTokens: number
+  cachedReadTokens: number
+  totalTokens: number
+  durationMs: number
+}
+
+/** A conversation the CLI has on disk that no chat here is linked to — one
+ *  started in the terminal, say — offered for import. */
+export interface CLISessionEntry {
+  sessionId: string
+  title: string | null
+  /** ms since epoch, when the CLI reported one. */
+  updatedAt: number | null
+}
+
 /** Full detail the renderer holds for an open chat. */
 export interface ChatDetail {
   id: string
@@ -104,6 +142,10 @@ export interface ChatDetail {
   commands: ACPCommand[]
   plan: ACPPlanEntry[]
   usage: ACPUsage | null
+  /** Live-only: null until a turn finishes in this run of the app. */
+  lastTurn: TurnSummary | null
+  /** Every turn's tokens added up, across relaunches. */
+  sessionTokens: number
 }
 
 /** On-disk snapshot (sessions.json). Matches the remote-protocol StoredSession
@@ -120,6 +162,8 @@ export interface StoredSession {
   items: TranscriptItem[]
   configOptions: ACPConfigOption[]
   pendingConfigChanges: Record<string, JSONValue>
+  /** Absent in sessions saved before it was tracked. */
+  sessionTokens?: number
 }
 
 // ---------------------------------------------------------------------------

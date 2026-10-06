@@ -90,6 +90,8 @@ export function registerIpc(
     toggleArchive: async (chatId) => model.toggleArchive(chatId),
     renameChat: async (chatId, title) => model.renameChat(chatId, title),
     selectSession: async (chatId) => model.selectSession(chatId),
+    listCLISessions: (projectPath) => model.listCLISessions(projectPath),
+    importCLISession: (sessionId, projectPath) => model.importCLISession(sessionId, projectPath),
 
     // -- Prompting ----------------------------------------------------------
     send: async (chatId, text, attachments) => model.send(chatId, text, attachments, null),

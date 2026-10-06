@@ -58,16 +58,32 @@ export interface ACPToolDiffContent {
   newText: string
 }
 
+/** A file a tool call touches (`locations[]`); `line` when the agent names one. */
+export interface ACPToolLocation {
+  path: string
+  line?: number
+}
+
+/** An image a tool returned (a screenshot, a viewed image) — base64 `data`. */
+export interface ACPToolImage {
+  data: string
+  mimeType: string
+}
+
 export interface ACPToolCallEvent {
   toolCallId: string
   title?: string
   kind?: string
   status?: ACPToolStatus
   rawInput?: JSONValue
+  /** `rawOutput.output` — the tool's own result text, unclipped by the card. */
+  rawOutput?: string
   /** Plain-text output fragments from `content` blocks. */
   texts: string[]
   diffs: ACPToolDiffContent[]
-  locations: string[]
+  /** Image content blocks, capped (see parse.ts MAX_TOOL_IMAGES). */
+  images: ACPToolImage[]
+  locations: ACPToolLocation[]
 }
 
 // ---------------------------------------------------------------------------
@@ -100,6 +116,8 @@ export interface ACPUsage {
 export type ACPSessionUpdate =
   | { kind: 'agent_message_chunk'; text: string }
   | { kind: 'agent_thought_chunk'; text: string }
+  /** Only ever sent while `session/load` replays a stored conversation. */
+  | { kind: 'user_message_chunk'; text: string }
   | { kind: 'tool_call'; event: ACPToolCallEvent }
   | { kind: 'tool_call_update'; event: ACPToolCallEvent }
   | { kind: 'available_commands_update'; commands: ACPCommand[] }
@@ -120,6 +138,43 @@ export type ACPStopReason =
   | 'cancelled'
   | 'unknown'
 
+/** The token accounting a `session/prompt` response carries (ACP `Usage`). */
+export interface ACPTurnUsage {
+  inputTokens: number
+  outputTokens: number
+  totalTokens: number
+  cachedReadTokens?: number
+  cachedWriteTokens?: number
+}
+
+/** What a finished `session/prompt` reports. */
+export interface ACPPromptResult {
+  stopReason: ACPStopReason
+  usage?: ACPTurnUsage
+  /** Spettro's own count for the turn (`_meta["spettro.app/tokensUsed"]`),
+   *  an estimate when the provider reported no accounting. */
+  tokensUsed?: number
+}
+
+/** What the agent said it can do at `initialize` — feature detection instead
+ *  of trial and error. Every flag is false for an agent that didn't say. */
+export interface ACPAgentCapabilities {
+  loadSession: boolean
+  listSessions: boolean
+  resumeSession: boolean
+  closeSession: boolean
+  promptImage: boolean
+  promptEmbeddedContext: boolean
+}
+
+/** One entry of `session/list`. */
+export interface ACPSessionInfo {
+  sessionId: string
+  cwd: string
+  title: string | null
+  /** ms since epoch, when the agent reported one. */
+  updatedAt: number | null
+}
 // ---------------------------------------------------------------------------
 // Permission requests (agent → app)
 // ---------------------------------------------------------------------------
@@ -134,10 +189,26 @@ export interface ACPPermissionRequest {
   /** App-generated identity for queueing/dismissal. */
   id: string
   sessionId: string
+  /** The chat that asked, stamped by the main process; null when the ACP
+   *  session belongs to no chat it knows (a closed one, say). */
+  chatId: string | null
+  /** The transcript card this approval is about. The CLI attaches a request
+   *  to the card it is already drawing, or names a fresh `perm-N` one. */
+  toolCallId?: string
+  /** Always a sentence: the agent's title, else the card's, else one written
+   *  from the tool kind. */
   title: string
   toolKind?: string
   rawInput?: JSONValue
+  /** What the approval would do, from `toolCall.content`: the command (in a
+   *  fenced block), the reason, and any diff. An attached request carries
+   *  nothing else — no title, no rawInput (permission.go). */
+  content: { texts: string[]; diffs: ACPToolDiffContent[] }
+  locations: ACPToolLocation[]
   options: ACPPermissionOption[]
+  /** The "context nearly full — compact now?" prompt (compaction.go), which
+   *  rides the permission transport but approves no tool. */
+  variant?: 'compact'
 }
 
 // ---------------------------------------------------------------------------
@@ -166,6 +237,9 @@ export interface ACPQuestionRequest {
   id: string
   version: number
   sessionId?: string
+  /** The chat that asked, stamped by the main process (see
+   *  ACPPermissionRequest.chatId). */
+  chatId: string | null
   context?: string
   questions: ACPQuestion[]
 }

@@ -19,7 +19,7 @@ function session(): ChatSession {
 }
 
 function toolEvent(partial: Partial<ACPToolCallEvent> & { toolCallId: string }): ACPToolCallEvent {
-  return { texts: [], diffs: [], locations: [], ...partial }
+  return { texts: [], diffs: [], images: [], locations: [], ...partial }
 }
 
 function toolAt(s: ChatSession, index = 0) {
@@ -291,7 +291,7 @@ describe('AppModel sessions (rename, unread, recents)', () => {
       runTurn(s: ChatSession, blocks: unknown[]): Promise<void>
       connect(): Promise<void>
     }
-    internals.agent = { prompt: () => Promise.resolve('end_turn') }
+    internals.agent = { prompt: () => Promise.resolve({ stopReason: 'end_turn' }) }
     internals.liveACPSessionId = () => 'acp-1'
     // openChat warms the session through the agent; nothing to warm here.
     internals.connect = () => Promise.resolve()
@@ -326,6 +326,73 @@ describe('AppModel sessions (rename, unread, recents)', () => {
     expect(model.getState().recentProjects).toEqual([folder])
     expect(model.getState().missingProjects).toEqual([])
     rmSync(folder, { recursive: true, force: true })
+    rmSync(dir, { recursive: true, force: true })
+  })
+})
+
+describe('sessions saved by an older build', () => {
+  function legacy(): StoredSession {
+    return {
+      id: 'old',
+      acpSessionId: 'acp-old',
+      projectPath: '/work/acme',
+      title: 'Old',
+      createdAt: 1,
+      updatedAt: 1,
+      isPinned: false,
+      isArchived: false,
+      items: [
+        {
+          kind: 'tool',
+          // Before line numbers were kept, locations were bare paths.
+          tool: { id: 'c1', title: 'Read a.go', status: 'completed', output: '', diffs: [], locations: ['/p/a.go'] as never, timestamp: 1 }
+        },
+        {
+          kind: 'message',
+          message: { id: 'm1', role: 'user', text: 'and also…', attachments: [], isStreaming: false, timestamp: 2, steering: 'queued' }
+        }
+      ],
+      configOptions: [],
+      pendingConfigChanges: {}
+    }
+  }
+
+  it('get their tool locations upgraded to { path }', () => {
+    const s = ChatSession.restore(legacy())
+    expect(toolAt(s).locations).toEqual([{ path: '/p/a.go' }])
+  })
+
+  it('lose a steering state no turn is left to resolve', () => {
+    const s = ChatSession.restore(legacy())
+    const item = s.items[1]
+    expect(item.kind === 'message' && item.message.steering).toBeUndefined()
+  })
+
+  it('start counting tokens from zero, and keep the count from then on', () => {
+    const s = ChatSession.restore(legacy())
+    expect(s.sessionTokens).toBe(0)
+    s.recordTurn({ stopReason: 'end_turn', inputTokens: 1, outputTokens: 1, cachedReadTokens: 0, totalTokens: 2, durationMs: 5 })
+    expect(ChatSession.restore(s.snapshot()).sessionTokens).toBe(2)
+  })
+})
+
+describe('the commands cache', () => {
+  it('is per folder, migrates the old single list, and falls back to the last list seen', async () => {
+    const { Prefs } = await import('@main/model/prefs')
+    const dir = mkdtempSync(join(tmpdir(), 'spettro-prefs-'))
+    writeFileSync(join(dir, 'preferences.json'), JSON.stringify({ cachedCommands: [{ name: 'help' }] }))
+    const prefs = new Prefs(dir)
+    // The old global list serves every folder until one has its own.
+    expect(prefs.cachedCommands('/a')).toEqual([{ name: 'help' }])
+
+    prefs.setCachedCommands('/a', [{ name: 'help' }, { name: 'deploy' }])
+    prefs.setCachedCommands('/b', [{ name: 'help' }])
+    expect(prefs.cachedCommands('/a')).toEqual([{ name: 'help' }, { name: 'deploy' }])
+    expect(prefs.cachedCommands('/b')).toEqual([{ name: 'help' }])
+    expect(prefs.cachedCommands('/never-opened')).toEqual([{ name: 'help' }])
+    // An empty announcement never wipes what was there.
+    prefs.setCachedCommands('/a', [])
+    expect(new Prefs(dir).cachedCommands('/a')).toEqual([{ name: 'help' }, { name: 'deploy' }])
     rmSync(dir, { recursive: true, force: true })
   })
 })

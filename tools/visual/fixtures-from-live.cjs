@@ -68,7 +68,11 @@ for (const line of fs.readFileSync(IN, 'utf8').split('\n')) {
       status: u.status ?? (kind === 'tool_call' ? 'in_progress' : 'completed'),
       output,
       diffs: [],
-      locations: (u.locations || []).map((l) => l.path ?? l).filter(Boolean),
+      // ToolCallItem.locations: { path, line? } (src/shared/model.ts).
+      locations: (u.locations || [])
+        .map((l) => (typeof l === 'string' ? { path: l } : l))
+        .filter((l) => l && typeof l.path === 'string')
+        .map((l) => (typeof l.line === 'number' ? { path: l.path, line: l.line } : { path: l.path })),
       timestamp: 1700000000000 + items.length * 1000
     }
     if (u.kind !== undefined) tool.kind = u.kind

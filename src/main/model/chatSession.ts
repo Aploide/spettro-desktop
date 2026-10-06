@@ -15,6 +15,7 @@ import type {
   ACPConfigOption,
   ACPPlanEntry,
   ACPToolCallEvent,
+  ACPToolLocation,
   ACPToolStatus,
   ACPUsage,
   JSONValue
@@ -24,10 +25,20 @@ import type {
   ChatMessage,
   ChatSummary,
   ImageAttachmentDTO,
+  SteeringState,
   StoredSession,
   ToolCallItem,
-  TranscriptItem
+  TranscriptItem,
+  TurnSummary
 } from '../../shared/model'
+
+/** The CLI's acknowledgement that a message sent mid-turn was queued for the
+ *  running agent (bridge.go steerRunningTurn), and its report that the agent
+ *  has read it (content.go, from llm_runtime.go's "steering delivered"
+ *  comment). Both arrive as ordinary agent_message_chunks; the app turns them
+ *  into state on the user's message instead of printing them. */
+const STEERING_QUEUED = '→ steering queued'
+const STEERING_DELIVERED = '✔ steering delivered'
 
 /** A single select or boolean config value, used for the local display state
  *  and for queuing changes made before a live session exists. */
@@ -45,6 +56,8 @@ export type ChatMetaPatch = Partial<
     | 'acpSessionId'
     | 'isPinned'
     | 'isArchived'
+    | 'lastTurn'
+    | 'sessionTokens'
   >
 >
 
@@ -72,6 +85,14 @@ export class ChatSession {
    *  sidebar's "finished while you were away" dot; cleared the moment the
    *  chat is opened. Live-only: a relaunch starts with nothing unread. */
   unread = false
+  /** How the latest turn ended and what it cost; live-only. */
+  lastTurn: TurnSummary | null = null
+  /** Every turn's tokens added up. Persisted, so it survives a relaunch the
+   *  way the conversation does. */
+  sessionTokens = 0
+  /** True while `session/load` replays this conversation into it — the only
+   *  time a user_message_chunk is the agent's to send. */
+  isReplaying = false
 
   /** Changes the user made while this chat had no live ACP session yet;
    *  AppModel replays them onto the session as soon as one attaches. */
@@ -124,14 +145,20 @@ export class ChatSession {
   // -------------------------------------------------------------------------
 
   /** Rebuilds a session from its on-disk snapshot. The result is "cold": it
-   *  carries the display transcript but no live ACP session yet. */
-  static restore(stored: StoredSession): ChatSession {
+   *  carries the display transcript but no live ACP session yet. `commands`
+   *  seeds the slash palette until the agent announces its own. */
+  static restore(stored: StoredSession, commands: ACPCommand[] = []): ChatSession {
     const session = new ChatSession(stored.projectPath, stored.title, stored.id, stored.createdAt)
     session.acpSessionId = stored.acpSessionId ?? null
     session.isPinned = stored.isPinned === true
     session.isArchived = stored.isArchived === true
     session.items = Array.isArray(stored.items) ? structuredClone(stored.items) : []
+    for (const item of session.items) upgradeStoredItem(item)
     session.isEmpty = session.items.length === 0
+    session.commands = commands
+    if (typeof stored.sessionTokens === 'number' && Number.isFinite(stored.sessionTokens)) {
+      session.sessionTokens = Math.max(0, stored.sessionTokens)
+    }
     session.configOptions = Array.isArray(stored.configOptions)
       ? structuredClone(stored.configOptions)
       : []
@@ -160,7 +187,8 @@ export class ChatSession {
       isArchived: this.isArchived,
       items: structuredClone(this.items),
       configOptions: structuredClone(this.configOptions),
-      pendingConfigChanges: pending
+      pendingConfigChanges: pending,
+      sessionTokens: this.sessionTokens
     }
   }
 
@@ -212,7 +240,9 @@ export class ChatSession {
       configOptions: structuredClone(this.configOptions),
       commands: structuredClone(this.commands),
       plan: structuredClone(this.plan),
-      usage: this.usage ? structuredClone(this.usage) : null
+      usage: this.usage ? structuredClone(this.usage) : null,
+      lastTurn: this.lastTurn ? { ...this.lastTurn } : null,
+      sessionTokens: this.sessionTokens
     }
   }
 
@@ -277,6 +307,14 @@ export class ChatSession {
     this.emitMeta({ usage })
   }
 
+  /** Files a finished turn: what it ended with and what it cost, added to
+   *  the session's running total. */
+  recordTurn(turn: TurnSummary): void {
+    this.lastTurn = turn
+    this.sessionTokens += Math.max(0, turn.totalTokens)
+    this.emitMeta({ lastTurn: { ...turn }, sessionTokens: this.sessionTokens })
+  }
+
   /** A user-chosen title. Blank input is refused rather than stored, so a
    *  chat can never end up nameless in the sidebar. Returns whether the title
    *  changed. */
@@ -336,7 +374,14 @@ export class ChatSession {
   // Transcript mutation
   // -------------------------------------------------------------------------
 
-  appendUserMessage(text: string, attachments: ImageAttachmentDTO[] = []): void {
+  /** `steering` marks a message sent while a turn was running (see
+   *  SteeringState). Returns the message, whose id the caller needs to track
+   *  that state. */
+  appendUserMessage(
+    text: string,
+    attachments: ImageAttachmentDTO[] = [],
+    steering?: SteeringState
+  ): ChatMessage {
     const message: ChatMessage = {
       id: randomUUID(),
       role: 'user',
@@ -345,6 +390,7 @@ export class ChatSession {
       isStreaming: false,
       timestamp: Date.now()
     }
+    if (steering !== undefined) message.steering = steering
     const item: TranscriptItem = { kind: 'message', message }
     this.items.push(item)
     this.isEmpty = false
@@ -356,6 +402,55 @@ export class ChatSession {
       this.title = ChatSession.derivedTitle(titleSource)
       this.emitMeta({ title: this.title })
     }
+    return message
+  }
+
+  /** A user message `session/load` replays. spettro sends each stored
+   *  message as one chunk (sessions.go LoadSession), so every chunk is a
+   *  message of its own; whatever the agent was saying before it is over. */
+  appendReplayedUserMessage(text: string): void {
+    if (text.trim() === '') return
+    this.endStreaming()
+    this.appendUserMessage(text.trim())
+  }
+
+  messageById(messageId: string): ChatMessage | null {
+    for (const item of this.items) {
+      if (item.kind === 'message' && item.message.id === messageId) return item.message
+    }
+    return null
+  }
+
+  /** Moves a mid-turn message along (or, with `undefined`, drops the state,
+   *  for a steer that failed to send). */
+  setSteering(messageId: string, state: SteeringState | undefined): void {
+    for (const item of this.items) {
+      if (item.kind !== 'message' || item.message.id !== messageId) continue
+      if (item.message.steering === state) return
+      if (state === undefined) delete item.message.steering
+      else item.message.steering = state
+      this.emitItem(item)
+      return
+    }
+  }
+
+  /** Drops the state of every steer still waiting: once no turn is running,
+   *  nothing is going to read them, and they are plain messages. */
+  clearPendingSteering(): void {
+    for (const item of this.items) {
+      if (item.kind !== 'message') continue
+      const state = item.message.steering
+      if (state === 'sending' || state === 'queued') this.setSteering(item.message.id, undefined)
+    }
+  }
+
+  /** The id of a user message in the given steering state — the newest, or
+   *  with `oldest`, the first — or null. */
+  steeringMessage(state: SteeringState, oldest = false): string | null {
+    const found = (item: TranscriptItem): boolean =>
+      item.kind === 'message' && item.message.role === 'user' && item.message.steering === state
+    const item = oldest ? this.items.find(found) : this.items.findLast(found)
+    return item?.kind === 'message' ? item.message.id : null
   }
 
   appendNotice(text: string, isError: boolean): void {
@@ -389,6 +484,8 @@ export class ChatSession {
    *  answer in situations like a degraded resume, and blindly appending
    *  every chunk would duplicate the last message across relaunches. */
   appendAssistant(delta: string): void {
+    // The CLI's steering acknowledgements are state, not prose.
+    if (this.absorbSteeringNotice(delta)) return
     this.endReasoningStream()
     const last = this.items[this.items.length - 1]
     if (last && last.kind === 'message' && last.message.role === 'assistant') {
@@ -422,6 +519,26 @@ export class ChatSession {
     this.pushStreamingMessage('assistant', delta)
   }
 
+  /** Turns a steering acknowledgement into the state of the message it is
+   *  about; true when `delta` was one. Both go to the oldest message in the
+   *  earlier state: the CLI answers steers in the order they were sent, and
+   *  the agent reads them in that order too. An acknowledgement with no
+   *  message to apply to is dropped all the same. */
+  private absorbSteeringNotice(delta: string): boolean {
+    const text = delta.trim()
+    if (text.startsWith(STEERING_QUEUED)) {
+      const id = this.steeringMessage('sending', true)
+      if (id) this.setSteering(id, 'queued')
+      return true
+    }
+    if (text.startsWith(STEERING_DELIVERED)) {
+      const id = this.steeringMessage('queued', true) ?? this.steeringMessage('sending', true)
+      if (id) this.setSteering(id, 'delivered')
+      return true
+    }
+    return false
+  }
+
   private pushStreamingMessage(role: 'assistant' | 'reasoning', text: string): void {
     const message: ChatMessage = {
       id: randomUUID(),
@@ -446,6 +563,8 @@ export class ChatSession {
       newText: d.newText
     }))
     const argsJSON = encodeArgs(event.rawInput)
+    const locations = event.locations.map((l) => ({ ...l }))
+    const images = event.images.map((i) => ({ ...i }))
 
     const existing = this.items.find(
       (item): item is Extract<TranscriptItem, { kind: 'tool' }> =>
@@ -459,7 +578,9 @@ export class ChatSession {
       // Only when non-empty, so a contentless update doesn't wipe earlier output.
       if (combinedOutput !== '') tool.output = combinedOutput
       if (diffs.length > 0) tool.diffs = diffs
-      if (event.locations.length > 0) tool.locations = event.locations
+      if (locations.length > 0) tool.locations = locations
+      if (images.length > 0) tool.images = images
+      if (event.rawOutput !== undefined) tool.rawOutput = event.rawOutput
       if (argsJSON !== undefined) tool.argsJSON = argsJSON
       this.emitItem(existing)
       return
@@ -472,14 +593,38 @@ export class ChatSession {
       status,
       output: combinedOutput,
       diffs,
-      locations: event.locations,
+      locations,
       timestamp: Date.now()
     }
     if (event.kind !== undefined) tool.kind = event.kind
+    if (images.length > 0) tool.images = images
+    if (event.rawOutput !== undefined) tool.rawOutput = event.rawOutput
     if (argsJSON !== undefined) tool.argsJSON = argsJSON
     const item: TranscriptItem = { kind: 'tool', tool }
     this.items.push(item)
     this.emitItem(item)
+  }
+
+  toolById(toolCallId: string): ToolCallItem | null {
+    for (const item of this.items) {
+      if (item.kind === 'tool' && item.tool.id === toolCallId) return item.tool
+    }
+    return null
+  }
+
+  /** Sets one card's status; returns the status it had, or null when there
+   *  is no such card. */
+  setToolStatus(toolCallId: string, status: ACPToolStatus): ACPToolStatus | null {
+    for (const item of this.items) {
+      if (item.kind !== 'tool' || item.tool.id !== toolCallId) continue
+      const previous = item.tool.status
+      if (previous !== status) {
+        item.tool.status = status
+        this.emitItem(item)
+      }
+      return previous
+    }
+    return null
   }
 
   /** Marks the current streamed bubbles as finished at turn's end. */
@@ -507,6 +652,27 @@ export class ChatSession {
     const trimmed = text.trim()
     const firstLine = trimmed.split(/\r?\n/, 1)[0] ?? trimmed
     return firstLine.slice(0, 48)
+  }
+}
+
+/** Brings an item saved by an older build up to the current shape, in place:
+ *  tool locations were bare paths before line numbers were kept, and a
+ *  steering state saved mid-turn means nothing once the turn is gone. */
+function upgradeStoredItem(item: TranscriptItem): void {
+  if (item.kind === 'tool') {
+    const raw = Array.isArray(item.tool.locations) ? (item.tool.locations as unknown[]) : []
+    item.tool.locations = raw
+      .map((loc): ACPToolLocation | null => {
+        if (typeof loc === 'string') return { path: loc }
+        const path = (loc as Partial<ACPToolLocation> | null)?.path
+        if (typeof path === 'string') return loc as ACPToolLocation
+        return null
+      })
+      .filter((loc): loc is ACPToolLocation => loc !== null)
+    return
+  }
+  if (item.message.steering !== undefined && item.message.steering !== 'delivered') {
+    delete item.message.steering
   }
 }
 

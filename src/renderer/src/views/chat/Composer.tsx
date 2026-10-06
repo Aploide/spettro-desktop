@@ -65,7 +65,9 @@ export function draftChat(projectPath: string): ChatDetail {
     configOptions: [],
     commands: [],
     plan: [],
-    usage: null
+    usage: null,
+    lastTurn: null,
+    sessionTokens: 0
   }
 }
 

@@ -223,7 +223,9 @@ const CHAT: ChatDetail = {
     { content: 'Disable SaveButton while saving', status: 'completed' },
     { content: 'Run the tests and lint', status: BUSY ? 'in_progress' : 'completed' }
   ],
-  usage: { used: 38_400, size: 200_000, tokensUsed: 51_200 }
+  usage: { used: 38_400, size: 200_000, tokensUsed: 51_200 },
+  lastTurn: null,
+  sessionTokens: 51_200
 }
 
 function summary(
@@ -430,9 +432,16 @@ const app: AppStateDTO = {
 const PERMISSION_BASH: ACPPermissionRequest = {
   id: 'perm-1',
   sessionId: 'acp-1',
+  chatId: 'c1',
   title: 'bash {"command":"npm run lint -- --fix"}',
   toolKind: 'execute',
   rawInput: { command: 'npm run lint -- --fix' },
+  // permission.go approvalContent: the whole command, fenced, then the reason.
+  content: {
+    texts: ['```sh\nnpm run lint -- --fix\n```', 'Fixes the lint errors the edit introduced.'],
+    diffs: []
+  },
+  locations: [],
   options: [
     { optionId: 'allow', name: 'Allow once', kind: 'allow_once' },
     { optionId: 'always', name: 'Always allow `npm` commands', kind: 'allow_always' },
@@ -443,9 +452,22 @@ const PERMISSION_BASH: ACPPermissionRequest = {
 const PERMISSION_DIFF: ACPPermissionRequest = {
   id: 'perm-2',
   sessionId: 'acp-1',
+  chatId: 'c1',
   title: 'file-edit {"path":"src/components/SaveButton.tsx"}',
   toolKind: 'edit',
   rawInput: { path: `${PROJECT}/src/components/SaveButton.tsx`, old_text: OLD_BUTTON, new_text: NEW_BUTTON },
+  content: {
+    texts: [],
+    diffs: [
+      {
+        type: 'diff',
+        path: `${PROJECT}/src/components/SaveButton.tsx`,
+        oldText: OLD_BUTTON,
+        newText: NEW_BUTTON
+      }
+    ]
+  },
+  locations: [{ path: `${PROJECT}/src/components/SaveButton.tsx` }],
   options: [
     { optionId: 'allow', name: 'Allow once', kind: 'allow_once' },
     { optionId: 'always', name: 'Always allow edits in this project', kind: 'allow_always' },
@@ -457,6 +479,7 @@ const QUESTION: ACPQuestionRequest = {
   id: 'q-1',
   version: 1,
   sessionId: 'acp-1',
+  chatId: 'c1',
   context: 'Two components call SaveButton and they handle failures differently.',
   questions: [
     {

@@ -11,7 +11,14 @@ import type {
   ACPQuestionAnswer,
   ACPQuestionRequest
 } from './acp'
-import type { Appearance, AppStateDTO, ChatDetail, GitStat, TranscriptItem } from './model'
+import type {
+  Appearance,
+  AppStateDTO,
+  ChatDetail,
+  CLISessionEntry,
+  GitStat,
+  TranscriptItem
+} from './model'
 import type {
   ConnectResult,
   LocalProbeResult,
@@ -43,7 +50,22 @@ export type MainEvent =
   | {
       type: 'chat-meta'
       chatId: string
-      meta: Partial<Pick<ChatDetail, 'title' | 'isBusy' | 'configOptions' | 'commands' | 'plan' | 'usage' | 'acpSessionId' | 'isPinned' | 'isArchived'>>
+      meta: Partial<
+        Pick<
+          ChatDetail,
+          | 'title'
+          | 'isBusy'
+          | 'configOptions'
+          | 'commands'
+          | 'plan'
+          | 'usage'
+          | 'acpSessionId'
+          | 'isPinned'
+          | 'isArchived'
+          | 'lastTurn'
+          | 'sessionTokens'
+        >
+      >
     }
   /** A chat was removed. */
   | { type: 'chat-removed'; chatId: string }
@@ -94,8 +116,16 @@ export interface RendererApi {
   /** Blank titles are ignored. */
   renameChat(chatId: string, title: string): Promise<void>
   selectSession(chatId: string | null): Promise<void>
+  /** Conversations the CLI keeps for this folder that no chat is linked to
+   *  (started in the terminal, say). Empty when the agent can't list. */
+  listCLISessions(projectPath: string): Promise<CLISessionEntry[]>
+  /** Opens one of those as a new chat, replaying its transcript; resolves to
+   *  the chat's id, or null when it couldn't be loaded. */
+  importCLISession(sessionId: string, projectPath: string): Promise<string | null>
 
   // Prompting
+  /** While the chat is busy this steers the running turn rather than
+   *  starting another (the message's `steering` field tracks it). */
   send(chatId: string, text: string, attachments: { data: string; mimeType: string }[]): Promise<void>
   cancel(chatId: string): Promise<void>
 

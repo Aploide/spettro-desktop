@@ -9,8 +9,14 @@
 //   lastConfigOptions — last full ACPConfigOption set seen from any session
 //                       (spettro.lastConfigOptions); seeds new chats
 //   recentProjects    — most-recent-first, deduped, capped at 10
-//   cachedCommands    — last available-commands list any agent advertised
-//                       (spettro.cachedCommands); empty updates never wipe it
+//   cachedCommandsByProject
+//                     — the last available-commands list advertised in each
+//                       project folder (skills make it per project); the ''
+//                       key holds the last list seen anywhere, the fallback
+//                       for a folder never opened. Empty updates never wipe
+//                       it. Replaces the single global `cachedCommands`
+//                       (spettro.cachedCommands), which is read once and
+//                       migrated into that fallback.
 //   appearance        — 'system' | 'light' | 'dark'; main applies it to
 //                       nativeTheme.themeSource before the window exists
 
@@ -24,28 +30,39 @@ interface PrefsData {
   lastProjectPath: string
   lastConfigOptions: ACPConfigOption[]
   recentProjects: string[]
-  cachedCommands: ACPCommand[]
+  cachedCommandsByProject: Record<string, ACPCommand[]>
   appearance: Appearance
 }
 
-const DEFAULTS: PrefsData = {
-  explicitCLIPath: '',
-  lastProjectPath: '',
-  lastConfigOptions: [],
-  recentProjects: [],
-  cachedCommands: [],
-  appearance: 'system'
-}
+/** The commands-cache key for "the last list seen in any folder". */
+const ANY_PROJECT = ''
 
-function sanitize(raw: unknown): PrefsData {
-  const data: PrefsData = {
+/** Folders whose command lists are remembered, besides the fallback. Oldest
+ *  written goes first, so the file can't grow with every folder ever opened. */
+const MAX_CACHED_PROJECTS = 40
+
+function defaults(): PrefsData {
+  return {
     explicitCLIPath: '',
     lastProjectPath: '',
     lastConfigOptions: [],
     recentProjects: [],
-    cachedCommands: [],
+    cachedCommandsByProject: {},
     appearance: 'system'
   }
+}
+
+function isCommandList(value: unknown): value is ACPCommand[] {
+  return (
+    Array.isArray(value) &&
+    value.every(
+      (c) => typeof c === 'object' && c !== null && typeof (c as ACPCommand).name === 'string'
+    )
+  )
+}
+
+function sanitize(raw: unknown): PrefsData {
+  const data = defaults()
   if (typeof raw !== 'object' || raw === null) return data
   const obj = raw as Record<string, unknown>
   if (typeof obj.explicitCLIPath === 'string') data.explicitCLIPath = obj.explicitCLIPath
@@ -56,8 +73,14 @@ function sanitize(raw: unknown): PrefsData {
   if (Array.isArray(obj.recentProjects)) {
     data.recentProjects = obj.recentProjects.filter((p): p is string => typeof p === 'string')
   }
-  if (Array.isArray(obj.cachedCommands)) {
-    data.cachedCommands = obj.cachedCommands as ACPCommand[]
+  if (typeof obj.cachedCommandsByProject === 'object' && obj.cachedCommandsByProject !== null) {
+    for (const [path, commands] of Object.entries(obj.cachedCommandsByProject)) {
+      if (isCommandList(commands)) data.cachedCommandsByProject[path] = commands
+    }
+  }
+  // Migration: the old single list becomes the any-folder fallback.
+  if (data.cachedCommandsByProject[ANY_PROJECT] === undefined && isCommandList(obj.cachedCommands)) {
+    if (obj.cachedCommands.length > 0) data.cachedCommandsByProject[ANY_PROJECT] = obj.cachedCommands
   }
   if (isAppearance(obj.appearance)) data.appearance = obj.appearance
   return data
@@ -76,7 +99,7 @@ export class Prefs {
     try {
       return sanitize(JSON.parse(readFileSync(this.file, 'utf8')))
     } catch {
-      return { ...DEFAULTS, lastConfigOptions: [], recentProjects: [], cachedCommands: [] }
+      return defaults()
     }
   }
 
@@ -142,15 +165,27 @@ export class Prefs {
     this.save()
   }
 
-  get cachedCommands(): ACPCommand[] {
-    return structuredClone(this.data.cachedCommands)
+  /** The commands to show in a chat that hasn't heard from the agent yet:
+   *  the folder's own last list, else the last list seen anywhere. */
+  cachedCommands(projectPath: string): ACPCommand[] {
+    const byProject = this.data.cachedCommandsByProject
+    return structuredClone(byProject[projectPath] ?? byProject[ANY_PROJECT] ?? [])
   }
 
-  set cachedCommands(commands: ACPCommand[]) {
+  setCachedCommands(projectPath: string, commands: ACPCommand[]): void {
     // saveCache ignores empty lists, so a transient empty update can't wipe
     // the cache (appendix C).
     if (commands.length === 0) return
-    this.data.cachedCommands = structuredClone(commands)
+    const byProject = { ...this.data.cachedCommandsByProject }
+    // Re-inserted so the key order is oldest-written first.
+    delete byProject[projectPath]
+    byProject[projectPath] = structuredClone(commands)
+    byProject[ANY_PROJECT] = structuredClone(commands)
+    const folders = Object.keys(byProject).filter((k) => k !== ANY_PROJECT)
+    for (const stale of folders.slice(0, Math.max(0, folders.length - MAX_CACHED_PROJECTS))) {
+      delete byProject[stale]
+    }
+    this.data.cachedCommandsByProject = byProject
     this.save()
   }
 

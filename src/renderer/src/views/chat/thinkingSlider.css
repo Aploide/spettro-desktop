@@ -104,14 +104,23 @@
   box-shadow: inset 0 1px 2px color-mix(in srgb, var(--scrim) 50%, transparent);
 }
 
-/* Past Max: the Ultra segment, a faint ember until it is reached. */
+/* Past Max: the Ultra segment, a faint ember until it is reached. It warms
+   in over most of the step before Max rather than starting at a hard edge.
+   Spanning the whole bar keeps the gradient's percentages in the bar's own
+   width, the same box --thinking-span is measured in. */
 .thinking-fire {
+  --max-at: calc(var(--thinking-cap) + var(--thinking-span) * var(--f));
   position: absolute;
   top: 0;
   bottom: 0;
-  left: calc(var(--thinking-cap) + var(--thinking-span) * var(--f));
+  left: 0;
   right: 0;
-  background: linear-gradient(90deg, var(--ultra-flame), var(--ultra-ember));
+  background: linear-gradient(
+    90deg,
+    transparent calc(var(--max-at) - var(--thinking-span) * 0.17),
+    var(--ultra-flame) var(--max-at),
+    var(--ultra-ember)
+  );
   opacity: 0.3;
   transition: opacity 300ms ease-out;
 }

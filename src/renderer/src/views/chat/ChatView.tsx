@@ -14,9 +14,10 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { JSX } from 'react'
-import { call, ensureChatLoaded, useChat, useStore } from '@renderer/state/store'
+import { call, ensureChatLoaded, useApp, useChat, useStore } from '@renderer/state/store'
 import { setTerminalVisible, useShell } from '@renderer/state/shell'
 import TerminalDrawer from '@renderer/views/terminal/TerminalDrawer'
+import { isBroadFolder } from '@renderer/views/shell/util'
 import { TranscriptRowView } from './transcript/TranscriptItemView'
 import { activeRuns, groupTranscript, type WorkflowRun } from './transcript/orchestration'
 import { groupToolRuns } from './transcript/toolGroups'
@@ -30,7 +31,7 @@ import { Icon, ProjectPathContext } from './transcript/ToolCallView'
 import OrchestrationPanel from './OrchestrationPanel'
 import ChatHeader, { projectName } from './ChatHeader'
 import Composer, { type PromptSeed } from './Composer'
-import StarterPrompts from './StarterPrompts'
+import StarterPrompts, { useEmptyFolder } from './StarterPrompts'
 import PromptDock from './PromptDock'
 import './chat.css'
 
@@ -344,11 +345,13 @@ function WelcomeBanner({
   projectPath: string
   onPrompt: (prompt: string) => void
 }): JSX.Element {
+  const broad = isBroadFolder(projectPath, useApp()?.homePath ?? '')
+  const empty = useEmptyFolder(projectPath, broad)
   return (
     <div className="chat-welcome">
       <div className="chat-welcome-title">What should we build?</div>
       <div className="chat-welcome-sub">Working in {projectName(projectPath)}</div>
-      <StarterPrompts onPrompt={onPrompt} />
+      <StarterPrompts fresh={broad || empty} onPrompt={onPrompt} />
     </div>
   )
 }

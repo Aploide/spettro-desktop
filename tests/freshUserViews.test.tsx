@@ -18,6 +18,8 @@ import { EMPTY_EXTENSIONS } from '@shared/extensions'
 
 const calls: [string, unknown[]][] = []
 let app: Record<string, unknown> = {}
+/** What listProjectFiles answers: the folder's files. */
+let files: string[] | null = []
 
 vi.mock('@renderer/state/store', () => {
   const mocked = {
@@ -25,7 +27,7 @@ vi.mock('@renderer/state/store', () => {
       select({ permissions: [], questions: [], chats: {} }),
     call: (method: string, ...args: unknown[]) => {
       calls.push([method, args])
-      return Promise.resolve(method === 'listProjectFiles' ? [] : null)
+      return Promise.resolve(method === 'listProjectFiles' ? files : null)
     },
     getState: () => ({ app, chats: {}, permissions: [], questions: [] }),
     useApp: () => app
@@ -48,6 +50,7 @@ const READY = { phase: { kind: 'ready' }, connection: 'ok', extensions: EMPTY_EX
 
 beforeEach(() => {
   calls.length = 0
+  files = []
   app = { ...READY }
   closeSettings()
   cleanup()
@@ -268,6 +271,45 @@ describe('starting in the home folder', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Create' }))
     })
     expect(calls).toContainEqual(['createProjectFolder', ['Bakery website']])
+  })
+})
+
+describe('starting in a project folder', () => {
+  const PROJECT = {
+    ...READY,
+    homePath: '/home/anna',
+    defaultProjectPath: '/home/anna/Spettro Projects/Bakery website',
+    recentProjects: [],
+    missingProjects: [],
+    approvedBroadFolders: []
+  }
+
+  it('offers ways to start something new while the folder is empty (as "New project…" makes it)', async () => {
+    app = PROJECT
+    files = []
+    await act(async () => {
+      render(<NewSessionView />)
+    })
+    expect(calls).toContainEqual(['listProjectFiles', ['/home/anna/Spettro Projects/Bakery website']])
+    expect(screen.getByRole('button', { name: 'Build a simple website' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Explain this project' })).toBeNull()
+  })
+
+  it('offers ways into the code once there is some', async () => {
+    app = PROJECT
+    files = ['index.html']
+    await act(async () => {
+      render(<NewSessionView />)
+    })
+    expect(screen.getByRole('button', { name: 'Explain this project' })).toBeTruthy()
+  })
+
+  it('never lists the home folder to find out', async () => {
+    app = { ...PROJECT, defaultProjectPath: '/home/anna', approvedBroadFolders: ['/home/anna'] }
+    await act(async () => {
+      render(<NewSessionView />)
+    })
+    expect(calls.some(([m]) => m === 'listProjectFiles')).toBe(false)
   })
 })
 

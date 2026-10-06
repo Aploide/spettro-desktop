@@ -3,6 +3,9 @@
 // composer — the user still reads, edits and sends — so it can't start work
 // nobody meant to start.
 
+import { useEffect, useState } from 'react'
+import { call } from '@renderer/state/store'
+
 export const STARTER_PROMPTS: { label: string; prompt: string }[] = [
   { label: 'Explain this project', prompt: 'Explain this project in simple terms' },
   { label: 'Fix a bug', prompt: 'Help me find and fix a bug: ' },
@@ -10,7 +13,8 @@ export const STARTER_PROMPTS: { label: string; prompt: string }[] = [
   { label: 'Write tests', prompt: 'Write tests for the most important code that has none' }
 ]
 
-/** For a start with no project yet (working in the home folder): the
+/** For a start with no project yet (working in the home folder, or in a
+ *  folder with nothing in it, like one "New project…" just made): the
  *  prompts above all assume there is code to explain, fix or test. */
 export const FRESH_START_PROMPTS: { label: string; prompt: string }[] = [
   { label: 'Build a simple website', prompt: 'Build me a simple website for ' },
@@ -18,6 +22,24 @@ export const FRESH_START_PROMPTS: { label: string; prompt: string }[] = [
   { label: 'Automate a chore', prompt: 'Write a script that ' },
   { label: 'Explain a file', prompt: 'Explain this file in simple terms: ' }
 ]
+
+/** Whether `path` holds no files yet. False until the answer comes (and
+ *  when there is none), and never asked for a folder `skip` says is no
+ *  project anyway: listing a home folder walks it. */
+export function useEmptyFolder(path: string, skip = false): boolean {
+  const [empty, setEmpty] = useState<{ path: string; empty: boolean } | null>(null)
+  useEffect(() => {
+    if (skip || path === '') return
+    let live = true
+    void call('listProjectFiles', path).then((files) => {
+      if (live && files) setEmpty({ path, empty: files.length === 0 })
+    })
+    return () => {
+      live = false
+    }
+  }, [path, skip])
+  return !skip && empty?.path === path && empty.empty
+}
 
 export default function StarterPrompts({
   onPrompt,

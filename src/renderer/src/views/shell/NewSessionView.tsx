@@ -17,7 +17,7 @@ import { setNewSessionPath, useShell } from '@renderer/state/shell'
 import { Icon } from '@renderer/design/icons'
 import Composer, { draftChat, type PromptSeed, type SubmitAttachment } from '@renderer/views/chat/Composer'
 import { ReconnectingPill, SidebarReopenButton, useDismiss } from '@renderer/views/chat/ChatHeader'
-import StarterPrompts from '@renderer/views/chat/StarterPrompts'
+import StarterPrompts, { useEmptyFolder } from '@renderer/views/chat/StarterPrompts'
 import { basename, isBroadFolder } from './util'
 import '@renderer/design/form.css'
 
@@ -28,6 +28,7 @@ export default function NewSessionView(): JSX.Element {
   const homePath = app?.homePath ?? ''
   const missing = (app?.missingProjects ?? []).includes(path)
   const broad = path !== '' && isBroadFolder(path, homePath)
+  const empty = useEmptyFolder(path, broad || missing)
 
   // Folders the user has said "Continue" for — remembered in prefs, so the
   // question is asked once per folder, not after every new session and every
@@ -135,7 +136,7 @@ export default function NewSessionView(): JSX.Element {
           </FolderNotice>
         ) : null}
         <StarterPrompts
-          fresh={broad}
+          fresh={broad || empty}
           onPrompt={(text) => setPromptSeed({ text, nonce: Date.now() })}
         />
       </div>

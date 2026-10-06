@@ -157,6 +157,21 @@ describe('reasoning timing', () => {
   })
 })
 
+describe('interim prose', () => {
+  it('is finished once the agent moves on to a tool call', () => {
+    const s = session()
+    s.appendAssistant('Let me look at the form.')
+    s.applyToolEvent(toolEvent({ toolCallId: 'c1', title: 'file-read {}', status: 'in_progress' }), true)
+    const prose = s.items[0]
+    expect(prose.kind === 'message' && prose.message.isStreaming).toBe(false)
+    // …and the next prose starts a bubble of its own.
+    s.appendAssistant('Fixed.')
+    expect(s.items).toHaveLength(3)
+    s.endStreaming()
+    expect(s.items.every((item) => item.kind !== 'message' || !item.message.isStreaming)).toBe(true)
+  })
+})
+
 describe('config values', () => {
   it('reports what the chips are showing', () => {
     const s = session()
@@ -363,6 +378,35 @@ describe('AppModel sessions (rename, unread, recents)', () => {
     rmSync(dir, { recursive: true, force: true })
   })
 
+  it('marks the error a turn ended on, and not a refused settings change', async () => {
+    const { dir, model } = await setup([stored('a', 'hello')])
+    const internals = model as unknown as {
+      agent: unknown
+      liveACPSessionId: (s: ChatSession) => string | null
+      runTurn(s: ChatSession, blocks: unknown[]): Promise<void>
+    }
+    internals.agent = {
+      prompt: () => Promise.reject(new Error('provider overloaded')),
+      setConfigOption: () => Promise.reject(new Error('unknown model'))
+    }
+    internals.liveACPSessionId = () => 'acp-1'
+    const session = model.sessionById('a') as ChatSession
+    const lastNotice = () => {
+      const item = session.items[session.items.length - 1]
+      return item.kind === 'message' ? item.message : null
+    }
+
+    await internals.runTurn(session, [])
+    expect(lastNotice()).toMatchObject({ role: 'notice', noticeIsError: true, endsTurn: true })
+
+    // Try again resends the prompt; that fixes neither of these, so they
+    // must not look like the end of a turn.
+    await model.setConfigValue('a', 'model', 'nope')
+    expect(lastNotice()?.text).toContain("Couldn't change model")
+    expect(lastNotice()?.endsTurn).toBeUndefined()
+    rmSync(dir, { recursive: true, force: true })
+  })
+
   it('remembers a folder without creating a chat, and forgets it on request', async () => {
     const { dir, model } = await setup([])
     const folder = mkdtempSync(join(tmpdir(), 'spettro-project-'))
@@ -420,6 +464,17 @@ describe('sessions saved by an older build', () => {
     stored.items.push({ kind: 'message' } as never, null as never, { kind: 'tool' } as never)
     const s = ChatSession.restore(stored)
     expect(s.items).toHaveLength(2)
+  })
+
+  it('stop "streaming" a bubble saved mid-stream, so it shows no typing dots', () => {
+    const stored = legacy()
+    stored.items.push({
+      kind: 'message',
+      message: { id: 'm2', role: 'assistant', text: 'Let me look…', attachments: [], isStreaming: true, timestamp: 3 }
+    })
+    const s = ChatSession.restore(stored)
+    const item = s.items[2]
+    expect(item.kind === 'message' && item.message.isStreaming).toBe(false)
   })
 
   it('lose a steering state no turn is left to resolve', () => {

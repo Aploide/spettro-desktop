@@ -456,7 +456,8 @@ export class ChatSession {
     return item?.kind === 'message' ? item.message.id : null
   }
 
-  appendNotice(text: string, isError: boolean): void {
+  /** `endsTurn` marks the error a turn ended on (see ChatMessage.endsTurn). */
+  appendNotice(text: string, isError: boolean, endsTurn = false): void {
     const message: ChatMessage = {
       id: randomUUID(),
       role: 'notice',
@@ -466,6 +467,7 @@ export class ChatSession {
       isStreaming: false,
       timestamp: Date.now()
     }
+    if (isError && endsTurn) message.endsTurn = true
     const item: TranscriptItem = { kind: 'message', message }
     this.items.push(item)
     this.emitItem(item)
@@ -618,6 +620,11 @@ export class ChatSession {
     if (event.rawOutput !== undefined) tool.rawOutput = event.rawOutput
     if (argsJSON !== undefined) tool.argsJSON = argsJSON
     if (event.workflowMeta !== undefined) tool.workflow = structuredClone(event.workflowMeta)
+    // A call after some prose means that prose is done: the agent said its
+    // piece and moved on. Left streaming, an interim "Let me look at…" kept
+    // its typing dots (and no Copy) for the rest of the chat — saved that
+    // way, even across relaunches.
+    this.endOpenBubbles()
     const item: TranscriptItem = { kind: 'tool', tool }
     this.items.push(item)
     this.emitItem(item)
@@ -647,11 +654,16 @@ export class ChatSession {
 
   /** Marks the current streamed bubbles as finished at turn's end. */
   endStreaming(): void {
-    this.endReasoningStream()
-    const last = this.items[this.items.length - 1]
-    if (last && last.kind === 'message' && last.message.isStreaming) {
-      last.message.isStreaming = false
-      this.emitItem(last)
+    this.endOpenBubbles()
+  }
+
+  /** Flips every streaming bubble — answer or reasoning — to finished. */
+  private endOpenBubbles(): void {
+    for (const item of this.items) {
+      if (item.kind === 'message' && item.message.isStreaming) {
+        item.message.isStreaming = false
+        this.emitItem(item)
+      }
     }
   }
 
@@ -675,7 +687,8 @@ export class ChatSession {
 
 /** Brings an item saved by an older build up to the current shape, in place:
  *  tool locations were bare paths before line numbers were kept, and a
- *  steering state saved mid-turn means nothing once the turn is gone. False
+ *  steering state or a stream saved mid-turn means nothing once the turn is
+ *  gone. False
  *  for an item too malformed to show. */
 function upgradeStoredItem(item: TranscriptItem): boolean {
   if (typeof item !== 'object' || item === null) return false
@@ -698,6 +711,10 @@ function upgradeStoredItem(item: TranscriptItem): boolean {
   if (item.message.steering !== undefined && item.message.steering !== 'delivered') {
     delete item.message.steering
   }
+  // Nothing saved is still arriving: a bubble stored mid-stream (or by a
+  // build that never closed interim prose) would otherwise show typing dots,
+  // or "Thinking…", forever.
+  item.message.isStreaming = false
   return true
 }
 

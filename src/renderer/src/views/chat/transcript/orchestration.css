@@ -228,6 +228,18 @@
   padding-left: var(--sp-md);
 }
 
+/* Tool rows inside a member sit in a dense card whose own lines are 12px:
+   a step down from the transcript's rows keeps them reading as the
+   member's detail rather than shouting over it. */
+.orch-nested .tr-tool-header {
+  min-height: 24px;
+  font-size: var(--fs-md);
+}
+
+.orch-nested .tr-tool-arg {
+  font-size: var(--fs-sm);
+}
+
 .orch-nested:last-child {
   margin-bottom: 0;
 }

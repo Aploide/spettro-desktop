@@ -27,12 +27,17 @@ import './transcript.css'
 
 /**
  * What a running turn is doing, from the tail of its transcript: waiting on
- * the user's approval, thinking (reasoning is streaming), working (a tool is
- * running), or — every tool settled and the model on its own again —
- * writing the answer.
+ * the user (an approval, or an answer to its question), thinking (reasoning
+ * is streaming), working (a tool is running), or — every tool settled and
+ * the model on its own again — writing the answer.
  */
-export function runPhase(items: TranscriptItem[], awaitingApproval: boolean): string {
+export function runPhase(
+  items: TranscriptItem[],
+  awaitingApproval: boolean,
+  awaitingAnswer = false
+): string {
   if (awaitingApproval) return 'Waiting for your approval…'
+  if (awaitingAnswer) return 'Waiting for your answer…'
   // Only this turn counts: the tail after the newest user message that
   // started one (a steer sent mid-turn doesn't start anything).
   let start = 0
@@ -66,6 +71,7 @@ export function RunTicker({ chat }: { chat: ChatDetail }): JSX.Element | null {
   const busy = chat.isBusy
   const tokensUsed = chat.usage?.tokensUsed ?? 0
   const awaiting = useStore((s) => s.permissions.some((p) => p.chatId === chat.id))
+  const asking = useStore((s) => s.questions.some((q) => q.chatId === chat.id))
 
   const [startedAt, setStartedAt] = useState<number | null>(null)
   const [now, setNow] = useState(() => Date.now())
@@ -97,7 +103,10 @@ export function RunTicker({ chat }: { chat: ChatDetail }): JSX.Element | null {
   const elapsed = elapsedLabel(startedAt, now)
   const liveTokens = chat.usage?.tokensUsed != null ? Math.max(0, tokensUsed - tokensAtRunStart.current) : 0
   const color = tickerModeColor(chat.configOptions)
-  const phase = runPhase(chat.items, awaiting)
+  const phase = runPhase(chat.items, awaiting, asking)
+  // While the turn waits on the user, Esc answers the sheet (deny, skip)
+  // rather than interrupting, so the hint would be wrong there.
+  const waitingOnUser = awaiting || asking
 
   return (
     <div className="tk" role="status" aria-label={`${phase} ${elapsed}`}>
@@ -110,8 +119,12 @@ export function RunTicker({ chat }: { chat: ChatDetail }): JSX.Element | null {
           <span className="tk-num">{formatTokens(liveTokens)} tokens</span>
         </>
       )}
-      <span aria-hidden="true">·</span>
-      <span className="tk-hint">Esc to interrupt</span>
+      {!waitingOnUser && (
+        <>
+          <span aria-hidden="true">·</span>
+          <span className="tk-hint">Esc to interrupt</span>
+        </>
+      )}
     </div>
   )
 }

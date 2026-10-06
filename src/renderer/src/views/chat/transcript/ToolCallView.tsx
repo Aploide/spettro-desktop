@@ -263,7 +263,7 @@ function DiffView({ diff }: { diff: ToolDiff }): JSX.Element {
         {created && <span className="tr-diff-tag">New file</span>}
         <DiffStatLabel added={unified.added} removed={unified.removed} />
       </div>
-      <div className="tr-diff-body" role="table" aria-label={`Changes to ${shortPath(diff.path)}`}>
+      <div className="tr-diff-body" role="group" aria-label={`Changes to ${shortPath(diff.path)}`}>
         <div className="tr-diff-rows">
         {unified.hunks.length === 0 && <div className="tr-diff-empty">No changes</div>}
         {unified.hunks.map((hunk, h) => {
@@ -271,9 +271,9 @@ function DiffView({ diff }: { diff: ToolDiff }): JSX.Element {
           const lines = hunk.lines.slice(0, budget)
           budget -= lines.length
           return (
-            <div className="tr-hunk" key={h} role="rowgroup">
+            <div className="tr-hunk" key={h}>
               {h > 0 && (
-                <div className="tr-hunk-gap" role="row">
+                <div className="tr-hunk-gap">
                   @@ −{hunk.oldStart},{hunk.oldLines} +{hunk.newStart},{hunk.newLines} @@
                 </div>
               )}
@@ -297,7 +297,7 @@ function DiffView({ diff }: { diff: ToolDiff }): JSX.Element {
 function DiffRow({ line }: { line: DiffLine }): JSX.Element {
   const sign = line.kind === 'added' ? '+' : line.kind === 'removed' ? '−' : ' '
   return (
-    <div className={`tr-diff-line tr-diff-line--${line.kind}`} role="row">
+    <div className={`tr-diff-line tr-diff-line--${line.kind}`}>
       <span className="tr-diff-no" aria-hidden="true">
         {line.oldNo ?? ''}
       </span>
@@ -307,6 +307,10 @@ function DiffRow({ line }: { line: DiffLine }): JSX.Element {
       <span className="tr-diff-sign" aria-hidden="true">
         {sign}
       </span>
+      {/* The colour and sign are visual; a screen reader hears the word. */}
+      {line.kind !== 'context' && (
+        <span className="tr-sr">{line.kind === 'added' ? 'Added: ' : 'Removed: '}</span>
+      )}
       <span className="tr-diff-text">
         {line.text === '' ? ' ' : line.text}
         {line.noNewline && line.kind !== 'context' && (

@@ -14,14 +14,17 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { JSX } from 'react'
-import { call, ensureChatLoaded, useChat } from '@renderer/state/store'
+import { call, ensureChatLoaded, useChat, useStore } from '@renderer/state/store'
 import { setTerminalVisible, useShell } from '@renderer/state/shell'
 import TerminalDrawer from '@renderer/views/terminal/TerminalDrawer'
-import type { TranscriptItem } from '@shared/model'
 import { TranscriptRowView } from './transcript/TranscriptItemView'
 import { activeRuns, groupTranscript, type WorkflowRun } from './transcript/orchestration'
 import { groupToolRuns } from './transcript/toolGroups'
-import { TranscriptActionsProvider, type TranscriptActions } from './transcript/TranscriptActions'
+import {
+  TranscriptActionsProvider,
+  transcriptAnchors,
+  type TranscriptActions
+} from './transcript/TranscriptActions'
 import { RunTicker } from './transcript/RunTicker'
 import { Icon } from './transcript/ToolCallView'
 import OrchestrationPanel from './OrchestrationPanel'
@@ -172,11 +175,18 @@ export default function ChatView({ chatId }: { chatId: string }): JSX.Element {
 
   // Esc interrupts a running turn from the composer or the transcript —
   // never from inside a menu or popover (they take Escape for themselves),
-  // and never once something else has handled it.
+  // and never once something else has handled it. Nor while an approval or
+  // a question is up: there Esc means "deny" / "skip", and the sheets hear
+  // it on the window, after this handler — focus usually stays in the
+  // composer when one appears, so without this guard a deny would also
+  // throw away the whole turn.
+  const promptOpen = useStore((s) => s.permissions.length > 0 || s.questions.length > 0)
   const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>): void => {
-    if (event.key !== 'Escape' || event.defaultPrevented || !busy) return
+    if (event.key !== 'Escape' || event.defaultPrevented || !busy || promptOpen) return
     const target = event.target as Element
     if (!target.closest('.composer-input, .chat-transcript')) return
+    const overlay = '[aria-modal="true"], [role="dialog"], [role="menu"], .popover--portal'
+    if (document.querySelector(overlay)) return
     event.preventDefault()
     void call('cancel', chatId)
   }
@@ -257,34 +267,6 @@ export default function ChatView({ chatId }: { chatId: string }): JSX.Element {
       />
     </div>
   )
-}
-
-/**
- * The two messages the transcript's actions hang off: the newest user
- * message (Edit & resend), and — once the turn it ended is over — the error
- * notice after it (Try again). An error from an earlier turn has been
- * answered by everything since, so it offers nothing.
- */
-function transcriptAnchors(
-  items: TranscriptItem[],
-  busy: boolean
-): Pick<TranscriptActions, 'lastUserMessageId' | 'retryNoticeId'> {
-  let lastUserMessageId: string | null = null
-  let retryNoticeId: string | null = null
-  for (let i = items.length - 1; i >= 0; i--) {
-    const item = items[i]
-    if (item.kind !== 'message') continue
-    const { message } = item
-    if (message.role === 'user') {
-      lastUserMessageId = message.id
-      break
-    }
-    if (retryNoticeId === null && message.role === 'notice' && message.noticeIsError === true) {
-      retryNoticeId = message.id
-    }
-  }
-  if (busy || lastUserMessageId === null) retryNoticeId = null
-  return { lastUserMessageId, retryNoticeId }
 }
 
 /**

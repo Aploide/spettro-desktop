@@ -1126,7 +1126,7 @@ export class AppModel extends EventEmitter {
     // screen ends the turn in the same visible state.
     const notice: TurnNotice | null =
       failure !== null ? { text: failure, isError: true } : stopNotice(stopReason)
-    if (notice) session.appendNotice(notice.text, notice.isError)
+    if (notice) session.appendNotice(notice.text, notice.isError, failure !== null)
     if (failure !== null) {
       // The turn is gone; whatever it was asking can't be answered usefully.
       const acpId = session.acpSessionId
@@ -1185,7 +1185,7 @@ export class AppModel extends EventEmitter {
     const agent = this.agent
     if (!agent) {
       if (!silent) {
-        session.appendNotice("The agent isn't running yet — try again in a moment.", true)
+        session.appendNotice("The agent isn't running yet — try again in a moment.", true, true)
       }
       return null
     }
@@ -1223,7 +1223,7 @@ export class AppModel extends EventEmitter {
       // A background warm must not spray notices into an empty chat; the
       // prompt path reports the same failure when the user actually sends.
       if (!silent) {
-        session.appendNotice(`Couldn't start a session: ${errMessage(err)}`, true)
+        session.appendNotice(`Couldn't start a session: ${errMessage(err)}`, true, true)
       }
       return null
     }

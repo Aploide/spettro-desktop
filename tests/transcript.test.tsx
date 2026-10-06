@@ -13,7 +13,10 @@ import type { MainEvent } from '@shared/ipc'
 import { TranscriptRowView, TranscriptItemView } from '@renderer/views/chat/transcript/TranscriptItemView'
 import { groupTranscript } from '@renderer/views/chat/transcript/orchestration'
 import { groupToolRuns } from '@renderer/views/chat/transcript/toolGroups'
-import { TranscriptActionsProvider } from '@renderer/views/chat/transcript/TranscriptActions'
+import {
+  TranscriptActionsProvider,
+  transcriptAnchors
+} from '@renderer/views/chat/transcript/TranscriptActions'
 import { runPhase } from '@renderer/views/chat/transcript/RunTicker'
 import { initStore } from '@renderer/state/store'
 
@@ -142,6 +145,24 @@ describe('notices and actions', () => {
     expect(screen.getByRole('note').textContent).toContain('Interrupted')
   })
 
+  it('hangs Try again only on the error a finished turn ended on', () => {
+    const user = say('user', 'go')
+    const turnError = say('notice', 'The provider is overloaded', { noticeIsError: true, endsTurn: true })
+    const settingError = say('notice', "Couldn't change model: unknown model", { noticeIsError: true })
+    const id = (item: TranscriptItem): string => (item.kind === 'message' ? item.message.id : '')
+
+    expect(transcriptAnchors([user, turnError], false).retryNoticeId).toBe(id(turnError))
+    // A refused settings change after a good turn: resending the prompt
+    // would spend a turn and fix nothing.
+    expect(transcriptAnchors([user, say('assistant', 'done'), settingError], false).retryNoticeId).toBeNull()
+    // …and it doesn't hide the turn's own error above it.
+    expect(transcriptAnchors([user, turnError, settingError], false).retryNoticeId).toBe(id(turnError))
+    // Not while a turn runs, and not for an error a later prompt answered.
+    expect(transcriptAnchors([user, turnError], true).retryNoticeId).toBeNull()
+    expect(transcriptAnchors([user, turnError, say('user', 'again')], false).retryNoticeId).toBeNull()
+    expect(transcriptAnchors([user, turnError], false).lastUserMessageId).toBe(id(user))
+  })
+
   it('offers Edit & resend on the newest user message only', () => {
     const editMessage = vi.fn()
     const older = say('user', 'first try')
@@ -200,10 +221,12 @@ describe('tool rows', () => {
     expect(row.textContent).toContain('+1')
     expect(row.textContent).toContain('−1')
     fireEvent.click(row)
-    const lines = screen.getAllByRole('row').map((r) => r.textContent)
-    expect(lines).toContain('3+C')
+    const diff = screen.getByRole('group', { name: /Changes to .*x\.ts/ })
+    const lines = Array.from(diff.querySelectorAll('.tr-diff-line')).map((r) => r.textContent)
+    // Old and new numbers, the sign, then (for a screen reader) the word.
+    expect(lines).toContain('3+Added: C')
     expect(lines).toContain('44 d')
-    expect(lines).toContain('3−c')
+    expect(lines).toContain('3−Removed: c')
   })
 
   it('opens a command to `$ command` and its output, held to 30 lines', () => {
@@ -265,6 +288,10 @@ describe('what the run ticker says the turn is doing', () => {
   it('thinking while reasoning streams, waiting while an approval is open', () => {
     expect(runPhase([user, say('reasoning', 'x', { isStreaming: true })], false)).toBe('Thinking…')
     expect(runPhase([user, read('/a', 'pending')], true)).toBe('Waiting for your approval…')
+  })
+
+  it('waiting while a question is open', () => {
+    expect(runPhase([user, read('/a')], false, true)).toBe('Waiting for your answer…')
   })
 
   it('only looks at this turn: an old answer is not this turn writing', () => {

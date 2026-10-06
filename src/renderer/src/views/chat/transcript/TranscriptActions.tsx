@@ -9,6 +9,7 @@
 
 import { createContext, useContext, useEffect, useRef, useState } from 'react'
 import type { JSX } from 'react'
+import type { TranscriptItem } from '@shared/model'
 import { Icon } from '@renderer/design/icons'
 
 export interface TranscriptActions {
@@ -30,6 +31,41 @@ export const TranscriptActionsProvider = TranscriptActionsContext.Provider
 
 export function useTranscriptActions(): TranscriptActions {
   return useContext(TranscriptActionsContext)
+}
+
+/**
+ * The two messages the transcript's actions hang off: the newest user
+ * message (Edit & resend), and — once the turn it ended is over — the error
+ * a turn ended on after it (Try again). An error from an earlier turn has
+ * been answered by everything since, so it offers nothing; nor does an error
+ * that ended no turn (a settings change the agent refused), since resending
+ * the prompt would not fix it.
+ */
+export function transcriptAnchors(
+  items: TranscriptItem[],
+  busy: boolean
+): Pick<TranscriptActions, 'lastUserMessageId' | 'retryNoticeId'> {
+  let lastUserMessageId: string | null = null
+  let retryNoticeId: string | null = null
+  for (let i = items.length - 1; i >= 0; i--) {
+    const item = items[i]
+    if (item.kind !== 'message') continue
+    const { message } = item
+    if (message.role === 'user') {
+      lastUserMessageId = message.id
+      break
+    }
+    if (
+      retryNoticeId === null &&
+      message.role === 'notice' &&
+      message.noticeIsError === true &&
+      message.endsTurn === true
+    ) {
+      retryNoticeId = message.id
+    }
+  }
+  if (busy || lastUserMessageId === null) retryNoticeId = null
+  return { lastUserMessageId, retryNoticeId }
 }
 
 /** How long "Copied" stays before the button goes back to "Copy". */
@@ -58,10 +94,17 @@ export function CopyButton({
     []
   )
   const copy = (): void => {
-    void navigator.clipboard?.writeText(text)
-    setCopied(true)
-    if (timer.current) clearTimeout(timer.current)
-    timer.current = setTimeout(() => setCopied(false), COPIED_MS)
+    // "Copied" only once it is true: a refused write (no focus, no
+    // clipboard) leaves the button saying Copy, so trying again is obvious.
+    const write = navigator.clipboard?.writeText(text) ?? Promise.reject(new Error('no clipboard'))
+    write.then(
+      () => {
+        setCopied(true)
+        if (timer.current) clearTimeout(timer.current)
+        timer.current = setTimeout(() => setCopied(false), COPIED_MS)
+      },
+      () => undefined
+    )
   }
   const word = copied ? 'Copied' : (label ?? 'Copy')
   return (

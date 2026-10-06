@@ -81,6 +81,8 @@ function say(
     message.endedAt = timestamp + o.thoughtFor * 1000
   }
   if (o?.steering) message.steering = o.steering
+  // The harness's errors are all a turn failing, the kind Try again answers.
+  if (o?.error) message.endsTurn = true
   return { kind: 'message', message }
 }
 

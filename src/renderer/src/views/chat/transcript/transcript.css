@@ -759,6 +759,16 @@
   color: var(--diff-removed);
 }
 
+/* Read aloud, never drawn: what the sign and colour say to the eye. */
+.tr-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
 .tr-diff-text {
   padding-right: var(--sp-md);
   color: var(--text-primary);

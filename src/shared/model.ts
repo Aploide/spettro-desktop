@@ -42,6 +42,10 @@ export interface ChatMessage {
   role: ChatRole
   /** Only meaningful when role === 'notice'. */
   noticeIsError?: boolean
+  /** Only on error notices: this error is how a turn ended, so "Try again"
+   *  (resending the prompt) is the answer to it. A failed settings change is
+   *  an error too, but resending the last prompt would not fix it. */
+  endsTurn?: boolean
   text: string
   attachments: ImageAttachmentDTO[]
   isStreaming: boolean

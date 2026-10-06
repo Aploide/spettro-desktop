@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
 //
 // The thinking slider as a user drives it: arrow keys, the Ultra stop's two
-// calls in order, the Paused prompt under Ask first, and the meteor — which
+// calls in order, the Paused prompt under Ask first, the meteor — which
 // must play when Ultra is reached and never merely because the slider was
-// drawn with Ultra already on.
+// drawn with Ultra already on — and lit Ultra's smoulder, which runs only
+// while someone could be looking at it.
 
-import { describe, expect, it, vi, beforeEach, beforeAll } from 'vitest'
+import { describe, expect, it, vi, beforeEach, beforeAll, afterEach } from 'vitest'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import ThinkingSlider, { ThinkingChip } from '@renderer/views/chat/ThinkingSlider'
 import type { ChatDetail } from '@shared/model'
@@ -132,7 +133,7 @@ describe('the slider', () => {
   it('rests Off short of Low, and the chip names what is off', () => {
     const { container } = render(<ThinkingSlider chat={chat(options({ thinking: 'off', ultra: false }))} />)
     // Not on the Low tick (0%): the label and the thumb agree.
-    expect(container.querySelector<HTMLElement>('.thinking-thumb')?.style.left).toBe('-12px')
+    expect(container.querySelector<HTMLElement>('.thinking-thumb')?.style.left).toBe('-14px')
     expect(container.querySelector('.thinking-label--current')).toBeNull()
     cleanup()
     render(<ThinkingChip chat={chat(options({ thinking: 'off', ultra: false }))} />)
@@ -293,6 +294,12 @@ describe('the meteor', () => {
     expect(meteor()).toBe(first)
   })
 
+  it('flies inside the bar, whose pill clips it', () => {
+    const { rerender } = render(<ThinkingSlider chat={chat(options({ thinking: 'high', ultra: false }))} />)
+    rerender(<ThinkingSlider chat={chat(options({ thinking: 'high', ultra: true }))} />)
+    expect(meteor()?.parentElement?.classList.contains('thinking-bar')).toBe(true)
+  })
+
   it('leaves the stops ahead of the head unlit until the streak reaches them', () => {
     holding = true
     render(<ThinkingSlider chat={chat(options({ thinking: 'low', ultra: false }))} />)
@@ -342,6 +349,128 @@ describe('the meteor', () => {
       expect(document.querySelector('.thinking-slider--ultra')).not.toBeNull()
     } finally {
       vi.useRealTimers()
+    }
+  })
+})
+
+describe('lit Ultra’s smoulder', () => {
+  const embers = (): Element | null => document.querySelector('.thinking-embers')
+  const lit = (): ChatDetail => chat(options({ thinking: 'high', ultra: true }))
+  let reduce = false
+  const listeners = new Set<() => void>()
+
+  beforeEach(() => {
+    reduce = false
+    listeners.clear()
+    window.matchMedia = ((query: string) => ({
+      get matches() {
+        return query.includes('reduced-motion') && reduce
+      },
+      media: query,
+      addEventListener: (_: string, fn: () => void) => listeners.add(fn),
+      removeEventListener: (_: string, fn: () => void) => listeners.delete(fn)
+    })) as never
+  })
+  afterEach(() => {
+    delete (window as { matchMedia?: unknown }).matchMedia
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' })
+  })
+
+  it('smoulders inside the bar while Ultra is lit, and not otherwise', () => {
+    render(<ThinkingSlider chat={lit()} />)
+    expect(embers()?.parentElement?.classList.contains('thinking-bar')).toBe(true)
+    cleanup()
+    render(<ThinkingSlider chat={chat(options({ thinking: 'high', ultra: false }))} />)
+    expect(embers()).toBeNull()
+    cleanup()
+    render(
+      <ThinkingSlider
+        chat={chat(options({ thinking: 'high', ultra: true, permission: 'ask-first', suspended: true }))}
+      />
+    )
+    expect(embers()).toBeNull()
+  })
+
+  it('waits for the meteor to burn out first', async () => {
+    vi.useFakeTimers()
+    try {
+      const { rerender } = render(<ThinkingSlider chat={chat(options({ thinking: 'high', ultra: false }))} />)
+      rerender(<ThinkingSlider chat={lit()} />)
+      expect(document.querySelector('.thinking-meteor')).not.toBeNull()
+      expect(embers()).toBeNull()
+      await act(async () => {
+        vi.advanceTimersByTime(1300)
+      })
+      expect(document.querySelector('.thinking-meteor')).toBeNull()
+      expect(embers()).not.toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('stops when the popover closes', () => {
+    render(<ThinkingChip chat={lit()} />)
+    expect(embers()).toBeNull()
+    fireEvent.click(screen.getByTestId('thinking-chip'))
+    expect(embers()).not.toBeNull()
+    fireEvent.click(screen.getByTestId('thinking-chip'))
+    expect(embers()).toBeNull()
+  })
+
+  it('stops while the window is hidden, and comes back with it', () => {
+    render(<ThinkingSlider chat={lit()} />)
+    expect(embers()).not.toBeNull()
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' })
+    act(() => {
+      document.dispatchEvent(new Event('visibilitychange'))
+    })
+    expect(embers()).toBeNull()
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' })
+    act(() => {
+      document.dispatchEvent(new Event('visibilitychange'))
+    })
+    expect(embers()).not.toBeNull()
+  })
+
+  it('stands still under reduced motion, even turned on with the slider open', () => {
+    reduce = true
+    render(<ThinkingSlider chat={lit()} />)
+    expect(embers()).toBeNull()
+    expect(document.querySelector('.thinking-slider--ultra')).not.toBeNull()
+    cleanup()
+    reduce = false
+    render(<ThinkingSlider chat={lit()} />)
+    expect(embers()).not.toBeNull()
+    reduce = true
+    act(() => listeners.forEach((fn) => fn()))
+    expect(embers()).toBeNull()
+  })
+
+  it('stops asking for frames once it is gone', () => {
+    // A context that accepts any drawing call, so the loop really runs.
+    const noop = (): void => {}
+    const gradient = { addColorStop: noop }
+    const ctx = new Proxy(
+      {},
+      {
+        get: (_, key) =>
+          key === 'createLinearGradient' || key === 'createRadialGradient' ? () => gradient : noop,
+        set: () => true
+      }
+    )
+    const getContext = HTMLCanvasElement.prototype.getContext
+    HTMLCanvasElement.prototype.getContext = (() => ctx) as never
+    const raf = vi.spyOn(window, 'requestAnimationFrame').mockImplementation(() => 42)
+    const caf = vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(noop)
+    try {
+      const { unmount } = render(<ThinkingSlider chat={lit()} />)
+      expect(raf).toHaveBeenCalled()
+      unmount()
+      expect(caf).toHaveBeenCalledWith(42)
+    } finally {
+      raf.mockRestore()
+      caf.mockRestore()
+      HTMLCanvasElement.prototype.getContext = getContext
     }
   })
 })

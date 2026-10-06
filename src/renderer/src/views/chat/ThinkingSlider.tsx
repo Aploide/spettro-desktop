@@ -11,19 +11,22 @@
 // can't use it is a control nobody learns exists.
 //
 // Arriving at Ultra is the one moment that changes what a turn *is*, so it is
-// marked: the thumb becomes a meteor and streaks into the stop (meteor.ts),
-// then stays lit. Only on the way in — never on mount, never on a re-render
-// that finds it already there — and a plain glow under reduced motion.
+// marked: the thumb becomes a meteor and streaks into the stop along the bar
+// (meteor.ts), then stays lit. Only on the way in — never on mount, never on a
+// re-render that finds it already there — and a plain glow under reduced
+// motion. While it stays lit and the slider is open, the bar smoulders
+// (embers.ts); under reduced motion it is simply fire, standing still.
 //
 // ThinkingChip is the compact form for a toolbar: the current level as a chip
 // that opens the slider in a popover.
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import type { CSSProperties, JSX, KeyboardEvent, PointerEvent, RefObject } from 'react'
+import type { CSSProperties, JSX, KeyboardEvent, PointerEvent } from 'react'
 import type { ChatDetail } from '@shared/model'
 import { call, useApp } from '@renderer/state/store'
 import { Icon } from '@renderer/design/icons'
 import Popover from '@renderer/views/common/Popover'
+import { drawEmbers, planEmbers } from './embers'
 import { drawMeteor, meteorTiming, planMeteor, readPalette } from './meteor'
 import {
   PERMISSION_ID,
@@ -40,9 +43,9 @@ import {
 import './thinkingSlider.css'
 
 const OFF_CAPTION = 'Thinking is off — the model answers straight away'
-/** Where the thumb rests while thinking is off: left of the Low tick, in
- *  the rail's inset. */
-const OFF_THUMB = '-12px'
+/** Where the thumb rests while thinking is off: left of the Low stop, just
+ *  clear of the bar's end (its cap, 8px, plus the 12px ring's radius). */
+const OFF_THUMB = '-14px'
 const PAUSED_CAPTION = 'Ultra is saved, but workflows don’t run under Ask first'
 /** How long a move's preview outlives its calls when the options never come
  *  round to it (the CLI refused, and rolled the option back). */
@@ -58,6 +61,8 @@ interface SliderProps {
   meteorProgress?: number
   /** Harness only: the stop the frozen meteor set out from. */
   meteorFrom?: number
+  /** Harness only: freeze lit Ultra's smoulder this many seconds in. */
+  idleTime?: number
 }
 
 export default function ThinkingSlider({
@@ -65,7 +70,8 @@ export default function ThinkingSlider({
   reasons = null,
   autoFocus = false,
   meteorProgress,
-  meteorFrom
+  meteorFrom,
+  idleTime
 }: SliderProps): JSX.Element | null {
   const base = thinkingState(chat.configOptions)
   const [pending, setPending] = useState<ThinkingStop | null>(null)
@@ -80,7 +86,9 @@ export default function ThinkingSlider({
   const state: ThinkingState | null = base && pending ? previewState(base, pending) : base
   const lit = !!state && state.ultraOn && !state.paused
   const meteor = useMeteor(lit, drag ?? state?.index ?? -1, state?.stops.length ?? 0)
-  const frozen = meteorProgress !== undefined
+  const frozen = meteorProgress !== undefined || idleTime !== undefined
+  const reduced = useReducedMotion()
+  const visible = usePageVisible()
 
   useEffect(() => {
     if (!autoFocus) return
@@ -146,6 +154,14 @@ export default function ThinkingSlider({
   // last saw it and the canvas burns it the rest of the way, so fire and fill
   // can never come apart. It takes over again, whole, at impact.
   const fillFrac = flight && !landed ? frac(flight.from) : frac(shown)
+  // Lit and settled on Ultra, with nothing else moving: the bar smoulders —
+  // for as long as someone could be looking at it.
+  const smoulder =
+    lit &&
+    !disabled &&
+    shown === ultraIndex &&
+    !flight &&
+    (idleTime !== undefined || (!reduced && visible))
 
   const select = (i: number): void => {
     if (disabled || i < 0 || i > last || i === state.index) return
@@ -264,48 +280,50 @@ export default function ThinkingSlider({
         onPointerCancel={() => setDrag(null)}
         onKeyDown={onKeyDown}
       >
+        {/* The rail is the stops' line, Low to Ultra; the bar is drawn round
+            it, half its height further at each end, so every stop sits
+            inside the pill. Positions in the bar are shares of the rail
+            (--f), offset by that end cap. */}
         <div
           className="thinking-rail"
           ref={railRef}
-          style={{ '--fire-start': `${frac(ultraIndex - 1) * 100}%` } as CSSProperties}
+          style={{ '--fire-start': frac(ultraIndex - 1) } as CSSProperties}
         >
-          <div className="thinking-track" />
-          {ultraIndex > 0 && (
-            <div
-              className="thinking-fire"
-              style={{ left: `${frac(ultraIndex - 1) * 100}%` }}
-            />
-          )}
-          <div className="thinking-fill" style={{ width: `${fillFrac * 100}%` }} />
-          {stops.map((stop, i) => (
-            <span
-              key={stop.id}
-              // Lit where the fill is: in flight, the ticks ahead of the head
-              // wait for the streak (which covers them as it passes).
-              className={
-                'thinking-tick' + (i <= shown && frac(i) <= fillFrac ? ' thinking-tick--passed' : '')
-              }
-              style={{ left: `${frac(i) * 100}%` }}
-            />
-          ))}
+          <div className="thinking-bar">
+            {ultraIndex > 0 && (
+              <div className="thinking-fire" style={{ '--f': frac(ultraIndex - 1) } as CSSProperties} />
+            )}
+            <div className="thinking-fill" style={{ '--f': fillFrac } as CSSProperties} />
+            {stops.map((stop, i) => (
+              <span
+                key={stop.id}
+                // Lit where the fill is: in flight, the ticks ahead of the head
+                // wait for the streak (which covers them as it passes).
+                className={
+                  'thinking-tick' + (i <= shown && frac(i) <= fillFrac ? ' thinking-tick--passed' : '')
+                }
+                style={{ '--f': frac(i) } as CSSProperties}
+              />
+            ))}
+            {smoulder && <EmberCanvas time={idleTime} />}
+            {flight && (
+              <MeteorCanvas
+                key={meteor.key}
+                fromFrac={frac(flight.from)}
+                toFrac={frac(ultraIndex)}
+                seed={frozen ? 7 : meteor.key}
+                progress={flight.progress}
+                onLanded={meteor.land}
+                onDone={meteor.done}
+              />
+            )}
+          </div>
           {/* Off is not a stop: its hollow thumb waits short of Low, so the
               slider never looks as if it were on Low while saying Off. */}
           <span className="thinking-thumb" style={{ left: shown < 0 ? OFF_THUMB : `${frac(shown) * 100}%` }}>
             {showPaused && <PauseGlyph />}
           </span>
         </div>
-        {flight && (
-          <MeteorCanvas
-            key={meteor.key}
-            railRef={railRef}
-            fromFrac={frac(flight.from)}
-            toFrac={frac(ultraIndex)}
-            seed={frozen ? 7 : meteor.key}
-            progress={flight.progress}
-            onLanded={meteor.land}
-            onDone={meteor.done}
-          />
-        )}
       </div>
 
       <div className="thinking-labels" aria-hidden>
@@ -457,11 +475,55 @@ function useCommit(
 // The meteor
 // ---------------------------------------------------------------------------
 
+const REDUCED_MOTION = '(prefers-reduced-motion: reduce)'
+
 function prefersReducedMotion(): boolean {
-  return (
-    typeof window.matchMedia === 'function' &&
-    window.matchMedia('(prefers-reduced-motion: reduce)').matches
-  )
+  return typeof window.matchMedia === 'function' && window.matchMedia(REDUCED_MOTION).matches
+}
+
+/** Reduced motion, followed live: turned on with the slider open, the
+ *  smoulder stops there and then. */
+function useReducedMotion(): boolean {
+  const [reduced, setReduced] = useState(prefersReducedMotion)
+  useEffect(() => {
+    if (typeof window.matchMedia !== 'function') return
+    const query = window.matchMedia(REDUCED_MOTION)
+    const update = (): void => setReduced(query.matches)
+    query.addEventListener?.('change', update)
+    return () => query.removeEventListener?.('change', update)
+  }, [])
+  return reduced
+}
+
+/** Whether the window can be seen at all: minimised or hidden, nothing on
+ *  it is worth a frame. */
+function usePageVisible(): boolean {
+  const [visible, setVisible] = useState(() => document.visibilityState !== 'hidden')
+  useEffect(() => {
+    const update = (): void => setVisible(document.visibilityState !== 'hidden')
+    document.addEventListener('visibilitychange', update)
+    return () => document.removeEventListener('visibilitychange', update)
+  }, [])
+  return visible
+}
+
+/** The rail a canvas in the bar measures itself against. Found from the
+ *  canvas rather than handed down as a ref: a child's layout effect runs
+ *  before its parent's ref is attached, so on a slider that mounts with a
+ *  canvas in it (opened on lit Ultra, or a harness frame) the ref is empty. */
+function railOf(canvas: HTMLCanvasElement | null): HTMLElement | null {
+  return canvas?.closest<HTMLElement>('.thinking-rail') ?? null
+}
+
+/** Sizes a canvas's backing store to its box at the screen's density, and
+ *  returns its CSS size. */
+function fitCanvas(canvas: HTMLCanvasElement): { width: number; height: number; dpr: number } {
+  const dpr = window.devicePixelRatio || 1
+  const width = canvas.clientWidth
+  const height = canvas.clientHeight
+  canvas.width = Math.round(width * dpr)
+  canvas.height = Math.round(height * dpr)
+  return { width, height, dpr }
 }
 
 interface MeteorState {
@@ -518,13 +580,12 @@ function useMeteor(lit: boolean, shown: number, count: number): MeteorState {
 }
 
 /**
- * The canvas the meteor is drawn on, over the slider body. Runs one flight
- * and reports when the head lands (the CSS thumb takes over from there) and
- * when the last spark is out. With `progress` it draws that one frame and
- * stays.
+ * The canvas the meteor is drawn on, filling the bar, whose pill clips it.
+ * Runs one flight and reports when the head lands (the CSS thumb takes over
+ * from there) and when the last spark is out. With `progress` it draws that
+ * one frame and stays.
  */
 function MeteorCanvas({
-  railRef,
   fromFrac,
   toFrac,
   seed,
@@ -532,7 +593,6 @@ function MeteorCanvas({
   onLanded,
   onDone
 }: {
-  railRef: RefObject<HTMLDivElement>
   fromFrac: number
   toFrac: number
   seed: number
@@ -546,7 +606,7 @@ function MeteorCanvas({
 
   useLayoutEffect(() => {
     const canvas = ref.current
-    const rail = railRef.current
+    const rail = railOf(canvas)
     const ctx = canvas?.getContext?.('2d') ?? null
     if (!canvas || !rail || !ctx) {
       // Nothing to draw on (no canvas support): keep the timing, so the
@@ -560,17 +620,13 @@ function MeteorCanvas({
         clearTimeout(doneT)
       }
     }
-    const dpr = window.devicePixelRatio || 1
-    const width = canvas.clientWidth
-    const height = canvas.clientHeight
-    canvas.width = Math.round(width * dpr)
-    canvas.height = Math.round(height * dpr)
-    // The rail sits inset in the body; the canvas covers the body.
+    const { width, height, dpr } = fitCanvas(canvas)
+    // The canvas is the bar, which runs an end cap past the rail each side.
     const run = planMeteor(
       {
-        railLeft: rail.offsetLeft,
+        railLeft: rail.getBoundingClientRect().left - canvas.getBoundingClientRect().left,
         railWidth: rail.offsetWidth,
-        y: rail.offsetTop + rail.offsetHeight / 2,
+        y: height / 2,
         height,
         fromFrac,
         toFrac
@@ -612,6 +668,59 @@ function MeteorCanvas({
   }, [])
 
   return <canvas ref={ref} className="thinking-meteor" aria-hidden />
+}
+
+/** How often the smoulder is redrawn: its embers move about a pixel a
+ *  frame at this rate, and it costs half of what every frame would. */
+const SMOULDER_FRAME_MS = 1000 / 30
+
+/**
+ * Lit Ultra's smoulder (embers.ts), on a canvas filling the bar. Runs until
+ * it unmounts — the slider takes it away when the popover closes, the window
+ * is hidden or reduced motion is turned on. With `time` it draws that one
+ * frame and stays.
+ */
+function EmberCanvas({ time }: { time?: number }): JSX.Element {
+  const ref = useRef<HTMLCanvasElement>(null)
+
+  useLayoutEffect(() => {
+    const canvas = ref.current
+    const rail = railOf(canvas)
+    const ctx = canvas?.getContext?.('2d') ?? null
+    if (!canvas || !rail || !ctx) return
+    const { width, height, dpr } = fitCanvas(canvas)
+    // Ultra is the last stop: the fill ends where the rail does.
+    const field = planEmbers(
+      {
+        fillEnd: rail.getBoundingClientRect().right - canvas.getBoundingClientRect().left,
+        height
+      },
+      11
+    )
+    const palette = readPalette(canvas)
+    const paint = (t: number): void => {
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+      ctx.clearRect(0, 0, width, height)
+      drawEmbers(ctx, field, t, palette)
+    }
+    if (time !== undefined) {
+      paint(time)
+      return
+    }
+    let frame = 0
+    let last = -Infinity
+    const start = performance.now()
+    const tick = (now: number): void => {
+      frame = requestAnimationFrame(tick)
+      if (now - last < SMOULDER_FRAME_MS - 2) return
+      last = now
+      paint((now - start) / 1000)
+    }
+    frame = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(frame)
+  }, [time])
+
+  return <canvas ref={ref} className="thinking-embers" aria-hidden />
 }
 
 function PauseGlyph(): JSX.Element {

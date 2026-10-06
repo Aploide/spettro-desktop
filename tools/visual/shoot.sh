@@ -49,6 +49,7 @@ SCENES=(
   chrome
   chrome:thinking
   chrome:meteor
+  chrome:smoulder
   app:welcome
   app:welcome-empty
   app:welcome-folders

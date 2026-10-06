@@ -14,6 +14,8 @@
 //   meteor    the meteor frozen at points of its flight, from Max and from
 //             Low; `&meteorProgress=0.3` (and `&meteorFrom=<stop>`) freezes
 //             one frame instead
+//   smoulder  lit Ultra at rest, frozen at moments of its idle fire;
+//             `&idleTime=1.5` freezes one frame instead
 
 import './accentPrelude'
 import type { JSX } from 'react'
@@ -194,6 +196,7 @@ function Toolbar({ o }: { o: Options }): JSX.Element {
 function Harness(): JSX.Element {
   if (MODE === 'thinking') return <ThinkingPage />
   if (MODE === 'meteor') return <MeteorPage />
+  if (MODE === 'smoulder') return <SmoulderPage />
   return (
     <div className="hz-root hz-root--chrome">
       <Row label="Mode · thinking High · settings (Restricted) … model">
@@ -283,13 +286,15 @@ function Panel({
   o,
   reasons,
   meteorProgress,
-  meteorFrom
+  meteorFrom,
+  idleTime
 }: {
   label: string
   o: Options
   reasons?: boolean
   meteorProgress?: number
   meteorFrom?: number
+  idleTime?: number
 }): JSX.Element {
   return (
     <div className="hz-chrome-row">
@@ -300,6 +305,7 @@ function Panel({
           reasons={reasons}
           meteorProgress={meteorProgress}
           meteorFrom={meteorFrom}
+          idleTime={idleTime}
         />
       </div>
     </div>
@@ -317,7 +323,7 @@ function ThinkingPage(): JSX.Element {
     <div className="hz-root hz-root--chrome">
       <div className="hz-panels">
         <Panel label="High" o={{ permission: 'yolo', ultra: false }} />
-        <Panel label="Ultra, settled (lit)" o={{ permission: 'yolo', ultra: true }} />
+        <Panel label="Ultra, settled (lit)" o={{ permission: 'yolo', ultra: true }} idleTime={1.2} />
         <Panel label="Ultra paused — Ask first" o={{ permission: 'ask-first', ultra: true }} />
         <Panel label="Extra high" o={{ permission: 'yolo', ultra: false, thinking: 'x-high' }} />
         <Panel label="Off (set elsewhere)" o={{ permission: 'yolo', ultra: false, thinking: 'off' }} />
@@ -369,6 +375,31 @@ function MeteorPage(): JSX.Element {
       <div className="hz-panels">
         {FRAMES.map((p) => (
           <Panel key={p} label={`From Low · ${p}`} o={lit} meteorProgress={p} meteorFrom={0} />
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// Lit Ultra at rest, a few seconds of its smoulder: the heat waves running
+// along the bar and the embers drifting with them.
+const IDLE_FRAMES = [0, 0.5, 1, 1.5, 2, 2.5, 3, 3.5]
+
+function SmoulderPage(): JSX.Element {
+  const lit = { permission: 'yolo', ultra: true }
+  const single = PARAMS.get('idleTime')
+  if (single !== null) {
+    return (
+      <div className="hz-root hz-root--chrome">
+        <Panel label={`Smoulder at ${single}s`} o={lit} idleTime={Number(single)} />
+      </div>
+    )
+  }
+  return (
+    <div className="hz-root hz-root--chrome">
+      <div className="hz-panels">
+        {IDLE_FRAMES.map((t) => (
+          <Panel key={t} label={`Smoulder · ${t}s`} o={lit} idleTime={t} />
         ))}
       </div>
     </div>

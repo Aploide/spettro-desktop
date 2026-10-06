@@ -46,8 +46,12 @@ from Max and from Low: the flight, the impact (from Max at about 0.49, from Low
 at about 0.6) and the cooling into the lit thumb. The meteor is a pure function
 of its progress and a fixed seed, so `chrome:meteor&meteorProgress=0.3`
 (optionally `&meteorFrom=<stop>`, 0 for Low) is the same frame every time. It
-lives in a 36px band: `SHOT_SCALE=3` renders any scene at three times the
-density for looking closely.
+flies inside the slider's 16px bar, which clips it: `SHOT_SCALE=3` renders any
+scene at three times the density for looking closely. `chrome:smoulder`
+freezes lit Ultra's idle fire (heat running along the bar, embers drifting
+toward the stop) at eight moments half a second apart; it too is a pure
+function of its time, so `chrome:smoulder&idleTime=1.5` is one fixed frame.
+`chrome:thinking` shows its lit panel frozen at 1.2s.
 
 ## The app harness
 

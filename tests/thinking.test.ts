@@ -15,6 +15,7 @@ import {
   thinkingState
 } from '@renderer/views/chat/thinking'
 import { meteorTiming, planMeteor } from '@renderer/views/chat/meteor'
+import { planEmbers } from '@renderer/views/chat/embers'
 
 /** thinkingConfigOption: Off, Low, Medium, High, X-High, Max. */
 function thinking(value: string, values = ['off', 'low', 'medium', 'high', 'x-high', 'max']): ACPConfigOption {
@@ -192,8 +193,9 @@ describe('whether the model reasons', () => {
 })
 
 describe('the meteor', () => {
-  // The slider body the numbers were tuned in: a 36px band, a 300px rail.
-  const body = { railLeft: 20, railWidth: 300, y: 18, height: 36, toFrac: 1 }
+  // The bar the numbers were tuned in: 16px tall, its rail an end cap (8px)
+  // in from each end.
+  const body = { railLeft: 8, railWidth: 318, y: 8, height: 16, toFrac: 1 }
 
   it('is the same run for the same seed, so a frozen frame is reproducible', () => {
     const run = (seed: number): unknown => planMeteor({ ...body, fromFrac: 0 }, seed)
@@ -218,7 +220,7 @@ describe('the meteor', () => {
     expect(meteorTiming(0, 1).startFrac).toBe(0)
     const run = planMeteor({ ...body, fromFrac: 0.8 }, 7)
     // The fill still ends at Max: the streak is drawn on from there.
-    expect(run.fillX).toBe(20 + 0.8 * 300)
+    expect(run.fillX).toBe(8 + 0.8 * 318)
     expect(run.fromX).toBeLessThan(run.fillX)
   })
 
@@ -228,6 +230,33 @@ describe('the meteor', () => {
       expect(run.sparks.length).toBeGreaterThanOrEqual(40)
       expect(run.sparks.length).toBeLessThanOrEqual(120)
       for (const s of run.sparks) expect(s.born + s.life).toBeLessThanOrEqual(run.total + 1e-9)
+    }
+  })
+
+  it('scatters its sparks to fit the bar: born inside it, and pulled no harder than it can hold', () => {
+    const run = planMeteor({ ...body, fromFrac: 0 }, 7)
+    for (const s of run.sparks) expect(Math.abs(s.y - run.y)).toBeLessThan(body.height / 2)
+    // A taller bar gives them more room, in proportion.
+    const tall = planMeteor({ ...body, y: 16, height: 32, fromFrac: 0 }, 7)
+    expect(tall.gravity).toBeCloseTo(run.gravity * 2)
+  })
+})
+
+describe('lit Ultra’s smoulder', () => {
+  const bar = { fillEnd: 326, height: 16 }
+
+  it('is the same field for the same seed', () => {
+    expect(planEmbers(bar, 11)).toEqual(planEmbers(bar, 11))
+  })
+
+  it('keeps its embers on the bar: a few of them, bobbing inside its height', () => {
+    const field = planEmbers(bar, 11)
+    expect(field.motes.length).toBeGreaterThanOrEqual(5)
+    expect(field.motes.length).toBeLessThanOrEqual(12)
+    for (const m of field.motes) {
+      expect(m.amp + m.size).toBeLessThan(bar.height / 2)
+      // Slow: the length of the bar in no less than ten seconds.
+      expect(m.speed).toBeLessThanOrEqual(bar.fillEnd / 10)
     }
   })
 })

@@ -177,21 +177,33 @@ export function useDismiss(open: boolean, onClose: () => void): React.RefObject<
 
 /** GitStatModel port: polls the main-process `gitStat` endpoint every 5s and
  *  immediately when the session's busy state flips (the Swift `refreshSoon`
- *  triggers). */
+ *  triggers). Each poll is three git processes started by the main process,
+ *  so it rests while the window is hidden and catches up the moment it is
+ *  shown; and a poll that finds nothing new doesn't re-render the header. */
 function useGitStat(projectPath: string, isBusy: boolean): GitStat {
   const [stat, setStat] = useState<GitStat>({ branch: '', files: [] })
   useEffect(() => {
     let alive = true
+    let shown = ''
     const refresh = (): void => {
+      if (document.visibilityState === 'hidden') return
       void call('gitStat', projectPath).then((s) => {
-        if (alive) setStat(s)
+        const json = JSON.stringify(s)
+        if (!alive || json === shown) return
+        shown = json
+        setStat(s)
       })
+    }
+    const onVisibility = (): void => {
+      if (document.visibilityState !== 'hidden') refresh()
     }
     refresh()
     const timer = setInterval(refresh, 5000)
+    document.addEventListener('visibilitychange', onVisibility)
     return () => {
       alive = false
       clearInterval(timer)
+      document.removeEventListener('visibilitychange', onVisibility)
     }
   }, [projectPath, isBusy])
   return stat

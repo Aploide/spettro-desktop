@@ -8,7 +8,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { ACPUsage } from '@shared/acp'
 import type { ChatDetail, GitStat } from '@shared/model'
 import { call } from '@renderer/state/store'
-import { toggleSidebar, toggleTerminal, useShell } from '@renderer/state/shell'
+import { startNewSession, toggleSidebar, toggleTerminal, useShell } from '@renderer/state/shell'
 import { Icon } from '@renderer/design/icons'
 import InlineRename from '@renderer/views/shell/InlineRename'
 import { withShortcut } from '@renderer/views/shell/util'
@@ -32,7 +32,7 @@ export default function ChatHeader({ chat }: { chat: ChatDetail }): JSX.Element 
 
   return (
     <header className="chat-header">
-      <SidebarReopenButton />
+      <SidebarReopenButton withNewSession />
       <div className="chat-header-titles">
         {renaming ? (
           <InlineRename
@@ -83,20 +83,35 @@ export default function ChatHeader({ chat }: { chat: ChatDetail }): JSX.Element 
 }
 
 /** Leads a title bar while the sidebar is collapsed — the way back is where
- *  the sidebar's own hide button was. Renders nothing otherwise. */
-export function SidebarReopenButton(): JSX.Element | null {
+ *  the sidebar's own hide button was, and (in a chat) New session beside it,
+ *  so starting over never depends on knowing the shortcut. Renders nothing
+ *  while the sidebar is showing. */
+export function SidebarReopenButton({ withNewSession = false }: { withNewSession?: boolean }): JSX.Element | null {
   const collapsed = useShell((s) => s.sidebarCollapsed)
   if (!collapsed) return null
   return (
-    <button
-      type="button"
-      className="header-btn"
-      title={withShortcut('Show sidebar', 'B')}
-      aria-label="Show sidebar"
-      onClick={toggleSidebar}
-    >
-      <Icon name="sidebar.left" size={15} />
-    </button>
+    <>
+      <button
+        type="button"
+        className="header-btn"
+        title={withShortcut('Show sidebar', 'B')}
+        aria-label="Show sidebar"
+        onClick={toggleSidebar}
+      >
+        <Icon name="sidebar.left" size={15} />
+      </button>
+      {withNewSession && (
+        <button
+          type="button"
+          className="header-btn"
+          title={withShortcut('New session', 'N')}
+          aria-label="New session"
+          onClick={() => startNewSession()}
+        >
+          <Icon name="square.and.pencil" size={15} />
+        </button>
+      )}
+    </>
   )
 }
 

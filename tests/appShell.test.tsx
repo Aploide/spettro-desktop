@@ -93,7 +93,12 @@ beforeAll(() => {
   })) as unknown as typeof window.matchMedia
 })
 
-afterEach(() => {
+afterEach(async () => {
+  // The store and the layout store are module singletons that outlive a
+  // render: put back what a test changed so the next one starts clean.
+  act(() => listeners.forEach((l) => l({ type: 'app-state', state: STATE })))
+  const { setNewSessionPath } = await import('@renderer/state/shell')
+  setNewSessionPath(null)
   cleanup()
   calls.length = 0
   localStorage.clear()
@@ -175,6 +180,13 @@ describe('the shell', () => {
     expect(called('renameChat')).toEqual([['b', 'Renamed']])
   })
 
+  it('closes a row menu when Tab leaves it', async () => {
+    await renderApp()
+    fireEvent.click(screen.getByRole('button', { name: 'More actions for Older chat' }))
+    fireEvent.keyDown(screen.getByRole('menuitem', { name: 'Rename…' }), { key: 'Tab' })
+    expect(screen.queryByRole('menu')).toBeNull()
+  })
+
   it('asks twice before deleting', async () => {
     await renderApp()
     fireEvent.click(screen.getByRole('button', { name: 'More actions for Older chat' }))
@@ -182,6 +194,86 @@ describe('the shell', () => {
     expect(called('closeChat')).toEqual([])
     fireEvent.click(screen.getByRole('menuitem', { name: 'Delete permanently' }))
     expect(called('closeChat')).toEqual([['b']])
+  })
+
+  it('Ctrl+N starts a new session, but not from inside the terminal', async () => {
+    await renderApp()
+    await act(async () => {
+      listeners.forEach((l) => l({ type: 'app-state', state: { ...STATE, selectedSessionId: 'a' } }))
+    })
+    const xterm = document.createElement('div')
+    xterm.className = 'xterm'
+    const input = document.createElement('textarea')
+    xterm.appendChild(input)
+    document.body.appendChild(xterm)
+    press('n', {}, input)
+    expect(called('selectSession')).toEqual([])
+    xterm.remove()
+    press('n')
+    expect(called('selectSession')).toEqual([[null]])
+  })
+
+  it('keeps the switcher and session shortcuts out of the way of an open sheet', async () => {
+    await renderApp()
+    press(',')
+    press('k')
+    press('1')
+    expect(screen.queryByRole('dialog', { name: 'Switch session' })).toBeNull()
+    expect(called('openChat')).toEqual([])
+  })
+
+  it('keeps Tab inside the switcher, and Escape closes it', async () => {
+    await renderApp()
+    press('k')
+    const search = screen.getByRole('combobox', { name: 'Search sessions' })
+    const tab = new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true })
+    act(() => void search.dispatchEvent(tab))
+    expect(tab.defaultPrevented).toBe(true)
+    press('Escape', { ctrlKey: false })
+    expect(screen.queryByRole('dialog', { name: 'Switch session' })).toBeNull()
+  })
+
+  it('refills the composer when the same starter is chosen twice', async () => {
+    await renderApp()
+    const box = screen.getByPlaceholderText(/Describe a task/) as HTMLTextAreaElement
+    fireEvent.click(screen.getByRole('button', { name: 'Fix a bug' }))
+    expect(box.value).toBe('Help me find and fix a bug: ')
+    fireEvent.change(box, { target: { value: '' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Fix a bug' }))
+    expect(box.value).toBe('Help me find and fix a bug: ')
+  })
+
+  it('holds the first message until starting in the home folder is confirmed', async () => {
+    await renderApp()
+    await act(async () => {
+      listeners.forEach((l) =>
+        l({ type: 'app-state', state: { ...STATE, defaultProjectPath: '/home/me', lastProjectPath: null } })
+      )
+    })
+    const box = screen.getByPlaceholderText(/Describe a task/) as HTMLTextAreaElement
+    fireEvent.change(box, { target: { value: 'tidy up' } })
+    fireEvent.keyDown(box, { key: 'Enter' })
+    await act(async () => undefined)
+    expect(called('newChat')).toEqual([])
+    expect(box.value).toBe('tidy up')
+    expect(screen.getByRole('alert').textContent).toContain('everything in your home folder')
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
+    fireEvent.keyDown(box, { key: 'Enter' })
+    await act(async () => undefined)
+    expect(called('newChat')).toEqual([['/home/me']])
+  })
+
+  it('refuses to start in a folder that no longer exists', async () => {
+    await renderApp()
+    await act(async () => {
+      listeners.forEach((l) => l({ type: 'app-state', state: { ...STATE, missingProjects: ['/work/acme'] } }))
+    })
+    const box = screen.getByPlaceholderText(/Describe a task/)
+    fireEvent.change(box, { target: { value: 'hello' } })
+    fireEvent.keyDown(box, { key: 'Enter' })
+    await act(async () => undefined)
+    expect(called('newChat')).toEqual([])
+    expect(screen.getByRole('alert').textContent).toContain('can’t be found')
   })
 
   it('starts a session in the chosen folder with the first message', async () => {

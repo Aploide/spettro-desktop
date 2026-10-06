@@ -99,8 +99,13 @@ export function toggleSidebar(): void {
 }
 
 export function setTerminalVisible(visible: boolean): void {
+  // Hiding the drawer while typing in it would leave focus on nothing, so the
+  // next keystroke went nowhere; hand it to the composer instead.
+  const leavingTerminal =
+    !visible && document.activeElement instanceof Element && document.activeElement.closest('.xterm') !== null
   write(TERMINAL_VISIBLE_KEY, visible ? '1' : '0')
   update({ terminalVisible: visible })
+  if (leavingTerminal) focusComposer()
 }
 
 export function toggleTerminal(): void {

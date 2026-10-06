@@ -85,6 +85,13 @@ export default function ContextMenu({ x, y, entries, onClose, label, above }: Pr
   }, [onClose])
 
   const onKeyDown = (e: React.KeyboardEvent): void => {
+    if (e.key === 'Tab') {
+      // Leaving a menu by Tab closes it, as native menus do, rather than
+      // stranding it open behind the focus.
+      e.preventDefault()
+      onClose()
+      return
+    }
     if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp' && e.key !== 'Home' && e.key !== 'End') return
     e.preventDefault()
     const items = Array.from(

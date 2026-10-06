@@ -216,8 +216,9 @@ export interface AppStateDTO {
    *  the renderer never has to guess at the home directory. */
   defaultProjectPath: string
   recentProjects: string[]
-  /** The subset of recentProjects that no longer exists as a folder, so the
-   *  folder menu can grey them out instead of failing on click. */
+  /** Recent and session folders that no longer exist, so the folder menu
+   *  can grey them out and the new-session view can refuse to start in one
+   *  instead of failing on the first message. */
   missingProjects: string[]
   /** The user's home folder. Starting a session there (or at /) hands the
    *  agent everything the user owns, which the new-session view warns about. */

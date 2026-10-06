@@ -426,7 +426,12 @@
 .chat-list::-webkit-scrollbar-thumb {
   border: 3px solid transparent;
   border-radius: 999px;
-  background: color-mix(in srgb, var(--text-tertiary) 40%, transparent) padding-box;
+  background: transparent padding-box;
+}
+
+/* Like an overlay scrollbar: there while the pointer is over the list. */
+.chat-list:hover::-webkit-scrollbar-thumb {
+  background-color: color-mix(in srgb, var(--text-tertiary) 40%, transparent);
 }
 
 .chat-list::-webkit-scrollbar-thumb:hover {
@@ -548,7 +553,8 @@
   color: var(--text-secondary);
 }
 
-.chat-row:hover {
+.chat-row:hover,
+.chat-row--menu {
   background: var(--hover-fill);
   color: var(--text-primary);
 }
@@ -691,13 +697,15 @@
 }
 
 .chat-row:hover .chat-row-more,
-.chat-row:focus-within .chat-row-more {
+.chat-row:focus-within .chat-row-more,
+.chat-row--menu .chat-row-more {
   opacity: 1;
   pointer-events: auto;
 }
 
 .chat-row:hover .chat-row-status,
-.chat-row:focus-within .chat-row-status {
+.chat-row:focus-within .chat-row-status,
+.chat-row--menu .chat-row-status {
   visibility: hidden;
 }
 

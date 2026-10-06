@@ -8,7 +8,7 @@
 // depends on discovering the secondary click. The sidebar is resizable from
 // its right edge and collapsible (Ctrl/Cmd+B); both live in state/shell.ts.
 
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ChatSummary } from '@shared/model'
 import { isUpdateBusy, type UpdateState } from '@shared/update'
 import { call, useApp } from '@renderer/state/store'
@@ -53,6 +53,7 @@ export default function Sidebar({ onOpenSettings, onOpenRemote, onOpenWorkflows 
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [footerMenu, setFooterMenu] = useState<{ x: number; y: number } | null>(null)
 
+  const now = useClock()
   const sessions = app?.sessions
   const selectedId = app?.selectedSessionId ?? null
   const isSearching = searchText.trim().length > 0
@@ -108,7 +109,9 @@ export default function Sidebar({ onOpenSettings, onOpenRemote, onOpenWorkflows 
   ]
 
   const rowProps = {
+    now,
     selectedId,
+    menuId: menu?.session.id ?? null,
     renamingId,
     onRename: setRenamingId,
     onRenameDone: () => setRenamingId(null),
@@ -235,6 +238,17 @@ export default function Sidebar({ onOpenSettings, onOpenRemote, onOpenWorkflows 
   )
 }
 
+/** The current time, refreshed every half minute: row ages ("now", "5m")
+ *  are relative, and an idle app sends no state that would re-render them. */
+function useClock(): number {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 30_000)
+    return () => clearInterval(timer)
+  }, [])
+  return now
+}
+
 // ---------------------------------------------------------------- resizer
 
 /** The sidebar's right edge. Drag to resize (220–360), double-click for the
@@ -346,7 +360,10 @@ function UpdatePrompt({
 // --------------------------------------------------------------- sections
 
 interface RowHandlers {
+  now: number
   selectedId: string | null
+  /** The row whose menu is open keeps its highlight while the menu has focus. */
+  menuId: string | null
   renamingId: string | null
   onRename: (chatId: string) => void
   onRenameDone: () => void
@@ -433,7 +450,9 @@ function ArchivedSection({
 function ChatRow({
   session,
   subtitle,
+  now,
   selectedId,
+  menuId,
   renamingId,
   onRename,
   onRenameDone,
@@ -453,6 +472,7 @@ function ChatRow({
       className={
         'chat-row' +
         (isSelected ? ' chat-row--selected' : '') +
+        (session.id === menuId ? ' chat-row--menu' : '') +
         (session.unread && !isSelected ? ' chat-row--unread' : '')
       }
       data-testid={`sidebar-row-${session.id}`}
@@ -487,7 +507,7 @@ function ChatRow({
               <PinIcon size={9} />
             </span>
           )}
-          <RowStatus session={session} isSelected={isSelected} />
+          <RowStatus session={session} isSelected={isSelected} now={now} />
           <button
             type="button"
             className="chat-row-more"
@@ -508,7 +528,15 @@ function ChatRow({
  *  elsewhere → accent dot. Otherwise the time since it last moved, which the
  *  "…" button covers on hover. (The amber "needs you" badge joins this slot
  *  with inline permission cards.) */
-function RowStatus({ session, isSelected }: { session: ChatSummary; isSelected: boolean }): JSX.Element {
+function RowStatus({
+  session,
+  isSelected,
+  now
+}: {
+  session: ChatSummary
+  isSelected: boolean
+  now: number
+}): JSX.Element {
   if (session.isBusy) {
     return (
       <span className="chat-row-status" title="Working…">
@@ -521,7 +549,7 @@ function RowStatus({ session, isSelected }: { session: ChatSummary; isSelected: 
       {session.unread && !isSelected && (
         <span className="chat-row-dot" role="img" aria-label="Finished while you were away" />
       )}
-      <span className="chat-row-time">{relativeTime(session.updatedAt)}</span>
+      <span className="chat-row-time">{relativeTime(session.updatedAt, now)}</span>
     </span>
   )
 }

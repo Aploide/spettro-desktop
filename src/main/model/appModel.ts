@@ -250,10 +250,19 @@ export class AppModel extends EventEmitter {
       lastProjectPath: this.prefs.lastProjectPath || null,
       defaultProjectPath: this.defaultProjectPath,
       recentProjects: this.prefs.recentProjects,
-      missingProjects: this.prefs.recentProjects.filter((p) => !isDirectory(p)),
+      missingProjects: this.missingProjects(),
       homePath: homedir(),
       appearance: this.prefs.appearance
     }
+  }
+
+  /** Recent and session folders that no longer exist. Sessions count too: a
+   *  project's "+" (or New session from one of its chats) points the
+   *  new-session view at that chat's folder, which may be long gone. */
+  private missingProjects(): string[] {
+    const paths = new Set(this.prefs.recentProjects)
+    for (const s of this.sessions) if (!s.isScratch) paths.add(s.projectPath)
+    return [...paths].filter((p) => !isDirectory(p))
   }
 
   /** The persisted colour scheme. Read by main before the window exists, so

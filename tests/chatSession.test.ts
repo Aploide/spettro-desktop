@@ -189,6 +189,30 @@ describe('ChatSession.rename', () => {
   })
 })
 
+describe('ChatSession.updatedAt', () => {
+  it('moves with the conversation, not with notices the app adds itself', () => {
+    const s = new ChatSession('/work/acme', 'Old chat', 'chat-3', 1_000)
+    expect(s.updatedAt).toBe(1_000)
+    s.appendUserMessage('hello')
+    const spoke = s.updatedAt
+    expect(spoke).toBeGreaterThan(1_000)
+    // Opening an old chat whose context can't be restored adds a notice;
+    // that must not make the chat look (and sort) as if it just moved.
+    s.items.push({
+      kind: 'message',
+      message: {
+        id: 'n1',
+        role: 'notice',
+        text: "Couldn't restore this chat's earlier context — starting fresh.",
+        attachments: [],
+        isStreaming: false,
+        timestamp: spoke + 60_000
+      }
+    })
+    expect(s.updatedAt).toBe(spoke)
+  })
+})
+
 describe('AppModel sessions (rename, unread, recents)', () => {
   async function setup(stored: StoredSession[]): Promise<{
     dir: string

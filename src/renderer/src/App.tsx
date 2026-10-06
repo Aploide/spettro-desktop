@@ -76,13 +76,14 @@ export default function App(): JSX.Element {
     const onKey = (e: KeyboardEvent): void => {
       const state = getState().app
       const phase = state?.phase.kind
+      const sheetOpen = remoteOpen || workflowsChatId !== null || settingsPane !== null
       const shellUp =
         phase === 'ready' ||
         phase === 'needsProject' ||
         (phase === 'needsProvider' && providerSetupSkipped)
 
       if (e.ctrlKey && !e.metaKey && !e.altKey && (e.code === 'Backquote' || e.key === '`')) {
-        if (shellUp && state?.selectedSessionId) {
+        if (shellUp && !sheetOpen && state?.selectedSessionId) {
           e.preventDefault()
           toggleTerminal()
         }
@@ -91,7 +92,8 @@ export default function App(): JSX.Element {
       if (e.target instanceof Element && e.target.closest('.xterm')) return
 
       if (e.key === 'Escape') {
-        if (remoteOpen) setRemoteOpen(false)
+        if (switcherOpen) setSwitcherOpen(false)
+        else if (remoteOpen) setRemoteOpen(false)
         else if (workflowsChatId) setWorkflowsChatId(null)
         else if (settingsPane) setSettingsPane(null)
         return
@@ -112,7 +114,9 @@ export default function App(): JSX.Element {
           e.preventDefault()
           setWorkflowsChatId(selected)
         }
-      } else if (!shellUp || e.shiftKey) {
+      } else if (!shellUp || e.shiftKey || sheetOpen) {
+        // A sheet (Settings, Workflows, Remote) is in front: changing the
+        // session or the layout behind it would happen out of sight.
         return
       } else if (key === 'n') {
         e.preventDefault()
@@ -136,7 +140,7 @@ export default function App(): JSX.Element {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [remoteOpen, settingsPane, workflowsChatId, providerSetupSkipped])
+  }, [remoteOpen, settingsPane, workflowsChatId, providerSetupSkipped, switcherOpen])
 
   // The transient banner toast. It re-arms whenever the banner text changes
   // and hides itself; onboarding shows the same banner inline, so the toast

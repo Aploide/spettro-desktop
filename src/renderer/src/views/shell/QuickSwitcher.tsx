@@ -60,6 +60,10 @@ export default function QuickSwitcher({ onClose }: { onClose: () => void }): JSX
       e.preventDefault()
       e.stopPropagation()
       onClose()
+    } else if (e.key === 'Tab') {
+      // The field is the only stop: Tab would otherwise walk focus out to the
+      // page behind, leaving the switcher open with nothing listening to it.
+      e.preventDefault()
     }
   }
 

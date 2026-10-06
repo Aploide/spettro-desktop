@@ -164,10 +164,18 @@ export class ChatSession {
     }
   }
 
+  /** When the conversation last moved: the newest message or tool call.
+   *  Notices don't count — the app adds those on its own (e.g. "Couldn't
+   *  restore this chat's earlier context" when a chat is merely opened), and
+   *  the sidebar sorts by this, so counting them would make an old chat jump
+   *  to the top, as "now", just for being clicked. */
   get updatedAt(): number {
-    const last = this.items[this.items.length - 1]
-    if (!last) return this.createdAt
-    return last.kind === 'message' ? last.message.timestamp : last.tool.timestamp
+    for (let i = this.items.length - 1; i >= 0; i--) {
+      const item = this.items[i]
+      if (item.kind === 'tool') return item.tool.timestamp
+      if (item.message.role !== 'notice') return item.message.timestamp
+    }
+    return this.createdAt
   }
 
   // -------------------------------------------------------------------------

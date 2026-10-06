@@ -5,6 +5,7 @@ import { app, BrowserWindow, nativeTheme, shell } from 'electron'
 import { existsSync } from 'fs'
 import { join } from 'path'
 import { EVENT_CHANNEL, type MainEvent } from '../shared/ipc'
+import { wireAttention } from './attention'
 import { registerIpc, type IpcHandle } from './ipc'
 import { AppModel } from './model/appModel'
 import { buildRemoteBridge } from './model/remoteBridge'
@@ -105,6 +106,8 @@ app.whenReady().then(() => {
   })
   model.setRemoteState(remoteHost.getState())
   ipcHandle = registerIpc(model, terminals, remoteHost, getMainWindow)
+  // The app badge and notifications for approvals and questions waiting.
+  wireAttention(model, getMainWindow)
 
   // Kick the model off once the window exists; events emitted from here on
   // are forwarded to the renderer by registerIpc.

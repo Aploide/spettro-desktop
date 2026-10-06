@@ -31,6 +31,7 @@ import OrchestrationPanel from './OrchestrationPanel'
 import ChatHeader, { projectName } from './ChatHeader'
 import Composer, { type PromptSeed } from './Composer'
 import StarterPrompts from './StarterPrompts'
+import PromptDock from './PromptDock'
 import './chat.css'
 
 /** UserDefaults key `spettro.orchestrationPanelVisible` — global, like the
@@ -175,12 +176,14 @@ export default function ChatView({ chatId }: { chatId: string }): JSX.Element {
 
   // Esc interrupts a running turn from the composer or the transcript —
   // never from inside a menu or popover (they take Escape for themselves),
-  // and never once something else has handled it. Nor while an approval or
-  // a question is up: there Esc means "deny" / "skip", and the sheets hear
-  // it on the window, after this handler — focus usually stays in the
-  // composer when one appears, so without this guard a deny would also
-  // throw away the whole turn.
-  const promptOpen = useStore((s) => s.permissions.length > 0 || s.questions.length > 0)
+  // and never once something else has handled it. Nor while this chat has
+  // an approval or a question up: there Esc means "deny" / "skip" (the card
+  // hears it on the window, after this handler), and a deny must not also
+  // throw away the whole turn — nor may an Esc typed in the composer, where
+  // the card ignores it, cancel the turn the card belongs to.
+  const promptOpen = useStore(
+    (s) => s.permissions.some((p) => p.chatId === chatId) || s.questions.some((q) => q.chatId === chatId)
+  )
   const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>): void => {
     if (event.key !== 'Escape' || event.defaultPrevented || !busy || promptOpen) return
     const target = event.target as Element
@@ -258,7 +261,7 @@ export default function ChatView({ chatId }: { chatId: string }): JSX.Element {
         </aside>
       </div>
 
-      <Composer chat={chat} promptSeed={promptSeed} />
+      <Composer chat={chat} promptSeed={promptSeed} dock={<PromptDock chat={chat} />} />
 
       <TerminalDrawer
         projectPath={chat.projectPath}

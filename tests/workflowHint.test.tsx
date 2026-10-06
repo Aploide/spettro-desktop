@@ -16,6 +16,9 @@ import type { ACPConfigOption } from '@shared/acp'
 const calls: [string, unknown[]][] = []
 
 vi.mock('@renderer/state/store', () => ({
+  // No approval or question is waiting.
+  useStore: <T,>(select: (s: { permissions: never[]; questions: never[] }) => T): T =>
+    select({ permissions: [], questions: [] }),
   call: (method: string, ...args: unknown[]) => {
     calls.push([method, args])
     return Promise.resolve()

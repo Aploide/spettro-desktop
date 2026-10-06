@@ -11,7 +11,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ChatSummary } from '@shared/model'
 import { isUpdateBusy, type UpdateState } from '@shared/update'
-import { call, useApp } from '@renderer/state/store'
+import { call, useApp, useStore } from '@renderer/state/store'
+import { chatsNeedingYou } from '@renderer/views/chat/prompts'
 import {
   SIDEBAR_DEFAULT_WIDTH,
   setSidebarWidth,
@@ -54,6 +55,11 @@ export default function Sidebar({ onOpenSettings, onOpenRemote, onOpenWorkflows 
   const [footerMenu, setFooterMenu] = useState<{ x: number; y: number } | null>(null)
 
   const now = useClock()
+  // Chats waiting on an approval or an answer. The selected one shows its
+  // card above the composer; every other one says so in its row.
+  const permissions = useStore((s) => s.permissions)
+  const questions = useStore((s) => s.questions)
+  const needsYou = useMemo(() => chatsNeedingYou(permissions, questions), [permissions, questions])
   const sessions = app?.sessions
   const selectedId = app?.selectedSessionId ?? null
   const isSearching = searchText.trim().length > 0
@@ -111,6 +117,7 @@ export default function Sidebar({ onOpenSettings, onOpenRemote, onOpenWorkflows 
   const rowProps = {
     now,
     selectedId,
+    needsYou,
     menuId: menu?.session.id ?? null,
     renamingId,
     onRename: setRenamingId,
@@ -362,6 +369,8 @@ function UpdatePrompt({
 interface RowHandlers {
   now: number
   selectedId: string | null
+  /** Chats with an approval or a question waiting. */
+  needsYou: Set<string>
   /** The row whose menu is open keeps its highlight while the menu has focus. */
   menuId: string | null
   renamingId: string | null
@@ -379,6 +388,8 @@ function ProjectSection({
   const [collapsed, setCollapsed] = useState(false)
   const isExpanded = forceExpanded || !collapsed
   const name = basename(group.path)
+  // A folded group still says when one of its chats is waiting on you.
+  const waiting = !isExpanded && group.sessions.some((s) => rows.needsYou.has(s.id))
 
   return (
     <section className="section" aria-label={name}>
@@ -392,6 +403,7 @@ function ProjectSection({
           onClick={() => setCollapsed((c) => !c)}
         >
           <span className="section-name">{name}</span>
+          {waiting && <span className="section-needs-you" role="img" aria-label="A session here needs you" />}
           <span className={`section-chevron${isExpanded ? ' section-chevron--open' : ''}`}>
             <ChevronRightIcon size={8} />
           </span>
@@ -418,6 +430,7 @@ function ArchivedSection({
 }: RowHandlers & { sessions: ChatSummary[]; forceExpanded: boolean }): JSX.Element {
   const [collapsed, setCollapsed] = useState(true)
   const isExpanded = forceExpanded || !collapsed
+  const waiting = !isExpanded && sessions.some((s) => rows.needsYou.has(s.id))
 
   return (
     <section className="section section--archived" aria-label="Archived">
@@ -432,6 +445,7 @@ function ArchivedSection({
           <ArchiveIcon size={11} />
           <span className="section-name">Archived</span>
           <span className="section-count">{sessions.length}</span>
+          {waiting && <span className="section-needs-you" role="img" aria-label="A session here needs you" />}
           <span className={`section-chevron${isExpanded ? ' section-chevron--open' : ''}`}>
             <ChevronRightIcon size={8} />
           </span>
@@ -452,6 +466,7 @@ function ChatRow({
   subtitle,
   now,
   selectedId,
+  needsYou,
   menuId,
   renamingId,
   onRename,
@@ -461,6 +476,7 @@ function ChatRow({
 }: RowHandlers & { session: ChatSummary; subtitle?: string }): JSX.Element {
   const isSelected = session.id === selectedId
   const renaming = renamingId === session.id
+  const waiting = needsYou.has(session.id) && !isSelected
   const open = (): void => void call('openChat', session.id)
 
   // The row is a container, not a button: the title is the button (its
@@ -473,7 +489,8 @@ function ChatRow({
         'chat-row' +
         (isSelected ? ' chat-row--selected' : '') +
         (session.id === menuId ? ' chat-row--menu' : '') +
-        (session.unread && !isSelected ? ' chat-row--unread' : '')
+        (session.unread && !isSelected ? ' chat-row--unread' : '') +
+        (waiting ? ' chat-row--needs-you' : '')
       }
       data-testid={`sidebar-row-${session.id}`}
       onContextMenu={(e) => onContextMenu(e, session)}
@@ -507,7 +524,7 @@ function ChatRow({
               <PinIcon size={9} />
             </span>
           )}
-          <RowStatus session={session} isSelected={isSelected} now={now} />
+          <RowStatus session={session} isSelected={isSelected} waiting={waiting} now={now} />
           <button
             type="button"
             className="chat-row-more"
@@ -524,19 +541,31 @@ function ChatRow({
   )
 }
 
-/** The row's right-hand slot. Working → spinner. Finished while you were
- *  elsewhere → accent dot. Otherwise the time since it last moved, which the
- *  "…" button covers on hover. (The amber "needs you" badge joins this slot
- *  with inline permission cards.) */
+/** The row's right-hand slot. Waiting on an approval or an answer → the
+ *  amber "Needs you" badge, which outranks everything: the chat is stuck
+ *  until you look. Working → spinner. Finished while you were elsewhere →
+ *  accent dot. Otherwise the time since it last moved, which the "…" button
+ *  covers on hover. */
 function RowStatus({
   session,
   isSelected,
+  waiting,
   now
 }: {
   session: ChatSummary
   isSelected: boolean
+  waiting: boolean
   now: number
 }): JSX.Element {
+  if (waiting) {
+    return (
+      <span className="chat-row-status">
+        <span className="chat-row-needs-you" title="Waiting for your approval or answer">
+          Needs you
+        </span>
+      </span>
+    )
+  }
   if (session.isBusy) {
     return (
       <span className="chat-row-status" title="Working…">

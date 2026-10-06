@@ -163,7 +163,7 @@ const FILES = [
   'src/main/remote/host.ts',
   'src/main/terminal/panels.ts',
   'src/renderer/src/views/shell/Sidebar.tsx',
-  'src/renderer/src/views/sheets/PermissionSheet.tsx',
+  'src/renderer/src/views/chat/PermissionCard.tsx',
   'src/main/remote/hostSession.ts'
 ]
 

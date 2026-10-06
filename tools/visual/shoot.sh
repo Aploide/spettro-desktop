@@ -70,7 +70,11 @@ SCENES=(
   app:switcher
   app:permission-bash
   app:permission-diff
+  app:permission-compact
+  app:permission-denied
+  app:permission-orphan
   app:question
+  app:question-multi
   app:settings
   app:onboarding
   app:gate

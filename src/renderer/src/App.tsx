@@ -1,7 +1,8 @@
 // Port of ContentView.swift + the SpettroApp command layer: routes exactly one
-// screen per app phase, hosts the app-wide sheets (permission, question,
-// settings, remote access) so they are reachable in every phase, shows the
-// transient banner as a top toast, and binds the global keyboard shortcuts.
+// screen per app phase, hosts the app-wide sheets (settings, remote access,
+// and the fallback for an approval no chat claims) so they are reachable in
+// every phase, shows the transient banner as a top toast, and binds the
+// global keyboard shortcuts.
 //
 // Once the agent is up the shell is persistent, like the Claude Code tab: the
 // sidebar stays put (unless collapsed with Ctrl/Cmd+B) and the main column
@@ -22,8 +23,8 @@ import SettingsView, { type SettingsPane } from './views/shell/SettingsView'
 import { visibleSessionOrder } from './views/shell/sessionGroups'
 import { isMac } from './views/shell/util'
 import ChatView from '@renderer/views/chat/ChatView'
-import PermissionSheet from '@renderer/views/sheets/PermissionSheet'
-import QuestionSheet from '@renderer/views/sheets/QuestionSheet'
+import PermissionCard from '@renderer/views/chat/PermissionCard'
+import QuestionCard from '@renderer/views/chat/QuestionCard'
 import RemoteAccessView from '@renderer/views/remote/RemoteAccessView'
 import ConnectProvidersView from '@renderer/views/providers/ConnectProvidersView'
 import WorkflowStudio from '@renderer/views/workflows/WorkflowStudio'
@@ -157,6 +158,13 @@ export default function App(): JSX.Element {
     return () => clearTimeout(timer)
   }, [banner])
 
+  // A prompt is shown inline when its chat can be on screen: a chat in the
+  // sidebar, or the one selected (a draft that isn't listed yet).
+  const isOrphan = (chatId: string | null): boolean =>
+    chatId === null || (chatId !== selectedId && !app?.sessions.some((s) => s.id === chatId))
+  const orphanPermission = permissions.find((p) => isOrphan(p.chatId))
+  const orphanQuestion = questions.find((q) => isOrphan(q.chatId))
+
   const phase = app?.phase ?? { kind: 'locating' as const }
   const onboarding = phase.kind === 'needsSetup' || phase.kind === 'installing'
 
@@ -199,10 +207,20 @@ export default function App(): JSX.Element {
         </div>
       )}
 
-      {/* The agent's turn blocks on these, so they sit above everything and
-          are available in every phase — first in, first out. */}
-      {questions.length > 0 && <QuestionSheet request={questions[0]} />}
-      {permissions.length > 0 && <PermissionSheet request={permissions[0]} />}
+      {/* Approvals and questions are answered inline, above the composer of
+          the chat that asked (PromptDock). One that no chat claims — its
+          session belongs to no chat this window knows — still blocks the
+          agent's turn, so it comes up here, over everything, first in first
+          out. */}
+      {orphanQuestion ? (
+        <div className="prompt-backdrop" role="presentation">
+          <QuestionCard key={orphanQuestion.id} request={orphanQuestion} presentation="sheet" />
+        </div>
+      ) : orphanPermission ? (
+        <div className="prompt-backdrop" role="presentation">
+          <PermissionCard key={orphanPermission.id} request={orphanPermission} presentation="sheet" />
+        </div>
+      ) : null}
 
       {toast && !onboarding && <div className="toast">{toast}</div>}
     </div>

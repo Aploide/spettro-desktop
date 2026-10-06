@@ -657,6 +657,36 @@
   background: var(--accent);
 }
 
+/* Waiting on an approval or an answer: amber, like the card it opens to,
+   and the one row state that never fades into the time. */
+.chat-row-needs-you {
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  line-height: 16px;
+  white-space: nowrap;
+  color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 16%, transparent);
+}
+
+.chat-row--needs-you {
+  color: var(--text-primary);
+}
+
+.chat-row--needs-you .chat-row-title {
+  font-weight: 500;
+}
+
+/* The same, folded into a collapsed group's header. */
+.section-needs-you {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--warning);
+}
+
 .chat-row-time {
   font-size: var(--fs-xs);
   color: var(--text-tertiary);

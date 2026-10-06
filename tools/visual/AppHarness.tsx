@@ -12,7 +12,9 @@
 //                 chat-tools | chat-error | chat-steering |
 //                 busy | guide | ultra | model-menu | session-settings | slash |
 //                 mention | sidebar-many | sidebar-menu | collapsed | switcher |
-//                 permission-bash | permission-diff | question | settings |
+//                 permission-bash | permission-diff | permission-compact |
+//                 permission-orphan | permission-denied | question |
+//                 question-multi | settings |
 //                 onboarding | installing | install-failed | gate | failure |
 //                 reconnecting
 
@@ -202,6 +204,32 @@ function transcript(mode: string): TranscriptItem[] {
         })
       )
       return items
+    case 'permission-bash':
+    case 'permission-denied':
+      // The command the approval is about, its card waiting on the answer.
+      items.push(
+        tool({
+          id: 'call_lint',
+          title: 'Run npm run lint -- --fix',
+          kind: 'execute',
+          status: 'pending',
+          argsJSON: JSON.stringify({ command: 'npm run lint -- --fix' })
+        })
+      )
+      return items
+    case 'permission-diff':
+      items.splice(items.length - 1, 1)
+      items.push(
+        tool({
+          id: 'call_edit',
+          title: 'Edit SaveButton.tsx',
+          kind: 'edit',
+          status: 'pending',
+          argsJSON: JSON.stringify({ path: `${PROJECT}/src/components/SaveButton.tsx` }),
+          locations: [{ path: `${PROJECT}/src/components/SaveButton.tsx` }]
+        })
+      )
+      return items
     case 'chat-steering':
       // A message sent while the agent works: queued for its next step.
       items.push(
@@ -361,7 +389,9 @@ const OPTIONS: ACPConfigOption[] = [
   }
 ]
 
-const BUSY = MODE === 'busy' || MODE === 'chat-steering' || MODE === 'guide'
+/** Modes whose turn is waiting on an approval or an answer. */
+const PROMPTED = MODE.startsWith('permission-') || MODE.startsWith('question')
+const BUSY = MODE === 'busy' || MODE === 'chat-steering' || MODE === 'guide' || PROMPTED
 
 const CHAT: ChatDetail = {
   id: 'c1',
@@ -623,33 +653,45 @@ const app: AppStateDTO = {
 
 // ----------------------------------------------------------- sheets' input
 
+// Shaped as permission.go requestApproval sends them, after adoptPermission:
+// an attached request gets its card's title and kind.
 const PERMISSION_BASH: ACPPermissionRequest = {
   id: 'perm-1',
   sessionId: 'acp-1',
   chatId: 'c1',
-  title: 'bash {"command":"npm run lint -- --fix"}',
+  toolCallId: 'call_lint',
+  title: 'Run npm run lint -- --fix',
   toolKind: 'execute',
-  rawInput: { command: 'npm run lint -- --fix' },
-  // permission.go approvalContent: the whole command, fenced, then the reason.
+  // approvalContent: the whole command, fenced, then the reason.
   content: {
     texts: ['```sh\nnpm run lint -- --fix\n```', 'Fixes the lint errors the edit introduced.'],
     diffs: []
   },
   locations: [],
   options: [
-    { optionId: 'allow', name: 'Allow once', kind: 'allow_once' },
-    { optionId: 'always', name: 'Always allow `npm` commands', kind: 'allow_always' },
-    { optionId: 'reject', name: 'Deny', kind: 'reject_once' }
+    { optionId: 'allow-once', name: 'Allow once', kind: 'allow_once' },
+    { optionId: 'allow-always', name: 'Always allow this command', kind: 'allow_always' },
+    { optionId: 'deny', name: 'Deny', kind: 'reject_once' }
   ]
 }
 
+/** A second approval queued behind the first ("1 of 2"). */
+const PERMISSION_QUEUED: ACPPermissionRequest = {
+  ...PERMISSION_BASH,
+  id: 'perm-1b',
+  toolCallId: 'perm-4',
+  title: 'Run npm test',
+  content: { texts: ['```sh\nnpm test\n```'], diffs: [] }
+}
+
+// A file write: no "Always allow" (permission.go remembersApproval).
 const PERMISSION_DIFF: ACPPermissionRequest = {
   id: 'perm-2',
   sessionId: 'acp-1',
   chatId: 'c1',
-  title: 'file-edit {"path":"src/components/SaveButton.tsx"}',
+  toolCallId: 'call_edit',
+  title: 'Edit SaveButton.tsx',
   toolKind: 'edit',
-  rawInput: { path: `${PROJECT}/src/components/SaveButton.tsx`, old_text: OLD_BUTTON, new_text: NEW_BUTTON },
   content: {
     texts: [],
     diffs: [
@@ -663,15 +705,50 @@ const PERMISSION_DIFF: ACPPermissionRequest = {
   },
   locations: [{ path: `${PROJECT}/src/components/SaveButton.tsx` }],
   options: [
-    { optionId: 'allow', name: 'Allow once', kind: 'allow_once' },
-    { optionId: 'always', name: 'Always allow edits in this project', kind: 'allow_always' },
-    { optionId: 'reject', name: 'Deny', kind: 'reject_once' }
+    { optionId: 'allow-once', name: 'Allow once', kind: 'allow_once' },
+    { optionId: 'deny', name: 'Deny', kind: 'reject_once' }
+  ]
+}
+
+// compaction.go askCompactPermission.
+const PERMISSION_COMPACT: ACPPermissionRequest = {
+  id: 'perm-3',
+  sessionId: 'acp-1',
+  chatId: 'c1',
+  toolCallId: 'compact-1',
+  title: 'Context nearly full (~182000/200000 tokens). Compact conversation history now?',
+  toolKind: 'think',
+  content: { texts: [], diffs: [] },
+  locations: [],
+  options: [
+    { optionId: 'compact', name: 'Compact now', kind: 'allow_once' },
+    { optionId: 'continue', name: 'Continue without compacting', kind: 'reject_once' }
+  ],
+  variant: 'compact'
+}
+
+/** An approval whose session no chat claims: the modal fallback. A network
+ *  approval, as permission.go sends it with no card open. */
+const PERMISSION_ORPHAN: ACPPermissionRequest = {
+  id: 'perm-5',
+  sessionId: 'acp-gone',
+  chatId: null,
+  toolCallId: 'perm-1',
+  title: 'Fetch https://registry.npmjs.org/react',
+  toolKind: 'fetch',
+  rawInput: { command: 'network web-fetch https://registry.npmjs.org/react', reason: '' },
+  content: { texts: ['```\nnetwork web-fetch https://registry.npmjs.org/react\n```'], diffs: [] },
+  locations: [],
+  options: [
+    { optionId: 'allow-once', name: 'Allow once', kind: 'allow_once' },
+    { optionId: 'allow-always', name: 'Always allow this URL', kind: 'allow_always' },
+    { optionId: 'deny', name: 'Deny', kind: 'reject_once' }
   ]
 }
 
 const QUESTION: ACPQuestionRequest = {
   id: 'q-1',
-  version: 1,
+  version: 2,
   sessionId: 'acp-1',
   chatId: 'c1',
   context: 'Two components call SaveButton and they handle failures differently.',
@@ -687,13 +764,53 @@ const QUESTION: ACPQuestionRequest = {
           id: 'both',
           label: 'Fix both forms',
           description: 'ProfileForm also awaits the save and shows the disabled state.',
-          isRecommended: true
+          isRecommended: true,
+          preview: "<SaveButton onSave={async () => {\n  await saveProfile(values)\n}} />"
         },
         { id: 'settings', label: 'Only SettingsForm', description: 'Leave ProfileForm as it is.' }
       ]
     }
   ]
 }
+
+/** Three questions, the second a multi-select: the step indicator. */
+const QUESTION_MULTI: ACPQuestionRequest = {
+  ...QUESTION,
+  id: 'q-2',
+  questions: [
+    ...QUESTION.questions,
+    {
+      id: 'tests',
+      header: 'Tests',
+      question: 'Which tests should cover it?',
+      multiSelect: true,
+      allowCustomInput: true,
+      options: [
+        { id: 'unit', label: 'Unit tests for SaveButton', isRecommended: true },
+        { id: 'form', label: 'Form tests for both callers' },
+        { id: 'e2e', label: 'One end-to-end save', description: 'Slower, but catches the double request.' }
+      ]
+    },
+    {
+      id: 'ship',
+      header: 'Release',
+      question: 'Ship it in 2.4 or hold for 2.5?',
+      multiSelect: false,
+      allowCustomInput: false,
+      options: [
+        { id: '24', label: 'Ship in 2.4', isRecommended: true },
+        { id: '25', label: 'Hold for 2.5' }
+      ]
+    }
+  ]
+}
+
+/** Prompts waiting in chats other than the selected one: their rows say
+ *  "Needs you". */
+const BACKGROUND_PROMPTS: ACPPermissionRequest[] = [
+  { ...PERMISSION_BASH, id: 'perm-bg-1', chatId: 'm4', sessionId: 'acp-m4' },
+  { ...PERMISSION_DIFF, id: 'perm-bg-2', chatId: 'm11', sessionId: 'acp-m11' }
+]
 
 // ------------------------------------------------------------------- bridge
 
@@ -747,9 +864,18 @@ function pushEvents(): void {
   }
   push({ type: 'app-state', state: app })
   if (app.selectedSessionId) push({ type: 'chat-reset', chat: CHAT })
-  if (MODE === 'permission-bash') push({ type: 'permissions', requests: [PERMISSION_BASH] })
-  if (MODE === 'permission-diff') push({ type: 'permissions', requests: [PERMISSION_DIFF] })
+  const permissions: Record<string, ACPPermissionRequest[]> = {
+    'permission-bash': [PERMISSION_BASH, PERMISSION_QUEUED],
+    'permission-denied': [PERMISSION_BASH],
+    'permission-diff': [PERMISSION_DIFF],
+    'permission-compact': [PERMISSION_COMPACT],
+    'permission-orphan': [PERMISSION_ORPHAN],
+    'sidebar-many': BACKGROUND_PROMPTS,
+    collapsed: [{ ...PERMISSION_BASH, id: 'perm-bg-3', chatId: 'c3', sessionId: 'acp-c3' }]
+  }
+  if (permissions[MODE]) push({ type: 'permissions', requests: permissions[MODE] })
   if (MODE === 'question') push({ type: 'questions', requests: [QUESTION] })
+  if (MODE === 'question-multi') push({ type: 'questions', requests: [QUESTION_MULTI] })
   // Settings, the switcher and the menus are renderer-local state behind a
   // shortcut or a click; press it the way a user would rather than adding a
   // prop the app would never use.
@@ -760,6 +886,26 @@ function pushEvents(): void {
     document.querySelector<HTMLElement>(selector)?.click()
   }
   if (MODE === 'settings') setTimeout(() => press(','), 60)
+  // Denied once the card has armed: the request leaves the queue the way
+  // main would take it off, and the "what instead?" field is what's left.
+  if (MODE === 'permission-denied') {
+    setTimeout(() => {
+      click('[data-testid="permission-deny"]')
+      push({ type: 'permissions', requests: [] })
+    }, 850)
+  }
+  // The second question, with a pick made, the way a user gets there.
+  if (MODE === 'question-multi') {
+    setTimeout(() => {
+      click('[data-testid="question-option-both"]')
+      click('[data-testid="question-submit"]')
+    }, 850)
+    setTimeout(() => {
+      click('[data-testid="question-option-unit"]')
+      click('[data-testid="question-option-e2e"]')
+      click('[data-testid="question-option-other"]')
+    }, 900)
+  }
   if (MODE === 'switcher') setTimeout(() => press('k'), 60)
   if (MODE === 'welcome-folders') setTimeout(() => click('[data-testid="project-chip"]'), 60)
   // The tool rows open the way a reader opens them: the folded reads, the

@@ -49,7 +49,7 @@ density for looking closely.
 
 ## The app harness
 
-`app.html` mounts the real `<App/>` — sidebar, chat, composer, sheets,
+`app.html` mounts the real `<App/>` — sidebar, chat, composer, prompt cards,
 settings, onboarding — with `window.spettro` stubbed by `AppHarness.tsx`:
 `call` answers from a canned table (`getState`, `getChat`, `gitStat`, …;
 anything else resolves `null`) and the events main would push (`app-state`,
@@ -67,9 +67,9 @@ Pick the screen with `?mode=`:
 | `chat-steering` | a running turn with a message sent mid-turn, queued for the agent's next step, and the run ticker |
 | `thinking`, `thinking-paused` | the same chat with the thinking slider open over the composer: at High, and Ultra saved under Ask first (paused, offering Restricted) |
 | `chat-one` | the same chat as the only session in the sidebar |
-| `sidebar-many` | twenty sessions across three projects: pinned, archived, one working, two finished while away |
+| `sidebar-many` | twenty sessions across three projects: pinned, archived, one working, two finished while away, two waiting on an approval ("Needs you") |
 | `sidebar-menu` | the same, with a row's menu open (Rename… / Pin / Archive / Delete…) |
-| `collapsed` | the sidebar collapsed (Ctrl/Cmd+B), its reopen button leading the header |
+| `collapsed` | the sidebar collapsed (Ctrl/Cmd+B), its reopen button leading the header, dotted amber: another session needs you |
 | `switcher` | the Ctrl/Cmd+K quick switcher over many sessions |
 | `busy` | the same turn still running: a live row, the ticker ("Working… 3s · Esc to interrupt"), the todo list open above the composer (one task under way, one blocked) and the Stop button |
 | `guide` | running, with words typed: Stop steps back and "Guide" sends them to the running agent |
@@ -78,8 +78,13 @@ Pick the screen with `?mode=`:
 | `mention` | one file picked with "@" (now a chip in the text) and the menu open for a second |
 | `model-menu` | the model menu: favourites first, then each provider, capabilities in words, Manage models… |
 | `session-settings` | the settings popover: permission, the thinking slider, workflow size |
-| `permission-bash`, `permission-diff` | the approval sheet for a command and for an edit |
-| `question` | the ask-user sheet |
+| `permission-bash` | the inline approval card for a command, a second one queued ("1 of 2"), the card's row marked "Needs approval" and the todo list folded |
+| `permission-diff` | the same for an edit: the diff preview, no "Always allow" (writes aren't remembered) |
+| `permission-compact` | the compaction prompt: "This conversation is almost full", Compact now / Continue without compacting |
+| `permission-denied` | after Deny: the "Tell Spettro what to do instead" field |
+| `permission-orphan` | an approval no chat claims, in its modal fallback (focused, so its key hints show) |
+| `question` | the inline question card: context, a Recommended option with a preview, Other… |
+| `question-multi` | three questions, on the second (multi-select) with picks made and Other… open |
 | `settings` | Settings, opened the way a user does (Ctrl+,) |
 | `onboarding`, `installing`, `install-failed` | first run without a CLI |
 | `gate` | the CLI is up but no model is connected |

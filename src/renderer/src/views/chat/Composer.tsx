@@ -18,13 +18,13 @@
 // chat with the first message.
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import type { JSX } from 'react'
+import type { JSX, ReactNode } from 'react'
 import { ActivationTextarea, WorkflowHint } from './ActivationGlow'
 import type { ACPCommand, ACPConfigOption } from '@shared/acp'
 import { workflowRequested } from '@shared/workflowActivation'
 import { budgetDirectivesLive, parseBudgetDirective } from '@shared/workflowBudget'
 import type { ChatDetail } from '@shared/model'
-import { call, useApp } from '@renderer/state/store'
+import { call, useApp, useStore } from '@renderer/state/store'
 import { FOCUS_COMPOSER_EVENT } from '@renderer/state/shell'
 import { Icon } from '@renderer/design/icons'
 import ConfigBar, { nextMode } from './ConfigBar'
@@ -67,6 +67,10 @@ export type SubmitAttachment = { data: string; mimeType: string }
 interface ComposerProps {
   chat: ChatDetail
   promptSeed?: PromptSeed | null
+  /** What sits on top of the card: the chat's pending approval or question
+   *  (PromptDock). Inside the composer's column, so it shares its measure
+   *  and the transcript fades out above it. */
+  dock?: ReactNode
   /** New-session mode: there is no chat to send to yet, so the message goes
    *  to the caller instead of `send`. Returning false keeps it in the field. */
   onSubmit?: (
@@ -99,7 +103,7 @@ export function draftChat(projectPath: string): ChatDetail {
   }
 }
 
-export default function Composer({ chat, promptSeed, onSubmit }: ComposerProps): JSX.Element {
+export default function Composer({ chat, promptSeed, dock, onSubmit }: ComposerProps): JSX.Element {
   const app = useApp()
   const [draft, setDraft] = useState('')
   const [attachments, setAttachments] = useState<PendingAttachment[]>([])
@@ -117,6 +121,10 @@ export default function Composer({ chat, promptSeed, onSubmit }: ComposerProps):
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
+  // An approval or a question is up above the card (PromptDock).
+  const waitingOnUser = useStore(
+    (s) => s.permissions.some((p) => p.chatId === chat.id) || s.questions.some((q) => q.chatId === chat.id)
+  )
   const ready = app?.phase.kind === 'ready'
   const busy = chat.isBusy && !onSubmit
   const gate = workflowGate(chat.configOptions)
@@ -375,7 +383,8 @@ export default function Composer({ chat, promptSeed, onSubmit }: ComposerProps):
   return (
     <div className="composer-outer">
       <div className="composer-column">
-        {!onSubmit && <TodoList plan={chat.plan} busy={chat.isBusy} />}
+        {dock}
+        {!onSubmit && <TodoList plan={chat.plan} busy={chat.isBusy} folded={waitingOnUser} />}
 
         <div className="composer-anchor">
           {mentionVisible && (

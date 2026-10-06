@@ -7,7 +7,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ACPUsage } from '@shared/acp'
 import type { ChatDetail, GitStat } from '@shared/model'
-import { call } from '@renderer/state/store'
+import { call, useApp, useStore } from '@renderer/state/store'
 import { startNewSession, toggleSidebar, toggleTerminal, useShell } from '@renderer/state/shell'
 import { Icon } from '@renderer/design/icons'
 import InlineRename from '@renderer/views/shell/InlineRename'
@@ -88,17 +88,26 @@ export default function ChatHeader({ chat }: { chat: ChatDetail }): JSX.Element 
  *  while the sidebar is showing. */
 export function SidebarReopenButton({ withNewSession = false }: { withNewSession?: boolean }): JSX.Element | null {
   const collapsed = useShell((s) => s.sidebarCollapsed)
+  // With the sidebar away, its "Needs you" badges are too: the button says
+  // that another session is waiting on you.
+  const selectedId = useApp()?.selectedSessionId ?? null
+  const elsewhere = useStore(
+    (s) =>
+      s.permissions.some((p) => p.chatId !== null && p.chatId !== selectedId) ||
+      s.questions.some((q) => q.chatId !== null && q.chatId !== selectedId)
+  )
   if (!collapsed) return null
   return (
     <>
       <button
         type="button"
-        className="header-btn"
-        title={withShortcut('Show sidebar', 'B')}
-        aria-label="Show sidebar"
+        className="header-btn header-btn--badged"
+        title={elsewhere ? 'Show sidebar — another session needs you' : withShortcut('Show sidebar', 'B')}
+        aria-label={elsewhere ? 'Show sidebar (another session needs you)' : 'Show sidebar'}
         onClick={toggleSidebar}
       >
         <Icon name="sidebar.left" size={15} />
+        {elsewhere && <span className="header-btn-badge" aria-hidden="true" />}
       </button>
       {withNewSession && (
         <button

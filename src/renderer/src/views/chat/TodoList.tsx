@@ -44,20 +44,24 @@ export function todoSummary(entries: TodoEntry[]): string {
 
 export default function TodoList({
   plan,
-  busy
+  busy,
+  folded = false
 }: {
   plan: ACPPlanEntry[]
   busy: boolean
+  /** Something more pressing sits above it (an approval, a question): fold
+   *  to one line and leave it the room. */
+  folded?: boolean
 }): JSX.Element | null {
   // Open while the agent works, folded when it stops — unless the user has
   // said otherwise during this stretch, which holds until busy flips again.
   const [override, setOverride] = useState<boolean | null>(null)
-  useEffect(() => setOverride(null), [busy])
+  useEffect(() => setOverride(null), [busy, folded])
   const listId = useId()
   if (plan.length === 0) return null
 
   const entries = plan.map(todoEntry)
-  const open = override ?? busy
+  const open = override ?? (busy && !folded)
   const current =
     entries.find((e) => e.status === 'in_progress') ??
     entries.find((e) => e.status === 'pending' && !e.blocked)

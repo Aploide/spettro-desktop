@@ -73,6 +73,9 @@ export type IconName =
   | 'circle'
   | 'circle.lefthalf.filled'
   | 'checklist'
+  | 'questionmark.bubble'
+  | 'lock.shield'
+  | 'hand.raised'
 
 /** gearshape: eight teeth round a ring, computed once. */
 const GEAR_TEETH = Array.from({ length: 8 }, (_, i) => {
@@ -320,6 +323,30 @@ const STROKE_ICONS: Record<string, ReactNode> = {
     </>
   ),
   xmark: <path d="M4 4l8 8M12 4l-8 8" strokeWidth="1.8" />,
+  // ---- approvals and questions
+  // A question the agent puts to the user.
+  'questionmark.bubble': (
+    <>
+      <path d="M14.2 7.9a6 6 0 0 1-8.8 5.3L2 14l.9-3.2a6 6 0 1 1 11.3-2.9z" />
+      <path d="M6.7 6.4a1.6 1.6 0 1 1 2.3 1.45c-.55.25-.85.6-.85 1.15" />
+      <circle cx="8.15" cy="10.9" r="0.75" fill="currentColor" stroke="none" />
+    </>
+  ),
+  // An approval that is about no particular tool.
+  'lock.shield': (
+    <>
+      <path d="M8 1.6l5.4 2.1v4.1c0 3.3-2.2 5.8-5.4 6.8-3.2-1-5.4-3.5-5.4-6.8V3.7z" />
+      <rect x="5.9" y="7.2" width="4.2" height="3.4" rx="0.8" />
+      <path d="M6.8 7.2v-.9a1.2 1.2 0 0 1 2.4 0v.9" />
+    </>
+  ),
+  // A denied approval: the agent was told to stop there.
+  'hand.raised': (
+    <>
+      <path d="M5.2 8.6V3.9a1 1 0 0 1 2 0v3.6M7.2 7.5V2.9a1 1 0 0 1 2 0v4.6M9.2 7.5V3.6a1 1 0 0 1 2 0v5.2" />
+      <path d="M11.2 8.8V6.4a1 1 0 0 1 2 0v3.1a5 5 0 0 1-5 5h-.4a4.4 4.4 0 0 1-3.6-1.9L2.3 9.8a1 1 0 0 1 1.6-1.2l1.3 1.6" />
+    </>
+  ),
   // Try again: the counterclockwise arrow's mirror.
   'arrow.clockwise': (
     <>

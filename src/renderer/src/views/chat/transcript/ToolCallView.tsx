@@ -247,11 +247,22 @@ function OutputBlock({ command, output }: { command: string | null; output: stri
  *  place, few enough that a rewritten file can't stall the transcript. */
 const MAX_DIFF_LINES = 400
 
-function DiffView({ diff }: { diff: ToolDiff }): JSX.Element {
+/** One file's change as a unified diff. The transcript draws up to 400
+ *  lines before "Show all"; an approval card asks for a glance (30) and
+ *  says "Show full diff" instead. */
+export function DiffView({
+  diff,
+  maxLines = MAX_DIFF_LINES,
+  moreLabel
+}: {
+  diff: ToolDiff
+  maxLines?: number
+  moreLabel?: string
+}): JSX.Element {
   const [all, setAll] = useState(false)
   const unified = diffOf(diff)
   const total = diffLineCount(unified)
-  let budget = all ? Infinity : MAX_DIFF_LINES
+  let budget = all ? Infinity : maxLines
   const created = diff.oldText === null
 
   return (
@@ -285,9 +296,9 @@ function DiffView({ diff }: { diff: ToolDiff }): JSX.Element {
         })}
         </div>
       </div>
-      {!all && total > MAX_DIFF_LINES && (
+      {!all && total > maxLines && (
         <button type="button" className="tr-more" onClick={() => setAll(true)}>
-          Show all {total} lines
+          {moreLabel ?? `Show all ${total} lines`}
         </button>
       )}
     </div>

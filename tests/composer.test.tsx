@@ -50,6 +50,9 @@ const CATALOG: ModelEntry[] = [
 ]
 
 vi.mock('@renderer/state/store', () => ({
+  // No approval or question is waiting.
+  useStore: <T,>(select: (s: { permissions: never[]; questions: never[] }) => T): T =>
+    select({ permissions: [], questions: [] }),
   call: (method: string, ...args: unknown[]) => {
     calls.push([method, args])
     return Promise.resolve(method === 'listProjectFiles' ? FILES : null)

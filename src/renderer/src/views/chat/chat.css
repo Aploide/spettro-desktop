@@ -314,6 +314,23 @@
   cursor: default;
 }
 
+/* Another session is waiting on an approval or an answer (the sidebar,
+   which would say so, is collapsed). */
+.header-btn--badged {
+  position: relative;
+}
+
+.header-btn-badge {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--warning);
+  box-shadow: 0 0 0 2px var(--canvas);
+}
+
 .header-btn:hover {
   background: var(--hover-fill);
   color: var(--text-primary);

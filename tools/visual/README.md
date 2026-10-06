@@ -1,6 +1,6 @@
 # Visual harness
 
-Renders the orchestration views (workflow card, ultra swarm card, live panel)
+Renders the orchestration views (workflow card, live panel)
 against fixtures shaped exactly like the Go CLI's ACP output, then screenshots
 them offscreen. A second page mounts the whole app the same way (see "The app
 harness" below). Reviewing these views by reading the code does not work — what
@@ -24,8 +24,17 @@ and its base branch, diffs them, and comments with only the views that moved.
 
 Add a state you care about to `fixtures.ts` — especially an awkward one. The
 fixtures already cover the case that actually bit us: a finished workflow whose
-`argsJSON` the CLI overwrote with its finish payload, leaving the phase tree
-recoverable only from the rendered text.
+`argsJSON` an older CLI overwrote with its finish payload, leaving the phase
+tree recoverable only from the rendered text. The cards the current CLI sends
+are built with `tests/wire.ts` `workflowCard` (a port of `render()` and the
+`_meta` it carries), so the scenes and the tests agree on the wire: running,
+`workflow-paused` (waiting at a checkpoint), `workflow-stopped`,
+`workflow-continued` (a card a later turn took over, then its successor) and
+`workflow-detail` (every line the text can carry, read without `_meta`).
+
+The `chrome` page shows the config bar (Ultra on/off/locked, the workflow size
+chip) and the composer's glow: a lit phrase, a `+500k` budget directive with
+its hint, and the muted Ask-first variant with its "switch permission" line.
 
 ## The app harness
 

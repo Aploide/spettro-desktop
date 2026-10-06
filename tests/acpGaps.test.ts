@@ -642,6 +642,25 @@ describe('tool output', () => {
   })
 })
 
+describe('workflow cards', () => {
+  it('carry `_meta["spettro.app/workflow"]` through to the event, and nothing else of `_meta`', () => {
+    // internal/acp/workflow.go withUpdateMeta: the run's state rides on every
+    // card update. Any other tool call has no such key.
+    const meta = { version: 1, runId: 'wf_1', status: 'paused', phases: [], members: [] }
+    const card = parseToolCallEvent({
+      toolCallId: 'workflow-wf_1',
+      status: 'in_progress',
+      _meta: { 'spettro.app/workflow': meta, 'other.app/thing': 1 }
+    })
+    expect(card?.workflowMeta).toEqual(meta)
+    expect(parseToolCallEvent({ toolCallId: 'call-1', _meta: { 'other.app/thing': 1 } })?.workflowMeta).toBeUndefined()
+    // Not an object: dropped, so the renderer never has to guess at it.
+    expect(
+      parseToolCallEvent({ toolCallId: 'workflow-wf_1', _meta: { 'spettro.app/workflow': 'nope' } })?.workflowMeta
+    ).toBeUndefined()
+  })
+})
+
 describe('workflow calls for a chat with no live session', () => {
   it('name the chat’s folder instead of coming back empty', async () => {
     liveModel()

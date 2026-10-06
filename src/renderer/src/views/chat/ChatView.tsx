@@ -2,7 +2,7 @@
 // header, scrolling transcript, composer, config bar, terminal drawer.
 //
 // Two things here are not in the Swift original, and both exist because a
-// workflow or an Ultra swarm is not one tool call but a hundred. The
+// a multi-agent workflow is not one tool call but a hundred. The
 // transcript is folded first (`groupTranscript`), so a run renders as the one
 // card that owns its members instead of a wall of interleaved rows; and while
 // a run is in flight the column can split, docking a live panel on the right.

@@ -1459,9 +1459,11 @@ export class AppModel extends EventEmitter {
       // treatment.
       //
       // A *refusal* — the agent answered, and the answer was no (a JSON-RPC
-      // error; kind 'rpc'). Ultra under the "Ask first" permission level is
-      // the canonical case: the CLI will reject it every single time until
-      // Permission changes. Retrying that before the next turn achieves
+      // error; kind 'rpc'). A value the CLI does not offer (a model a provider
+      // has since dropped, say) is the canonical case: it will be rejected
+      // every single time. (Ultra under "Ask first" is not one: the CLI saves
+      // it and only suspends it, saying so in the option's description.)
+      // Retrying that before the next turn achieves
       // nothing except another notice, forever, and leaving the optimistic
       // value on screen is a lie about what the agent is running with — so we
       // roll the chip back to the value the agent actually reports and drop

@@ -706,7 +706,7 @@
 }
 
 /* Ultra: the only chip that is not a preference. Off, it is quieter than a
-   plain boolean — an amber hairline and nothing else — so an armed swarm is
+   plain boolean — an amber hairline and nothing else — so armed ultracode is
    unmistakable against it. On, it fills with --mode-yellow and glows, and the
    glyph fills with it. Locked (Permission is "Ask first") it keeps its shape
    and loses its colour: unavailable, not absent. */
@@ -853,4 +853,16 @@
 .config-menu-description {
   font-size: 11px;
   color: var(--text-secondary);
+}
+
+/* A choice's plain-words gloss ("~10 agents"), quieter than its name. */
+.config-chip-hint,
+.config-menu-hint {
+  color: var(--text-secondary);
+  font-weight: 400;
+}
+
+.config-menu-hint {
+  margin-left: 6px;
+  font-size: 12px;
 }

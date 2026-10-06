@@ -50,12 +50,12 @@ export function message(role: 'user' | 'assistant', text: string): TranscriptIte
 }
 
 /**
- * The workflow lifecycle call at `start`.
+ * The workflow lifecycle card at `start`, as an older CLI sent it: no
+ * `_meta`, an id `wf-N`.
  *
  * internal/agent/workflow_trace.go: the observer publishes the declared phase
  * list up front, from `meta`, so a host can draw the whole plan before the
- * first agent runs. internal/acp/workflow.go gives this call an id prefixed
- * `wf-`, which is how it is told apart from the model's `workflow` tool call.
+ * first agent runs. For the card the current CLI sends, see workflowCard.
  */
 export function workflowStart(o: {
   runId: string
@@ -82,11 +82,11 @@ export function workflowStart(o: {
 }
 
 /**
- * The SAME lifecycle call after it finishes.
+ * The SAME lifecycle call after it finishes, as recorded from an older CLI.
  *
- * This is the shape that makes the fold hard, and it is not a hypothetical:
+ * This is the shape that makes the text fallback necessary:
  * `chatSession.applyToolEvent` overwrites `argsJSON` on every update carrying
- * rawInput, and the CLI's finish payload is `{run_id, workflow, agents,
+ * rawInput, and that CLI's finish payload was `{run_id, workflow, agents,
  * failed, cached, tokens}` — no `phases`, no `description`. A run reloaded
  * from disk has only ever seen this version.
  */
@@ -156,53 +156,6 @@ export function member(o: {
 }
 
 /**
- * An Ultra swarm member (internal/agent/ultra.go, emitSwarmTrace).
- *
- * Deliberately carries NO run_id — swarm members have no run to name, so they
- * can only be attached to an `ultra` call by position.
- */
-export function swarmMember(o: {
-  instance: string
-  item: string
-  status?: ACPToolStatus
-  output?: string
-}): TranscriptItem {
-  return tool({
-    title: `agent ${o.instance}: ${o.item}`,
-    kind: 'think',
-    status: o.status ?? 'in_progress',
-    argsJSON: JSON.stringify({
-      agent: o.instance,
-      task: o.item,
-      parent_agent_id: 'coding',
-      swarm: true
-    }),
-    output: o.output ?? ''
-  })
-}
-
-/** The `ultra` tool call itself. */
-export function ultra(o: {
-  items: string[]
-  subagentType?: string
-  isolation?: string
-  description?: string
-  status?: ACPToolStatus
-}): TranscriptItem {
-  return tool({
-    title: 'ultra {"description":"…"}',
-    status: o.status ?? 'in_progress',
-    argsJSON: JSON.stringify({
-      description: o.description ?? '',
-      subagent_type: o.subagentType ?? 'code',
-      prompt_template: 'Do {{item}}',
-      items: o.items,
-      isolation: o.isolation ?? ''
-    })
-  })
-}
-
-/**
  * The model's invocation of the `workflow` TOOL — the script, not the run.
  *
  * Confirmed from a recorded session: this arrives as an ordinary tool call
@@ -247,8 +200,8 @@ export function scriptCall(o: {
 /**
  * A tool call made BY a sub-agent.
  *
- * internal/acp/content.go only brackets the instance onto the title when the
- * instance name contains '#' — so swarm and workflow members are attributable
+ * internal/acp/tools.go finishTitle only brackets the instance onto the title
+ * when the instance name contains '#' — so workflow members are attributable
  * and a plain delegation like `explore` is not. Verified against a recording:
  * `explore`'s own `ls` call arrives titled plainly `ls {…}`.
  */
@@ -307,6 +260,282 @@ export function renderedTree(o: {
     for (const line of o.logs) lines.push(`  ${line}`)
   }
   return lines.join('\n')
+}
+
+// ---------------------------------------------------------------------------
+// The workflow card the current CLI sends (internal/acp/workflow.go)
+// ---------------------------------------------------------------------------
+
+/** A member as acpWorkflow records it: the trace's own status word. */
+export interface CardAgent {
+  instance: string
+  task: string
+  phase?: string
+  /** "running" | "success" | "error", or any word the runtime adds. */
+  status: string
+  cached?: boolean
+}
+
+/** The fields of acpWorkflow that render() and metaView() read. */
+export interface CardRun {
+  runId: string
+  name: string
+  description?: string
+  size?: string
+  sizeAgents?: number
+  budget?: number
+  /** "", "running", "paused", "stopped", "success", "error", or unnamed. */
+  status?: string
+  checkpointId?: string
+  waiting?: string
+  stopReason?: string
+  /** Declared and phase()-noted phases, in addPhase order. */
+  phases?: { title: string; detail?: string; dynamic?: boolean }[]
+  agents?: CardAgent[]
+  logs?: string[]
+  dropped?: number
+  attach?: number
+  continuedFrom?: string
+}
+
+/** compactTokens (workflow.go): 500k, 1.5m. */
+function compact(n: number): string {
+  if (n >= 1_000_000) {
+    const s = (n / 1e6).toFixed(2).replace(/0$/, '')
+    return s.replace(/\.0$/, '') + 'm'
+  }
+  if (n >= 1_000) {
+    const s = (n / 1e3).toFixed(1).replace(/0$/, '')
+    return s.replace(/\.$/, '') + 'k'
+  }
+  return String(n)
+}
+
+/** acpWorkflow.title(). */
+export function cardTitle(run: CardRun): string {
+  let title = `workflow ${run.name}`
+  if (run.size) title += ` · ${run.size}`
+  if ((run.budget ?? 0) > 0) title += ` · budget ${compact(run.budget ?? 0)}`
+  return title
+}
+
+interface PhaseView {
+  title: string
+  detail: string
+  dynamic: boolean
+  members: CardAgent[]
+  finished: number
+  failed: number
+}
+
+/** phaseOrder() + phaseViews(): declared phases, then undeclared ones a
+ *  member named, then the "" bucket when anyone is in it. */
+function phaseViews(run: CardRun): PhaseView[] {
+  const declared = run.phases ?? []
+  const order = declared.map((p) => p.title)
+  let loose = false
+  for (const a of run.agents ?? []) {
+    if (!a.phase) loose = true
+    else if (!order.includes(a.phase)) order.push(a.phase)
+  }
+  if (loose) order.push('')
+  return order.map((title) => {
+    const info = declared.find((p) => p.title === title)
+    const members = (run.agents ?? []).filter((a) => (a.phase ?? '') === title)
+    return {
+      title,
+      detail: info?.detail ?? '',
+      dynamic: info?.dynamic ?? false,
+      members,
+      finished: members.filter((a) => a.status === 'success' || a.status === 'error').length,
+      failed: members.filter((a) => a.status === 'error').length
+    }
+  })
+}
+
+function glyph(status: string): string {
+  return status === 'success' ? '✓' : status === 'error' ? '✗' : status === 'running' ? '▶' : '·'
+}
+
+/** acpWorkflow.render(), line for line. */
+export function renderCard(run: CardRun): string {
+  let b = ''
+  if (run.description) b += run.description + '\n\n'
+  if (run.size) {
+    b += (run.sizeAgents ?? 0) > 0
+      ? `size: ${run.size} (~${run.sizeAgents} agents, a guideline)`
+      : `size: ${run.size} (no guideline)`
+    if ((run.budget ?? 0) > 0) b += ` · budget ${compact(run.budget ?? 0)} tokens`
+    b += '\n\n'
+  }
+  switch (run.status ?? '') {
+    case '':
+    case 'running':
+    case 'success':
+    case 'error':
+      break
+    case 'stopped':
+      b += '■ stopped' + (run.stopReason ? `: ${run.stopReason}` : '') + '\n\n'
+      break
+    case 'paused':
+      b += '⏸ '
+      if (run.checkpointId) b += `paused at ${run.checkpointId} — `
+      b += 'waiting for orchestrator'
+      if (run.waiting) b += `: ${run.waiting}`
+      b += '\n\n'
+      break
+    default:
+      b += `status: ${run.status}\n\n`
+  }
+  for (const p of phaseViews(run)) {
+    let title = p.title === '' ? '(no phase)' : p.title
+    if (p.dynamic) title += ' (added at runtime)'
+    if (p.members.length === 0) b += `○ ${title} — pending\n`
+    else {
+      b += `▸ ${title} — ${p.finished}/${p.members.length} done`
+      if (p.failed > 0) b += `, ${p.failed} failed`
+      b += '\n'
+    }
+    if (p.detail) b += `    ↳ ${p.detail}\n`
+    for (const a of p.members) {
+      b += `    ${glyph(a.status)} ${a.instance}  ${a.cached ? 'replayed · ' : ''}${a.task}\n`
+    }
+  }
+  if ((run.logs ?? []).length > 0) {
+    b += '\nlog:\n'
+    if ((run.dropped ?? 0) > 0) b += `  … ${run.dropped} earlier lines\n`
+    for (const line of run.logs ?? []) b += `  ${line}\n`
+  }
+  return b.replace(/\n+$/, '')
+}
+
+/** workflowMetaStatus + metaView(): the `_meta["spettro.app/workflow"]`
+ *  payload, from the same state renderCard reads. */
+export function cardMeta(
+  run: CardRun,
+  extra: { continuedIn?: string; summary?: string } = {}
+): JSON {
+  const raw = run.status ?? ''
+  const status =
+    raw === '' || raw === 'running'
+      ? 'running'
+      : raw === 'error' || raw === 'failed'
+        ? 'failed'
+        : raw === 'cancelled' || raw === 'canceled'
+          ? 'cancelled'
+          : raw
+  const meta: { [key: string]: JSON } = {
+    version: 1,
+    runId: run.runId,
+    name: run.name,
+    description: run.description ?? '',
+    size: run.size ?? '',
+    sizeAgents: run.sizeAgents ?? 0,
+    budgetTokens: run.budget ?? 0,
+    status,
+    attach: run.attach ?? 1,
+    phases: [],
+    members: [],
+    counts: { agents: 0, failed: 0, replayed: 0 },
+    logTail: run.logs ?? [],
+    droppedLogLines: run.dropped ?? 0
+  }
+  if (status === 'paused') {
+    meta['pausedAt'] = { checkpointId: run.checkpointId ?? '', message: run.waiting ?? '' }
+  }
+  if (status === 'stopped') meta['stoppedReason'] = run.stopReason ?? ''
+  if (run.continuedFrom) meta['continuedFrom'] = run.continuedFrom
+  if (extra.continuedIn) meta['continuedIn'] = extra.continuedIn
+  if (extra.summary) meta['summary'] = extra.summary
+  const phases: JSON[] = []
+  const members: JSON[] = []
+  let agents = 0
+  let failed = 0
+  let replayed = 0
+  for (const p of phaseViews(run)) {
+    const phase: { [key: string]: JSON } = {
+      title: p.title,
+      dynamic: p.dynamic,
+      done: p.finished,
+      total: p.members.length,
+      failed: p.failed
+    }
+    if (p.detail) phase['detail'] = p.detail
+    phases.push(phase)
+    for (const a of p.members) {
+      members.push({
+        instance: a.instance,
+        task: a.task,
+        phase: a.phase ?? '',
+        status:
+          a.status === 'success' ? 'done' : a.status === 'error' ? 'failed' : a.status === 'running' ? 'running' : 'pending',
+        replayed: a.cached ?? false
+      })
+      agents += 1
+      if (a.status === 'error') failed += 1
+      if (a.cached) replayed += 1
+    }
+  }
+  meta['phases'] = phases
+  meta['members'] = members
+  meta['counts'] = { agents, failed, replayed }
+  return meta
+}
+
+/** cardID(): `workflow-<run id>`, plus `-<attach>` past the first card. */
+export function cardId(run: CardRun): string {
+  const attach = run.attach ?? 1
+  return attach <= 1 ? `workflow-${run.runId}` : `workflow-${run.runId}-${attach}`
+}
+
+/**
+ * A run's card as the transcript holds it after the CLI's latest update:
+ * title, ACP status, text and (unless `meta: false`, an older CLI) the
+ * `_meta` payload. `continuedIn` builds the card an earlier turn closed when
+ * a later one took the run over (takeWorkflowLocked): completed, its text
+ * prefixed, its state left as that turn saw it. `summary` is the finish
+ * output a success or failure puts on top (finishWorkflowLocked).
+ */
+export function workflowCard(
+  run: CardRun,
+  o: { meta?: boolean; continuedIn?: string; summary?: string; rawInput?: object | null } = {}
+): TranscriptItem {
+  const status = run.status ?? 'running'
+  let acp: ACPToolStatus
+  if (o.continuedIn) acp = 'completed'
+  else if (status === 'success' || status === 'stopped') acp = 'completed'
+  else if (status === 'error' || status === 'failed' || status === 'cancelled') acp = 'failed'
+  else acp = 'in_progress'
+  let output = renderCard(run)
+  if (o.summary && status !== 'stopped') output = `${o.summary}\n\n${output}`
+  if (o.continuedIn) output = `continued in a later turn\n\n${output}`
+  const rawInput =
+    o.rawInput === undefined
+      ? {
+          run_id: run.runId,
+          workflow: run.name,
+          description: run.description ?? '',
+          origin: 'inline',
+          phases: (run.phases ?? [])
+            .filter((p) => !p.dynamic)
+            .map((p) => ({ title: p.title, detail: p.detail ?? '' })),
+          size: run.size ?? '',
+          size_agents: run.sizeAgents ?? 0,
+          budget_tokens: run.budget ?? 0
+        }
+      : o.rawInput
+  const item = tool({
+    title: cardTitle(run),
+    kind: 'think',
+    status: acp,
+    output,
+    ...(rawInput === null ? {} : { argsJSON: JSON.stringify(rawInput) }),
+    ...(o.meta === false
+      ? {}
+      : { workflow: cardMeta(run, { continuedIn: o.continuedIn, summary: o.summary }) })
+  })
+  if (item.kind === 'tool') item.tool.id = cardId(run)
+  return item
 }
 
 // ---------------------------------------------------------------------------

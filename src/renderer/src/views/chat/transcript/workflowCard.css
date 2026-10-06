@@ -35,6 +35,18 @@
   border-color: color-mix(in srgb, var(--diff-removed) 30%, transparent);
 }
 
+/* Waiting at a checkpoint: amber, like anything that needs an answer. Still
+   — a pulse here would say the run is working when it is waiting. */
+.wfc--paused {
+  border-color: color-mix(in srgb, var(--warning) 34%, transparent);
+}
+
+/* A card a later turn took over is history the card below repeats: it steps
+   back rather than competing with it. */
+.wfc--continued {
+  background: none;
+}
+
 /* ------------------------------------------------------------------------- */
 /* Header                                                                     */
 /* ------------------------------------------------------------------------- */
@@ -83,6 +95,16 @@
 .wfc--failed .wfc-mark {
   color: var(--diff-removed);
   background: color-mix(in srgb, var(--diff-removed) 15%, transparent);
+}
+
+.wfc--paused .wfc-mark {
+  color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 15%, transparent);
+}
+
+.wfc--continued .wfc-name,
+.wfc--continued .wfc-mark {
+  opacity: 0.7;
 }
 
 @keyframes wfc-pulse {
@@ -153,6 +175,17 @@
   color: color-mix(in srgb, var(--diff-removed) 82%, var(--text-primary));
 }
 
+.wfc-badge--paused {
+  background: color-mix(in srgb, var(--warning) 18%, transparent);
+  color: color-mix(in srgb, var(--warning) 78%, var(--text-primary));
+}
+
+.wfc-badge--stopped,
+.wfc-badge--continued {
+  background: color-mix(in srgb, var(--text-secondary) 14%, transparent);
+  color: var(--text-secondary);
+}
+
 .wfc-metrics {
   display: flex;
   align-items: center;
@@ -183,6 +216,22 @@
   text-overflow: ellipsis;
 }
 
+/* What the run was sized for. It trails the counts, pushed right when no
+   clock is ticking there; beside a clock it simply follows it. */
+.wfc-plan {
+  flex: 0 1 auto;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--tr-tertiary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wfc-plan--end {
+  margin-left: auto;
+}
+
 /* ------------------------------------------------------------------------- */
 /* Body                                                                       */
 /* ------------------------------------------------------------------------- */
@@ -203,6 +252,53 @@
 
 .wfc--settled .wfc-phase--pending {
   padding-bottom: var(--sp-xs);
+}
+
+/* The sentence a paused, stopped or continued run leads with: what it is
+   waiting for, why it ended, where it went. */
+.wfc-state {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 0;
+  padding: 6px var(--sp-sm);
+  border-radius: var(--rad-sm);
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--text-secondary) 7%, transparent);
+}
+
+.wfc-state .orch-glyph {
+  margin-top: 2px;
+}
+
+.wfc-state--paused {
+  background: color-mix(in srgb, var(--warning) 10%, transparent);
+}
+
+.wfc-state--stopped,
+.wfc-state--continued {
+  color: var(--text-secondary);
+}
+
+.wfc-state-arrow {
+  color: var(--text-tertiary);
+}
+
+.wfc-state-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.wfc-state-meta {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--tr-tertiary);
+  padding-top: 1px;
 }
 
 .wfc-empty {
@@ -310,6 +406,17 @@
   font-weight: 600;
   color: var(--text-primary);
   white-space: nowrap;
+}
+
+/* A phase the script added while running rather than declaring it. */
+.wfc-phasetag {
+  flex: none;
+  padding: 0 5px;
+  border-radius: 999px;
+  border: 1px solid var(--hairline);
+  font-size: 9.5px;
+  line-height: 14px;
+  color: var(--tr-tertiary);
 }
 
 .wfc-phasedetail {
@@ -430,6 +537,10 @@
   color: var(--text-secondary);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+.wfc-logline--dropped {
+  color: var(--tr-tertiary);
 }
 
 .wfc-disclose {

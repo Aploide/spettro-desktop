@@ -37,8 +37,10 @@ SCENES=(
   workflow-running
   workflow-finished
   workflow-wide
-  swarm-running
-  swarm-finished
+  workflow-paused
+  workflow-stopped
+  workflow-continued
+  workflow-detail
   mixed
   studio
   studio:empty

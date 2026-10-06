@@ -27,12 +27,21 @@
 // Same reason each phase caps its visible rows while running: when a fan-out
 // is wider than the eye can scan, the rows that survive are the ones still
 // running and the ones that failed.
+//
+// Two states are neither live nor over, and each says so in words rather than
+// with a spinner. A run *paused* at a checkpoint is waiting for Spettro to
+// answer a question it asked; a spinner there reads as hung. A card a later
+// turn *continued* is superseded by the card further down — it keeps the
+// state its turn left (usually paused), so it starts folded with "Continued
+// below" instead of waiting forever. A *stopped* run was ended on purpose and
+// says why, rather than passing for a success.
 
 import { useEffect, useState } from 'react'
 import type { JSX } from 'react'
 import type { MemberCall, OrchCounts, WorkflowPhase, WorkflowRun } from './orchestration'
-import { memberTint } from './orchestration'
-import { CountsLabel, MemberRow, ProgressMeter } from './OrchestrationBits'
+import { memberTint, sizeLabel } from './orchestration'
+import { compactTokens } from '@shared/workflowBudget'
+import { CountsLabel, MemberRow, ProgressMeter, StatusGlyph } from './OrchestrationBits'
 import { Icon, ToolRow } from './ToolCallView'
 import { SpettroSpinner } from './RunTicker'
 import './workflowCard.css'
@@ -49,9 +58,12 @@ export function WorkflowCard({ run }: { run: WorkflowRun }): JSX.Element {
   // the card keeps it closed as further updates arrive.
   const [override, setOverride] = useState<boolean | null>(null)
   const [rawOpen, setRawOpen] = useState(false)
-  const running = run.status === 'running'
+  const continued = run.continued
+  const running = run.status === 'running' && !continued
   const settled = !running
-  const open = override ?? true
+  // A continued card is history the card below repeats in full, so it starts
+  // folded; everything else starts open.
+  const open = override ?? !continued
 
   const elapsed = useElapsed(running, run.tool.timestamp)
   const finished = run.counts.done + run.counts.failed
@@ -64,14 +76,17 @@ export function WorkflowCard({ run }: { run: WorkflowRun }): JSX.Element {
   const tail = running
     ? total > 0
       ? `${finished}/${total}${elapsed === '' ? '' : ` · ${elapsed}`}`
-      : elapsed === '' ? 'dispatching…' : elapsed
-    : summaryText(run)
+      : elapsed === '' ? 'starting…' : elapsed
+    : stateDetail(run)
 
   const phases = run.phases.filter((phase) => phase.title !== '' || phase.members.length > 0)
+  const plan = planLabel(run)
+  const state = stateLine(run)
+  const tone = continued ? 'continued' : run.status
 
   return (
     <section
-      className={`wfc wfc--${run.status}${open ? ' wfc--open' : ''}${settled ? ' wfc--settled' : ''}`}
+      className={`wfc wfc--${tone}${open ? ' wfc--open' : ''}${settled ? ' wfc--settled' : ''}`}
     >
       <button
         className="wfc-head"
@@ -87,18 +102,7 @@ export function WorkflowCard({ run }: { run: WorkflowRun }): JSX.Element {
         <span className="wfc-headmain">
           <span className="wfc-titlerow">
             <span className="wfc-name">{run.name === '' ? 'workflow' : run.name}</span>
-            {running && (
-              <span className="wfc-badge wfc-badge--running">
-                <SpettroSpinner size={9} color="currentColor" />
-                running
-              </span>
-            )}
-            {run.status === 'failed' && (
-              <span className="wfc-badge wfc-badge--failed">
-                <Icon name="xmark.circle.fill" size={9} />
-                failed
-              </span>
-            )}
+            <StatusBadge run={run} />
             <span className="wfc-tail">{open ? run.description : tail}</span>
           </span>
           {open && (
@@ -113,6 +117,11 @@ export function WorkflowCard({ run }: { run: WorkflowRun }): JSX.Element {
               {/* Only the clock: the ratio beside the meter already said
                   "2/4", and printing it twice on one line was noise. */}
               {running && elapsed !== '' && <span className="wfc-readout">{elapsed}</span>}
+              {plan !== '' && (
+                <span className={`wfc-plan${running && elapsed !== '' ? '' : ' wfc-plan--end'}`}>
+                  {plan}
+                </span>
+              )}
             </span>
           )}
         </span>
@@ -124,8 +133,23 @@ export function WorkflowCard({ run }: { run: WorkflowRun }): JSX.Element {
 
       {open && (
         <div className="wfc-body" id={bodyId}>
+          {state !== '' && (
+            <p className={`wfc-state wfc-state--${tone}`}>
+              {continued ? (
+                <span className="orch-glyph wfc-state-arrow" aria-hidden="true">
+                  <Icon name="arrow.down" size={11} />
+                </span>
+              ) : (
+                <StatusGlyph status={run.status} size={11} />
+              )}
+              <span className="wfc-state-text">{state}</span>
+              {!continued && run.pausedAt !== null && run.pausedAt.checkpointId !== '' && (
+                <span className="wfc-state-meta">at {run.pausedAt.checkpointId}</span>
+              )}
+            </p>
+          )}
           {phases.length === 0 ? (
-            <p className="wfc-empty">{running ? 'waiting for the first agent…' : 'no agents ran'}</p>
+            <p className="wfc-empty">{running ? 'Waiting for the first agent…' : 'No agents ran'}</p>
           ) : (
             <div className="wfc-tree">
               {phases.map((phase, i) => (
@@ -133,7 +157,9 @@ export function WorkflowCard({ run }: { run: WorkflowRun }): JSX.Element {
               ))}
             </div>
           )}
-          {run.logs.length > 0 && <LogBlock logs={run.logs} compact={settled} />}
+          {run.logs.length > 0 && (
+            <LogBlock logs={run.logs} dropped={run.droppedLogLines} compact={settled} />
+          )}
           {run.rendered !== '' && (
             <div className="wfc-raw">
               <button
@@ -205,7 +231,12 @@ function PhaseGroup({ phase, compact }: { phase: WorkflowPhase; compact: boolean
       </span>
       <div className="wfc-phasebody">
         <div className="wfc-phasehead">
-          <span className="wfc-phasetitle">{phase.title === '' ? 'no phase' : phase.title}</span>
+          <span className="wfc-phasetitle">{phase.title === '' ? 'No phase' : phase.title}</span>
+          {phase.dynamic && (
+            <span className="wfc-phasetag" title="The workflow added this phase while it ran">
+              added
+            </span>
+          )}
           {phase.detail !== '' && <span className="wfc-phasedetail">{phase.detail}</span>}
           {state === 'pending' ? (
             <span className="wfc-phasepending">pending</span>
@@ -291,11 +322,28 @@ function MemberLine({ member }: { member: MemberCall }): JSX.Element {
  * is the record and the narration is not, so a settled card always folds it
  * away however short it is.
  */
-function LogBlock({ logs, compact }: { logs: string[]; compact: boolean }): JSX.Element {
+function LogBlock({
+  logs,
+  dropped,
+  compact
+}: {
+  logs: string[]
+  dropped: number
+  compact: boolean
+}): JSX.Element {
   const [open, setOpen] = useState(false)
+  // The CLI keeps the last 40 lines; saying how many went before keeps the
+  // tail from passing for the whole log.
+  const earlier =
+    dropped > 0 ? (
+      <span className="wfc-logline wfc-logline--dropped">
+        … {dropped} earlier {dropped === 1 ? 'line' : 'lines'}
+      </span>
+    ) : null
   if (!compact && logs.length <= LOG_INLINE_MAX) {
     return (
       <div className="wfc-log">
+        {earlier}
         {logs.map((line, i) => (
           <span key={i} className="wfc-logline">
             {line}
@@ -315,9 +363,10 @@ function LogBlock({ logs, compact }: { logs: string[]; compact: boolean }): JSX.
         <span className={`tr-chevron${open ? ' tr-chevron--open' : ''}`}>
           <Icon name="chevron.right" size={8} />
         </span>
-        log ({logs.length})
+        Log ({logs.length + dropped})
         {!open && <span className="wfc-logpeek">{logs[logs.length - 1]}</span>}
       </button>
+      {open && earlier}
       {open &&
         logs.map((line, i) => (
           <span key={i} className="wfc-logline">
@@ -338,10 +387,6 @@ function LogBlock({ logs, compact }: { logs: string[]; compact: boolean }): JSX.
  * we take the error-ish field out of whatever JSON it was, and failing that
  * the raw text — a provider's plain "429 after 3 attempts" is the case that
  * matters most and never arrives as a report.
- *
- * Deliberately duplicated in SwarmCard.tsx rather than lifted: it is ten lines
- * of card presentation, and the two cards are the only surfaces that print a
- * reason on the row.
  */
 function failureReason(member: MemberCall): string {
   if (member.status !== 'failed') return ''
@@ -369,7 +414,7 @@ function failureReason(member: MemberCall): string {
 
 function phaseState(phase: WorkflowPhase): PhaseState {
   if (phase.members.length === 0) return 'pending'
-  if (phase.counts.running > 0) return 'running'
+  if (phase.counts.running > 0 || phase.counts.pending > 0) return 'running'
   if (phase.counts.failed > 0) return 'failed'
   return 'done'
 }
@@ -387,7 +432,9 @@ function capMembers(
 ): { shown: MemberCall[]; hidden: number } {
   if (members.length <= cap) return { shown: members, hidden: 0 }
   const keep = new Set<MemberCall>()
-  for (const member of members) if (member.status === 'running') keep.add(member)
+  for (const member of members) {
+    if (member.status === 'running' || member.status === 'pending') keep.add(member)
+  }
   let budget = Math.max(cap - keep.size, 0)
   for (const status of ['failed', 'done'] as const) {
     for (const member of members) {
@@ -399,6 +446,92 @@ function capMembers(
   }
   const shown = members.filter((member) => keep.has(member))
   return { shown, hidden: members.length - shown.length }
+}
+
+/** The status pill beside the name. A finished success needs none — the
+ *  meter and the counts already say it — but every other state is spelled
+ *  out, so none of them depends on colour alone. */
+function StatusBadge({ run }: { run: WorkflowRun }): JSX.Element | null {
+  if (run.continued) {
+    return (
+      <span className="wfc-badge wfc-badge--continued">
+        <Icon name="arrow.down" size={9} />
+        Continued below
+      </span>
+    )
+  }
+  switch (run.status) {
+    case 'running':
+      return (
+        <span className="wfc-badge wfc-badge--running">
+          <SpettroSpinner size={9} color="currentColor" />
+          Running
+        </span>
+      )
+    case 'paused':
+      return (
+        <span className="wfc-badge wfc-badge--paused">
+          <Icon name="pause.circle.fill" size={9} />
+          Paused
+        </span>
+      )
+    case 'stopped':
+      return (
+        <span className="wfc-badge wfc-badge--stopped">
+          <Icon name="stop.circle.fill" size={9} />
+          Stopped
+        </span>
+      )
+    case 'failed':
+      return (
+        <span className="wfc-badge wfc-badge--failed">
+          <Icon name="xmark.circle.fill" size={9} />
+          Failed
+        </span>
+      )
+    case 'done':
+      return null
+  }
+}
+
+/**
+ * The sentence for a run that is neither working nor finished, '' otherwise.
+ * "Waiting" is the paused run's whole story — the checkpoint's question is
+ * what it waits on, and Spettro (the orchestrating model) is who answers.
+ */
+function stateLine(run: WorkflowRun): string {
+  if (run.continued) return 'Continued below — this run went on in a later turn'
+  if (run.status === 'paused') {
+    const message = run.pausedAt?.message ?? ''
+    return message === '' ? 'Waiting for Spettro to continue it' : `Waiting — ${message}`
+  }
+  if (run.status === 'stopped') {
+    return run.stoppedReason === '' ? 'Stopped' : `Stopped — ${run.stoppedReason}`
+  }
+  return ''
+}
+
+/** The folded card's one line beside its badge: the badge already names the
+ *  state, so this is what it is about — the question a paused run asks, why
+ *  a stopped one stopped, what a finished one concluded. */
+function stateDetail(run: WorkflowRun): string {
+  if (run.continued) return run.description
+  if (run.status === 'paused') {
+    const message = run.pausedAt?.message ?? ''
+    return message === '' ? 'Waiting for Spettro to continue it' : message
+  }
+  if (run.status === 'stopped') return run.stoppedReason
+  return summaryText(run)
+}
+
+/** "Large · ~30 agents · 500k token budget" — what the run was sized for, in
+ *  plain words. '' when it reported neither. */
+function planLabel(run: WorkflowRun): string {
+  const parts: string[] = []
+  const size = sizeLabel(run)
+  if (size !== '') parts.push(size)
+  if (run.budgetTokens > 0) parts.push(`${compactTokens(run.budgetTokens)} token budget`)
+  return parts.join(' · ')
 }
 
 /** The line a finished run settles to: what the CLI concluded, or — when the

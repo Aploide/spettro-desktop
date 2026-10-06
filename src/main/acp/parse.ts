@@ -316,6 +316,10 @@ export function parseToolCallEvent(value: JSONValue): ACPToolCallEvent | null {
   if (obj['rawInput'] !== undefined) event.rawInput = obj['rawInput']
   const rawOutput = parseRawOutput(obj['rawOutput'])
   if (rawOutput !== null) event.rawOutput = rawOutput
+  // Kept as it came: the renderer reads it defensively (orchestration.ts),
+  // and an object is the only shape spettro sends.
+  const workflow = objectValue(objectValue(obj['_meta'])?.['spettro.app/workflow'])
+  if (workflow) event.workflowMeta = workflow
   return event
 }
 

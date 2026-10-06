@@ -7,8 +7,10 @@
 // chat with the first message.
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { ActivationTextarea } from './ActivationGlow'
-import type { ACPCommand } from '@shared/acp'
+import { ActivationTextarea, WorkflowHint } from './ActivationGlow'
+import type { ACPCommand, ACPConfigOption } from '@shared/acp'
+import { workflowRequested } from '@shared/workflowActivation'
+import { budgetDirectivesLive, parseBudgetDirective } from '@shared/workflowBudget'
 import type { ChatDetail } from '@shared/model'
 import { call, useApp } from '@renderer/state/store'
 import { FOCUS_COMPOSER_EVENT } from '@renderer/state/shell'
@@ -81,6 +83,13 @@ export default function Composer({ chat, promptSeed, onSubmit }: ComposerProps):
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const ready = app?.phase.kind === 'ready'
+  const gate = workflowGate(chat.configOptions)
+  const requested = workflowRequested(draft)
+  const budgets = budgetDirectivesLive(draft, gate.ultraOn && !gate.askFirst)
+  const budget = budgets ? parseBudgetDirective(draft) : null
+  // The message asks for workflows (or carries a budget for the standing
+  // Ultra) while Ask first means none will run.
+  const pausedByAskFirst = gate.askFirst && (requested || (gate.ultraOn && budget !== null))
   const matching = matchingCommands(draft, chat.commands)
   const paletteVisible = matching.length > 0 && focused
 
@@ -296,6 +305,8 @@ export default function Composer({ chat, promptSeed, onSubmit }: ComposerProps):
           onPaste={onPaste}
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}
+          budgets={budgets}
+          muted={gate.askFirst}
         />
 
         <div className="composer-options-row">
@@ -342,8 +353,40 @@ export default function Composer({ chat, promptSeed, onSubmit }: ComposerProps):
           )}
         </div>
       </div>
+      <WorkflowHint
+        pausedByAskFirst={pausedByAskFirst}
+        budgetTokens={budget}
+        onSwitchPermission={
+          gate.canRestrict && !onSubmit
+            ? () => void call('setSelectOption', chat.id, 'permission', 'restricted')
+            : undefined
+        }
+      />
     </div>
   )
+}
+
+/**
+ * What the session's options say about workflows: whether Ultra is on, and
+ * whether the "Ask first" permission level is holding every workflow back
+ * (the CLI refuses them there — internal/agent/workflow.go). `canRestrict` is
+ * whether the permission option offers the level that lifts it.
+ */
+function workflowGate(options: ACPConfigOption[]): {
+  ultraOn: boolean
+  askFirst: boolean
+  canRestrict: boolean
+} {
+  const ultra = options.find((o) => o.id === 'ultra')
+  const permission = options.find((o) => o.id === 'permission')
+  const kind = permission?.kind
+  const choices =
+    kind?.type === 'select' ? kind.groups.flatMap((g) => g.options).concat(kind.flat) : []
+  return {
+    ultraOn: ultra?.kind.type === 'boolean' && ultra.kind.currentValue,
+    askFirst: kind?.type === 'select' && kind.currentValue === 'ask-first',
+    canRestrict: choices.some((c) => c.value === 'restricted')
+  }
 }
 
 // ---------------------------------------------------------------------------

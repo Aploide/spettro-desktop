@@ -585,6 +585,7 @@ export class ChatSession {
       if (images.length > 0) tool.images = images
       if (event.rawOutput !== undefined) tool.rawOutput = event.rawOutput
       if (argsJSON !== undefined) tool.argsJSON = argsJSON
+      if (event.workflowMeta !== undefined) tool.workflow = structuredClone(event.workflowMeta)
       this.emitItem(existing)
       return
     }
@@ -603,6 +604,7 @@ export class ChatSession {
     if (images.length > 0) tool.images = images
     if (event.rawOutput !== undefined) tool.rawOutput = event.rawOutput
     if (argsJSON !== undefined) tool.argsJSON = argsJSON
+    if (event.workflowMeta !== undefined) tool.workflow = structuredClone(event.workflowMeta)
     const item: TranscriptItem = { kind: 'tool', tool }
     this.items.push(item)
     this.emitItem(item)

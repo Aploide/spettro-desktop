@@ -1,9 +1,10 @@
 // ChatSession owns the transcript mutations the whole app is downstream of.
 // One of them — applyToolEvent's argsJSON overwrite — is the direct cause of a
-// finished workflow losing its phase plan, which is why orchestration.ts has
-// a text-recovery path at all. Pinning that behaviour here means the day
-// somebody "fixes" it, the fold's fallback stops being load-bearing on
-// purpose rather than by accident.
+// finished workflow (from an older CLI) losing its phase plan, which is why
+// orchestration.ts has a text-recovery path at all. Pinning that behaviour
+// here means the day somebody "fixes" it, the fold's fallback stops being
+// load-bearing on purpose rather than by accident. The current CLI sends the
+// whole run as `_meta` on every card update, which is kept whole.
 
 import { describe, expect, it } from 'vitest'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
@@ -58,8 +59,8 @@ describe('applyToolEvent', () => {
 
   it('OVERWRITES argsJSON whenever an update carries rawInput', () => {
     // This is the behaviour orchestration.ts has to work around, and it is
-    // load-bearing that it stays documented: the CLI's workflow finish update
-    // sends a completely different payload, so a finished run's `phases` and
+    // load-bearing that it stays documented: an older CLI's workflow finish
+    // update sent a completely different payload, so a finished run's `phases` and
     // `description` are gone from here and can only be recovered from the
     // rendered text. If this ever stops being true, that fallback becomes
     // dead weight rather than the only thing holding the card up.
@@ -84,6 +85,25 @@ describe('applyToolEvent', () => {
     )
     expect(toolAt(s).argsJSON).not.toContain('phases')
     expect(toolAt(s).argsJSON).toContain('agents')
+  })
+
+  it('keeps a workflow card’s metadata, replaced whole by each update that carries it', () => {
+    // internal/acp/workflow.go sends the run's full state on every update, so
+    // the latest one is the truth; an update without it (none, today) must
+    // not erase it.
+    const s = session()
+    s.applyToolEvent(
+      toolEvent({ toolCallId: 'workflow-wf_1', title: 'workflow audit', workflowMeta: { version: 1, status: 'running' } }),
+      true
+    )
+    expect(toolAt(s).workflow).toEqual({ version: 1, status: 'running' })
+    s.applyToolEvent(
+      toolEvent({ toolCallId: 'workflow-wf_1', workflowMeta: { version: 1, status: 'paused' } }),
+      false
+    )
+    expect(toolAt(s).workflow).toEqual({ version: 1, status: 'paused' })
+    s.applyToolEvent(toolEvent({ toolCallId: 'workflow-wf_1', status: 'completed' }), false)
+    expect(toolAt(s).workflow).toEqual({ version: 1, status: 'paused' })
   })
 
   it('keeps two different tool calls apart', () => {

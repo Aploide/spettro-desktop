@@ -103,3 +103,71 @@ textarea.glow-input::selection {
     animation: none;
   }
 }
+
+/* Under "Ask first" workflows do not run, so the phrase is marked but not
+   lit: the text colour, still, with a dotted underline that says "this is the
+   phrase" without the shimmer that says "this is armed". The hint under the
+   composer says why. */
+.glow.glow--muted {
+  background-image: none;
+  color: var(--text-secondary);
+  -webkit-text-fill-color: currentColor;
+  font-weight: 600;
+  text-decoration: underline dotted color-mix(in srgb, var(--text-secondary) 70%, transparent);
+  text-underline-offset: 3px;
+  animation: none;
+}
+
+/* The line under the composer that explains a lit (or muted) phrase. Small
+   and quiet: it annotates the field, it is not a banner. */
+.workflow-hint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 22px;
+  padding: 4px var(--sp-md) 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text-secondary);
+}
+
+.workflow-hint > svg {
+  flex: none;
+  color: var(--text-tertiary);
+}
+
+.workflow-hint--paused > svg {
+  color: var(--warning);
+}
+
+.workflow-hint-text {
+  min-width: 0;
+}
+
+.workflow-hint-strong {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.workflow-hint-action {
+  flex: none;
+  margin-left: 2px;
+  padding: 2px 8px;
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  background: var(--surface-raised);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.workflow-hint-action:hover {
+  background: var(--hover-fill);
+}
+
+.workflow-hint-action:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 70%, transparent);
+  outline-offset: 2px;
+}

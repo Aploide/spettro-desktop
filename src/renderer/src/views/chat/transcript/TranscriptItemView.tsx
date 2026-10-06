@@ -6,8 +6,8 @@
 //
 // Since the transcript is folded before it is drawn (orchestration.ts), the
 // unit ChatView actually hands us is a *row*, not an item: a row can be a
-// plain transcript entry, a whole workflow / swarm run that swallowed its
-// members, or a lone sub-agent that swallowed the tools it ran. Keeping that
+// plain transcript entry, a whole workflow run that swallowed its members,
+// or a lone sub-agent that swallowed the tools it ran. Keeping that
 // second dispatch here rather than in ChatView is deliberate — ChatView is
 // about layout, and the question "what does this row look like" already has
 // exactly one home.
@@ -21,7 +21,6 @@ import { subAgentCall } from './toolPresentation'
 import { ActivationText } from '../ActivationGlow'
 import type { MemberCall, TranscriptRow } from './orchestration'
 import { ScriptCallRow } from './OrchestrationBits'
-import { SwarmCard } from './SwarmCard'
 import { WorkflowCard } from './WorkflowCard'
 import './transcript.css'
 
@@ -39,11 +38,7 @@ export function TranscriptRowView({ row }: { row: TranscriptRow }): JSX.Element 
     case 'item':
       return <TranscriptItemView item={row.item} />
     case 'run':
-      return row.run.kind === 'workflow' ? (
-        <WorkflowCard run={row.run} />
-      ) : (
-        <SwarmCard run={row.run} />
-      )
+      return <WorkflowCard run={row.run} />
     case 'agent':
       return <StandaloneAgentRow member={row.member} />
     case 'script':

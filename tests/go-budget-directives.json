@@ -1,0 +1,245 @@
+{
+ "cases": {
+  "": {
+   "spans": [],
+   "tokens": null
+  },
+  "(+500k)": {
+   "spans": [],
+   "tokens": null
+  },
+  "+.5k": {
+   "spans": [],
+   "tokens": null
+  },
+  "+0.0001k tiny": {
+   "spans": [
+    [
+     0,
+     8
+    ]
+   ],
+   "tokens": null
+  },
+  "+0.5k half": {
+   "spans": [
+    [
+     0,
+     5
+    ]
+   ],
+   "tokens": 500
+  },
+  "+0k zero": {
+   "spans": [
+    [
+     0,
+     3
+    ]
+   ],
+   "tokens": null
+  },
+  "+1.5.5m": {
+   "spans": [],
+   "tokens": null
+  },
+  "+10K upper": {
+   "spans": [
+    [
+     0,
+     4
+    ]
+   ],
+   "tokens": 10000
+  },
+  "+2\tk tab": {
+   "spans": [
+    [
+     0,
+     4
+    ]
+   ],
+   "tokens": 2000
+  },
+  "+2 M spaced": {
+   "spans": [
+    [
+     0,
+     4
+    ]
+   ],
+   "tokens": 2000000
+  },
+  "+2M": {
+   "spans": [
+    [
+     0,
+     3
+    ]
+   ],
+   "tokens": 2000000
+  },
+  "+5": {
+   "spans": [],
+   "tokens": null
+  },
+  "+500 k": {
+   "spans": [
+    [
+     0,
+     6
+    ]
+   ],
+   "tokens": 500000
+  },
+  "+5000m capped": {
+   "spans": [
+    [
+     0,
+     6
+    ]
+   ],
+   "tokens": 1000000000
+  },
+  "+500k at the start": {
+   "spans": [
+    [
+     0,
+     5
+    ]
+   ],
+   "tokens": 500000
+  },
+  "+500k, +1m twice": {
+   "spans": [
+    [
+     0,
+     5
+    ],
+    [
+     7,
+     10
+    ]
+   ],
+   "tokens": 1000000
+  },
+  "+500k,+1m": {
+   "spans": [
+    [
+     0,
+     5
+    ]
+   ],
+   "tokens": 500000
+  },
+  "+500k.": {
+   "spans": [
+    [
+     0,
+     5
+    ]
+   ],
+   "tokens": 500000
+  },
+  "+500k_": {
+   "spans": [],
+   "tokens": null
+  },
+  "+500kb is not a unit": {
+   "spans": [],
+   "tokens": null
+  },
+  "+500kk": {
+   "spans": [],
+   "tokens": null
+  },
+  "+１k fullwidth": {
+   "spans": [],
+   "tokens": null
+  },
+  "C++ and +5": {
+   "spans": [],
+   "tokens": null
+  },
+  "a+500k salary": {
+   "spans": [],
+   "tokens": null
+  },
+  "budget +1.5m please": {
+   "spans": [
+    [
+     7,
+     12
+    ]
+   ],
+   "tokens": 1500000
+  },
+  "first +100k then +200k": {
+   "spans": [
+    [
+     6,
+     11
+    ],
+    [
+     17,
+     22
+    ]
+   ],
+   "tokens": 200000
+  },
+  "hello": {
+   "spans": [],
+   "tokens": null
+  },
+  "line\n+500k": {
+   "spans": [
+    [
+     5,
+     10
+    ]
+   ],
+   "tokens": 500000
+  },
+  "nbsp +5k": {
+   "spans": [],
+   "tokens": null
+  },
+  "tab\t+5k": {
+   "spans": [
+    [
+     4,
+     7
+    ]
+   ],
+   "tokens": 5000
+  },
+  "ultracode +500k: review": {
+   "spans": [
+    [
+     10,
+     15
+    ]
+   ],
+   "tokens": 500000
+  },
+  "use a workflow +250k": {
+   "spans": [
+    [
+     15,
+     20
+    ]
+   ],
+   "tokens": 250000
+  },
+  "x +3.25m y": {
+   "spans": [
+    [
+     2,
+     8
+    ]
+   ],
+   "tokens": 3250000
+  }
+ },
+ "pattern": "(?:^|\\s)(\\+(\\d+(?:\\.\\d+)?)\\s?([kKmM]))\\b"
+}

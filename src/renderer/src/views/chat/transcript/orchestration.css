@@ -69,6 +69,18 @@
   color: var(--diff-removed);
 }
 
+/* Waiting at a checkpoint: amber, the colour of "needs an answer", and still
+   — anything that moved here would say the run is working. */
+.orch-glyph--paused {
+  color: var(--warning);
+}
+
+/* Ended on purpose and not yet started: both neutral, neither a result. */
+.orch-glyph--stopped,
+.orch-glyph--pending {
+  color: var(--text-tertiary);
+}
+
 /* ------------------------------------------------------------------------- */
 /* Counts label                                                               */
 /* ------------------------------------------------------------------------- */

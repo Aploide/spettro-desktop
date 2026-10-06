@@ -5,8 +5,8 @@
 // them precise but circular: if we misread the CLI, the fixtures encode the
 // same misreading and the harness happily renders the wrong thing. This drives
 // `spettro --acp` for one real turn and writes every session/update to JSONL,
-// so `node tools/visual/fixtures-from-live.cjs` can turn a genuine workflow or
-// swarm run into a scene.
+// so `node tools/visual/fixtures-from-live.cjs` can turn a genuine workflow
+// run into a scene.
 //
 //   node tools/visual/capture-live.cjs <cwd> <out.jsonl> "<prompt>"
 

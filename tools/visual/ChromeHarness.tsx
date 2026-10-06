@@ -8,7 +8,11 @@
 import type { JSX } from 'react'
 import { createRoot } from 'react-dom/client'
 import ConfigBar from '@renderer/views/chat/ConfigBar'
-import { ActivationText, ActivationTextarea } from '@renderer/views/chat/ActivationGlow'
+import {
+  ActivationText,
+  ActivationTextarea,
+  WorkflowHint
+} from '@renderer/views/chat/ActivationGlow'
 import type { ACPConfigOption } from '@shared/acp'
 import type { ChatDetail } from '@shared/model'
 import '@renderer/design/theme.css'
@@ -21,7 +25,7 @@ import './harness.css'
   call: () => Promise.resolve(null)
 }
 
-function options(o: { permission: string; ultra: boolean }): ACPConfigOption[] {
+function options(o: { permission: string; ultra: boolean; size?: string }): ACPConfigOption[] {
   return [
     {
       id: 'mode',
@@ -70,7 +74,32 @@ function options(o: { permission: string; ultra: boolean }): ACPConfigOption[] {
         flat: [{ value: 'high', name: 'High' }]
       }
     },
-    { id: 'ultra', name: 'Ultra', kind: { type: 'boolean', currentValue: o.ultra } }
+    {
+      id: 'ultra',
+      name: 'Ultra',
+      // config_options.go ultraConfigOption: the note comes with Ask first.
+      description:
+        o.ultra && o.permission === 'ask-first'
+          ? 'Ultracode: substantive tasks run as dynamic workflows (suspended under Ask first — workflows need Restricted or YOLO)'
+          : 'Ultracode: substantive tasks run as dynamic workflows',
+      kind: { type: 'boolean', currentValue: o.ultra }
+    },
+    {
+      id: 'workflow_size',
+      name: 'Workflow size',
+      description: 'How many agents a workflow run plans around (a guideline, not a cap)',
+      kind: {
+        type: 'select',
+        currentValue: o.size ?? 'medium',
+        groups: [],
+        flat: [
+          { value: 'small', name: 'Small', description: '~5 agents per run · fan-outs up to ~5 wide' },
+          { value: 'medium', name: 'Medium', description: '~10 agents per run · fan-outs up to ~10 wide' },
+          { value: 'large', name: 'Large', description: '~30 agents per run · fan-outs up to ~30 wide' },
+          { value: 'unbounded', name: 'Unbounded', description: 'no agent guideline · fan-outs up to ~50 wide' }
+        ]
+      }
+    }
   ]
 }
 
@@ -99,6 +128,7 @@ const PHRASES = [
   'use a workflow to modernise these handlers',
   'fan this out across sub-agents',
   'can you orchestrate this with subagents please',
+  'use a workflow to port the handlers +1.5m',
   'check our deploy workflow and .github/workflows — neither should light up'
 ]
 
@@ -119,9 +149,14 @@ function Harness(): JSX.Element {
           <ConfigBar chat={chat(options({ permission: 'yolo', ultra: true }))} />
         </div>
       </Row>
-      <Row label="Ultra off">
+      <Row label="Ultra off · workflow size Large">
         <div className="hz-bar">
-          <ConfigBar chat={chat(options({ permission: 'yolo', ultra: false }))} />
+          <ConfigBar chat={chat(options({ permission: 'yolo', ultra: false, size: 'large' }))} />
+        </div>
+      </Row>
+      <Row label="Workflow size Unbounded">
+        <div className="hz-bar">
+          <ConfigBar chat={chat(options({ permission: 'yolo', ultra: false, size: 'unbounded' }))} />
         </div>
       </Row>
       <Row label="Ultra locked (Ask first)">
@@ -138,6 +173,36 @@ function Harness(): JSX.Element {
             value={'ultracode: review the pending changes and use a workflow for the port'}
             onChange={() => undefined}
           />
+        </div>
+      </Row>
+
+      <Row label="Composer — a budget directive beside the keyword, and what it sets">
+        <div>
+          <div className="composer-card hz-composer">
+            <ActivationTextarea
+              className="composer-input"
+              rows={2}
+              value={'ultracode +500k: review the pending changes'}
+              onChange={() => undefined}
+              budgets
+            />
+          </div>
+          <WorkflowHint pausedByAskFirst={false} budgetTokens={500_000} />
+        </div>
+      </Row>
+
+      <Row label="Composer — Ask first: the phrase is muted and the line says why">
+        <div>
+          <div className="composer-card hz-composer">
+            <ActivationTextarea
+              className="composer-input"
+              rows={2}
+              value={'ultracode: review the pending changes'}
+              onChange={() => undefined}
+              muted
+            />
+          </div>
+          <WorkflowHint pausedByAskFirst budgetTokens={null} onSwitchPermission={() => undefined} />
         </div>
       </Row>
 

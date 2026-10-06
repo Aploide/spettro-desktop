@@ -56,6 +56,10 @@ export type IconName =
   | 'desktopcomputer'
   | 'star'
   | 'star.fill'
+  | 'pause.circle.fill'
+  | 'stop.circle.fill'
+  | 'circle.dashed'
+  | 'arrow.down'
 
 /** gearshape: eight teeth round a ring, computed once. */
 const GEAR_TEETH = Array.from({ length: 8 }, (_, i) => {
@@ -163,9 +167,9 @@ const STROKE_ICONS: Record<string, ReactNode> = {
       <path d="M3.6 11.6V7.6h8.8v4" />
     </>
   ),
-  // Ultra: the fan-out that hits all at once.
+  // Ultra: substantial tasks run as multi-agent workflows.
   bolt: <path d="M9.3 1.5L3.6 9.3h3.5l-.4 5.2 5.7-7.8H8.9z" />,
-  // Worktree isolation: each member on its own branch, merged back after.
+  // A git branch: one line splitting off another.
   'arrow.triangle.branch': (
     <>
       <circle cx="4.4" cy="3.4" r="1.8" />
@@ -175,6 +179,11 @@ const STROKE_ICONS: Record<string, ReactNode> = {
       <path d="M11.6 5.2v1.5a3.4 3.4 0 0 1-3.4 3.4H4.4" />
     </>
   ),
+  // A workflow member the CLI reports in a state it does not name: not yet
+  // running, so it must not read as a spinner or a finished dot.
+  'circle.dashed': <circle cx="8" cy="8" r="5.6" strokeDasharray="2.2 2.2" />,
+  // "Continued below": the run went on in a card further down.
+  'arrow.down': <path d="M8 2.75v10.5M3.75 9 8 13.25 12.25 9" />,
   // Replayed from the resume journal rather than re-run.
   'arrow.counterclockwise': (
     <>
@@ -282,6 +291,20 @@ const FILLED_ICONS: Record<string, ReactNode> = {
     <>
       <circle cx="8" cy="8" r="7" fill="currentColor" stroke="none" />
       <path d="M4.9 8.2l2.1 2.2 4.1-4.6" stroke="var(--canvas)" strokeWidth="1.7" />
+    </>
+  ),
+  // A run waiting at a checkpoint: alive, idle, not hung.
+  'pause.circle.fill': (
+    <>
+      <circle cx="8" cy="8" r="7" fill="currentColor" stroke="none" />
+      <path d="M6.4 5.4v5.2M9.6 5.4v5.2" stroke="var(--canvas)" strokeWidth="1.6" />
+    </>
+  ),
+  // A run ended on purpose: neither a tick nor a cross.
+  'stop.circle.fill': (
+    <>
+      <circle cx="8" cy="8" r="7" fill="currentColor" stroke="none" />
+      <rect x="5.6" y="5.6" width="4.8" height="4.8" rx="0.8" fill="var(--canvas)" stroke="none" />
     </>
   ),
   'xmark.circle.fill': (

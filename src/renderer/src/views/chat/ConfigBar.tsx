@@ -6,18 +6,21 @@
 //
 // Ultra is the one option that gets a look of its own, because it is the one
 // option that changes what a turn *is*: everything else picks a model or a
-// mode, Ultra fans a prompt out across a swarm of parallel sub-agents. Drawn
-// as an anonymous boolean beside "Auto-compact" it reads as a preference, so
-// here it is amber and filled when armed — the most charged thing in the bar.
+// mode, Ultra (ultracode) runs substantial tasks as multi-agent workflows.
+// Drawn as an anonymous boolean it reads as a preference, so here it is amber
+// and filled when armed — the most charged thing in the bar.
 //
-// It is also the one option the agent can refuse. A swarm runs many agents at
-// once and per-action approval prompts would flood the client, so the CLI
-// rejects enabling Ultra while Permission is "Ask first"
+// Workflows run many agents at once, and per-action approval prompts would
+// flood the user, so they need the Restricted or YOLO permission level
 // (internal/acp/config_options.go). The chip shows that as an unavailable
 // control with the reason attached rather than hiding itself: a control that
 // disappears when you are not allowed to use it is a control nobody ever
-// learns exists. The special-casing keys off the advertised option ids only —
-// if the CLI stops sending `ultra`, the bar simply stops drawing it.
+// learns exists. (The thinking slider replaces this chip; until then it keeps
+// its lock.) The special-casing keys off the advertised option ids only — if
+// the CLI stops sending `ultra`, the bar simply stops drawing it.
+//
+// Workflow size is a plain select, but its tiers are labelled in agents ("~10
+// agents") rather than by the tier's bare name, which says nothing on its own.
 
 import { useCallback, useRef, useState } from 'react'
 import type { JSX } from 'react'
@@ -30,13 +33,17 @@ import Popover from '@renderer/views/common/Popover'
 /** The CLI's option ids (internal/acp/config_options.go). */
 const ULTRA_ID = 'ultra'
 const PERMISSION_ID = 'permission'
-/** The permission level a swarm cannot run under. */
+const WORKFLOW_SIZE_ID = 'workflow_size'
+/** The permission level workflows cannot run under. */
 const ASK_FIRST = 'ask-first'
 
-/** Why the Ultra chip is unavailable — the CLI's own rejection text, so the
- *  tooltip and the notice the agent sends say the same thing. */
+/** What Ultra is, in the words the rest of the app uses for it. */
+const ULTRA_DESCRIPTION =
+  'Ultracode — substantial tasks run as multi-agent workflows (uses more tokens)'
+
+/** Why the Ultra chip is unavailable. */
 const ULTRA_LOCKED_REASON =
-  'Ultra requires the Restricted or YOLO permission level — change Permission first'
+  'Workflows need the Restricted or YOLO permission level — change Permission first'
 
 export default function ConfigBar({ chat }: { chat: ChatDetail }): JSX.Element {
   // Read the sibling permission select rather than remembering a level of our
@@ -53,6 +60,7 @@ export default function ConfigBar({ chat }: { chat: ChatDetail }): JSX.Element {
             key={option.id}
             option={option}
             kind={option.kind}
+            hint={option.id === WORKFLOW_SIZE_ID ? workflowSizeHint : undefined}
             onSelect={(value) => void call('setSelectOption', chat.id, option.id, value)}
           />
         ) : option.id === ULTRA_ID ? (
@@ -90,10 +98,14 @@ interface SelectKind {
 function SelectChip({
   option,
   kind,
+  hint,
   onSelect
 }: {
   option: ACPConfigOption
   kind: SelectKind
+  /** A short plain-words gloss for a choice, shown after its name on the
+   *  chip and in the menu. */
+  hint?: (choice: ACPConfigChoice) => string
   onSelect: (value: string) => void
 }): JSX.Element {
   const [open, setOpen] = useState(false)
@@ -108,6 +120,8 @@ function SelectChip({
   // matches the agent that's running.
   const isMode = (option.category ?? option.id) === 'mode'
   const tint = isMode && kind.currentValue ? modeColor(kind.currentValue) : undefined
+  const current = currentChoice(kind)
+  const currentHint = current && hint ? hint(current) : ''
 
   return (
     <div className="chip-wrap">
@@ -120,7 +134,10 @@ function SelectChip({
         onClick={() => setOpen((o) => !o)}
       >
         <CategoryIcon category={option.category ?? option.id} />
-        <span className="config-chip-label">{currentLabel(kind)}</span>
+        <span className="config-chip-label">
+          {currentLabel(kind)}
+          {currentHint !== '' && <span className="config-chip-hint"> · {currentHint}</span>}
+        </span>
         <ChevronDownIcon />
       </button>
       <Popover
@@ -147,7 +164,12 @@ function SelectChip({
                   {choice.value === kind.currentValue && <CheckIcon />}
                 </span>
                 <span className="config-menu-texts">
-                  <span className="config-menu-name">{choice.name}</span>
+                  <span className="config-menu-name">
+                    {choice.name}
+                    {hint && hint(choice) !== '' && (
+                      <span className="config-menu-hint">{hint(choice)}</span>
+                    )}
+                  </span>
                   {choice.description && (
                     <span className="config-menu-description">{choice.description}</span>
                   )}
@@ -166,8 +188,33 @@ function SelectChip({
 function currentLabel(kind: SelectKind): string {
   const value = kind.currentValue
   if (value == null) return '—'
+  return currentChoice(kind)?.name ?? value
+}
+
+function currentChoice(kind: SelectKind): ACPConfigChoice | undefined {
+  const value = kind.currentValue
+  if (value == null) return undefined
   const all = kind.groups.flatMap((g) => g.options).concat(kind.flat)
-  return all.find((c) => c.value === value)?.name ?? value
+  return all.find((c) => c.value === value)
+}
+
+/** The agent guideline of each size tier, for a CLI whose descriptions do
+ *  not carry it (internal/workflow/size.go SizeTiers). */
+const WORKFLOW_SIZE_AGENTS: Record<string, number> = { small: 5, medium: 10, large: 30 }
+
+/**
+ * "~10 agents" / "No limit" for a workflow size tier. Read from the tier's own
+ * description ("~10 agents per run · fan-outs up to ~20 wide") so it follows
+ * the CLI if a tier is retuned; the table is only the fallback.
+ */
+export function workflowSizeHint(choice: ACPConfigChoice): string {
+  const described = /~(\d+) agents\b/.exec(choice.description ?? '')
+  if (described) return `~${described[1]} agents`
+  if (choice.value === 'unbounded' || /no agent guideline/.test(choice.description ?? '')) {
+    return 'No limit'
+  }
+  const known = WORKFLOW_SIZE_AGENTS[choice.value]
+  return known !== undefined ? `~${known} agents` : ''
 }
 
 // ---------------------------------------------------------------------------
@@ -202,7 +249,7 @@ function BooleanChip({
 
 /**
  * The Ultra toggle: same capsule as every other chip, amber and filled when
- * armed so the swarm never runs unannounced.
+ * armed so workflows never run unannounced.
  *
  * Locked is `aria-disabled`, not `disabled`. A `disabled` button in Chromium
  * swallows the pointer events its own tooltip needs, which would leave the
@@ -210,7 +257,7 @@ function BooleanChip({
  * it. So the chip stays focusable and hoverable, carries the reason in its
  * title, and simply does not fire.
  *
- * Turning Ultra *off* is never locked: the gate only exists to stop a swarm
+ * Turning Ultra *off* is never locked: the gate only exists to stop workflows
  * starting under per-action approvals, and a user who somehow arrived at
  * ultra-on with Permission back on "Ask first" must be able to get out.
  */
@@ -235,7 +282,15 @@ function UltraChip({
       className={className}
       aria-disabled={locked}
       aria-pressed={isOn}
-      title={locked ? ULTRA_LOCKED_REASON : (option.description ?? option.name)}
+      title={
+        locked
+          ? ULTRA_LOCKED_REASON
+          : // The CLI says so in the description when Ask first suspends a
+            // saved Ultra (config_options.go ultraConfigOption).
+            (option.description ?? '').includes('suspended')
+            ? `${ULTRA_DESCRIPTION}. Paused under Ask first — workflows need Restricted or YOLO.`
+            : ULTRA_DESCRIPTION
+      }
       onClick={() => {
         if (locked) return
         onToggle(!isOn)
@@ -290,6 +345,17 @@ function CategoryIcon({ category }: { category: string }): JSX.Element {
           />
           <rect x="6" y="7" width="4" height="3.4" rx="0.8" stroke="currentColor" strokeWidth="1.1" />
           <path d="M6.8 7V5.9a1.2 1.2 0 0 1 2.4 0V7" stroke="currentColor" strokeWidth="1.1" />
+        </svg>
+      )
+    case 'workflow_size':
+      // One agent fanning out to three: how wide a workflow plans to go.
+      return (
+        <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden>
+          <circle cx="8" cy="3.2" r="1.9" stroke="currentColor" strokeWidth="1.3" />
+          <circle cx="2.8" cy="12.6" r="1.7" stroke="currentColor" strokeWidth="1.3" />
+          <circle cx="8" cy="12.6" r="1.7" stroke="currentColor" strokeWidth="1.3" />
+          <circle cx="13.2" cy="12.6" r="1.7" stroke="currentColor" strokeWidth="1.3" />
+          <path d="M8 5.1v5.8M6.7 4.7 3.6 10.9M9.3 4.7l3.1 6.2" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round" />
         </svg>
       )
     case 'thought_level':

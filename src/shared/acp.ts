@@ -78,6 +78,10 @@ export interface ACPToolCallEvent {
   rawInput?: JSONValue
   /** `rawOutput.output` — the tool's own result text, unclipped by the card. */
   rawOutput?: string
+  /** `_meta["spettro.app/workflow"]`: a workflow card's whole state as
+   *  structure (internal/acp/workflow.go metaView), on every update a workflow
+   *  card sends. Absent from older CLIs and from every other tool call. */
+  workflowMeta?: JSONValue
   /** Plain-text output fragments from `content` blocks. */
   texts: string[]
   diffs: ACPToolDiffContent[]

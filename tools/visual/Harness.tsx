@@ -2,8 +2,8 @@
 // so a screenshot can be taken and looked at.
 //
 // It exists because these views are almost impossible to review by reading
-// the code — the whole point of the workflow card and the swarm card is what
-// they look like when twenty rows land at once, half of them still moving.
+// the code — the whole point of the workflow card is what it looks like when
+// twenty rows land at once, half of them still moving.
 // The harness mounts them against fixtures shaped exactly like the CLI's wire
 // output (fixtures.ts) so every state, including the ones that need a real
 // provider and ten minutes of waiting to reach, is one build away.
@@ -12,7 +12,6 @@ import type { JSX } from 'react'
 import { createRoot } from 'react-dom/client'
 import { groupTranscript, activeRuns } from '@renderer/views/chat/transcript/orchestration'
 import { WorkflowCard } from '@renderer/views/chat/transcript/WorkflowCard'
-import { SwarmCard } from '@renderer/views/chat/transcript/SwarmCard'
 import OrchestrationPanel from '@renderer/views/chat/OrchestrationPanel'
 import TranscriptItemView from '@renderer/views/chat/transcript/TranscriptItemView'
 import { SubAgentCallView } from '@renderer/views/chat/transcript/ToolCallView'
@@ -41,13 +40,7 @@ function SceneView({ scene }: { scene: Scene }): JSX.Element {
         <div className="hz-transcript">
           <div className="chat-transcript-inner">
             {rows.map((row) => {
-              if (row.kind === 'run') {
-                return row.run.kind === 'workflow' ? (
-                  <WorkflowCard key={row.id} run={row.run} />
-                ) : (
-                  <SwarmCard key={row.id} run={row.run} />
-                )
-              }
+              if (row.kind === 'run') return <WorkflowCard key={row.id} run={row.run} />
               if (row.kind === 'script') {
                 return <ScriptCallRow key={row.id} script={row.script} />
               }

@@ -336,8 +336,8 @@
   border-left: 1px solid var(--hairline);
 }
 
-/* A swarm has no phase header to hang the guide off, so its members sit flush
-   with the run's own meter. */
+/* Agents dispatched outside any phase have no header to hang the guide off,
+   so they sit flush with the run's own meter. */
 .orp-phase--flat > .orp-members {
   margin-top: 0;
   margin-left: 0;

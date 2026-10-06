@@ -12,8 +12,10 @@ import { describe, expect, it, beforeEach } from 'vitest'
 import {
   activeRuns,
   groupTranscript,
+  nameFromTitle,
+  parseCompactTokens,
+  parseRenderedWorkflow,
   runTitle,
-  type SwarmRun,
   type TranscriptRow,
   type WorkflowRun
 } from '@renderer/views/chat/transcript/orchestration'
@@ -25,27 +27,21 @@ import {
   renderedTree,
   resetWire,
   scriptCall,
-  swarmMember,
   tool,
-  ultra,
+  workflowCard,
   workflowFinished,
-  workflowStart
+  workflowStart,
+  type CardRun
 } from './wire'
 
 beforeEach(resetWire)
 
-function runs(rows: TranscriptRow[]): (WorkflowRun | SwarmRun)[] {
+function runs(rows: TranscriptRow[]): WorkflowRun[] {
   return rows.flatMap((row) => (row.kind === 'run' ? [row.run] : []))
 }
 
 function onlyWorkflow(rows: TranscriptRow[]): WorkflowRun {
-  const found = runs(rows).filter((r): r is WorkflowRun => r.kind === 'workflow')
-  expect(found).toHaveLength(1)
-  return found[0]
-}
-
-function onlySwarm(rows: TranscriptRow[]): SwarmRun {
-  const found = runs(rows).filter((r): r is SwarmRun => r.kind === 'swarm')
+  const found = runs(rows)
   expect(found).toHaveLength(1)
   return found[0]
 }
@@ -249,14 +245,14 @@ describe('attributing a sub-agent’s own tool calls', () => {
     // hand #12's work to #1, and the two members would swap identities in the
     // card without anything looking broken.
     const rows = groupTranscript([
-      ultra({ items: ['a', 'b'] }),
-      swarmMember({ instance: 'code#1', item: 'a' }),
-      swarmMember({ instance: 'code#12', item: 'b' }),
+      workflowStart({ runId: 'wf_1', name: 'port', phases: [{ title: 'Port' }] }),
+      member({ instance: 'code#1', task: 'a', runId: 'wf_1', workflow: 'port', phase: 'Port' }),
+      member({ instance: 'code#12', task: 'b', runId: 'wf_1', workflow: 'port', phase: 'Port' }),
       childCall('code#12', 'bash', { command: 'belongs to twelve' })
     ])
-    const swarm = onlySwarm(rows)
-    const one = swarm.members.find((m) => m.instance === 'code#1')
-    const twelve = swarm.members.find((m) => m.instance === 'code#12')
+    const members = onlyWorkflow(rows).phases[0].members
+    const one = members.find((m) => m.instance === 'code#1')
+    const twelve = members.find((m) => m.instance === 'code#12')
     expect(one?.children).toHaveLength(0)
     expect(twelve?.children).toHaveLength(1)
   })
@@ -282,56 +278,6 @@ describe('attributing a sub-agent’s own tool calls', () => {
     const run = onlyWorkflow(rows)
     expect(run.phases[0].members).toHaveLength(1)
     expect(run.phases[0].members[0].children).toHaveLength(0)
-  })
-})
-
-describe('folding an Ultra swarm', () => {
-  it('attaches members by position, since they carry no run id', () => {
-    const rows = groupTranscript([
-      ultra({ items: ['a', 'b'], subagentType: 'code' }),
-      swarmMember({ instance: 'code#1', item: 'a' }),
-      swarmMember({ instance: 'code#2', item: 'b' })
-    ])
-    expect(rows.map((r) => r.kind)).toEqual(['run'])
-    expect(onlySwarm(rows).members).toHaveLength(2)
-  })
-
-  it('keeps two swarms in one turn apart', () => {
-    const rows = groupTranscript([
-      ultra({ items: ['a'] }),
-      swarmMember({ instance: 'code#1', item: 'a' }),
-      ultra({ items: ['b', 'c'] }),
-      swarmMember({ instance: 'code#2', item: 'b' }),
-      swarmMember({ instance: 'code#3', item: 'c' })
-    ])
-    const swarms = runs(rows).filter((r): r is SwarmRun => r.kind === 'swarm')
-    expect(swarms.map((s) => s.members.length)).toEqual([1, 2])
-  })
-
-  it('counts un-launched items as pending work, not absent work', () => {
-    // Ultra ramps: five at once, then one every 700ms. A ten-item swarm spends
-    // its first seconds mostly un-launched, and a denominator that grows as
-    // members appear makes the meter run backwards.
-    const swarm = onlySwarm(
-      groupTranscript([
-        ultra({ items: ['a', 'b', 'c', 'd', 'e'] }),
-        swarmMember({ instance: 'code#1', item: 'a', status: 'completed' }),
-        swarmMember({ instance: 'code#2', item: 'b' })
-      ])
-    )
-    expect(swarm.pending).toEqual(['c', 'd', 'e'])
-    expect(swarm.counts.total).toBe(5)
-    expect(swarm.counts.done).toBe(1)
-    expect(swarm.counts.running).toBe(1)
-  })
-
-  it('reports worktree isolation and ignores any other value', () => {
-    expect(
-      onlySwarm(groupTranscript([ultra({ items: ['a'], isolation: 'worktree' })])).isolation
-    ).toBe('worktree')
-    expect(
-      onlySwarm(groupTranscript([ultra({ items: ['a'], isolation: 'nonsense' })])).isolation
-    ).toBe('')
   })
 })
 
@@ -378,7 +324,6 @@ describe('the workflow tool call that carries the script', () => {
       message('user', 'go'),
       workflowStart({ runId: 'wf_1', name: 'a', phases: [{ title: 'P' }] }),
       workflowStart({ runId: 'wf_2', name: 'b', phases: [{ title: 'P' }] }),
-      ultra({ items: ['x'] }),
       delegation({ agent: 'explore', task: 't' })
     ])
     const ids = rows.map((r) => r.id)
@@ -405,25 +350,28 @@ describe('what a member has to show', () => {
     // `summary` — trusting the report parse alone renders a finished member as
     // an empty row while the card is holding its output.
     const rows = groupTranscript([
-      ultra({ items: ['a'] }),
-      swarmMember({
+      workflowStart({ runId: 'wf_1', name: 'r', phases: [{ title: 'P' }] }),
+      member({
         instance: 'code#1',
-        item: 'a',
+        task: 'a',
+        runId: 'wf_1',
+        workflow: 'r',
+        phase: 'P',
         status: 'completed',
         output: '{"content":"beta\\n","file":"b.txt"}'
       })
     ])
-    const [m] = onlySwarm(rows).members
+    const [m] = onlyWorkflow(rows).phases[0].members
     expect(m.resultText).toContain('b.txt')
     expect(m.resultIsJSON).toBe(true)
   })
 
   it('is empty only when the member really said nothing', () => {
     const rows = groupTranscript([
-      ultra({ items: ['a'] }),
-      swarmMember({ instance: 'code#1', item: 'a', status: 'completed', output: '' })
+      workflowStart({ runId: 'wf_1', name: 'r', phases: [{ title: 'P' }] }),
+      member({ instance: 'code#1', task: 'a', runId: 'wf_1', workflow: 'r', phase: 'P', status: 'completed', output: '' })
     ])
-    expect(onlySwarm(rows).members[0].resultText).toBe('')
+    expect(onlyWorkflow(rows).phases[0].members[0].resultText).toBe('')
   })
 })
 
@@ -465,28 +413,39 @@ describe('activeRuns', () => {
   it('reports only what is still moving', () => {
     const rows = groupTranscript([
       workflowFinished({
-        id: 'wf-1',
+        id: 'wf-9',
         runId: 'wf_1',
         name: 'done-one',
         agents: 1,
         rendered: renderedTree({ summary: '1 agents · 0 failed · 0 replayed', phases: [] })
       }),
-      ultra({ items: ['a'] }),
-      swarmMember({ instance: 'code#1', item: 'a' })
+      workflowStart({ runId: 'wf_2', name: 'live-one', phases: [] })
     ])
     const live = activeRuns(rows)
     expect(live).toHaveLength(1)
-    expect(live[0].kind).toBe('swarm')
+    expect(live[0].name).toBe('live-one')
   })
 
-  it('titles both kinds of run for the panel', () => {
+  it('leaves out a paused run and a card a later turn took over', () => {
+    // Neither is working: one waits for Spettro, the other has handed the run
+    // to the card below. A live panel holding either would never empty.
+    const paused: CardRun = {
+      runId: 'wf_1',
+      name: 'audit',
+      status: 'paused',
+      checkpointId: 'cp-1',
+      waiting: 'fix which?'
+    }
     const rows = groupTranscript([
-      workflowStart({ runId: 'wf_1', name: 'review-changes', phases: [] }),
-      ultra({ items: ['a'], subagentType: 'code' })
+      workflowCard(paused, { continuedIn: 'workflow-wf_1-2' }),
+      workflowCard({ runId: 'wf_2', name: 'other', status: 'paused' })
     ])
-    const titles = runs(rows).map(runTitle)
-    expect(titles[0]).toContain('review-changes')
-    expect(titles[1].toLowerCase()).toContain('swarm')
+    expect(activeRuns(rows)).toEqual([])
+  })
+
+  it('titles a run for the panel', () => {
+    const rows = groupTranscript([workflowStart({ runId: 'wf_1', name: 'review-changes', phases: [] })])
+    expect(runs(rows).map(runTitle)).toEqual(['review-changes'])
   })
 })
 
@@ -500,7 +459,7 @@ describe('robustness', () => {
       groupTranscript([
         tool({ title: 'workflow broken', kind: 'think', argsJSON: '{not json' }),
         tool({ title: 'agent x#1: t', kind: 'think', argsJSON: 'null' }),
-        tool({ title: 'ultra', argsJSON: '[]' })
+        tool({ title: 'workflow audit', argsJSON: '[]', workflow: { version: 1, phases: 'nope', members: [null, 3] } })
       ])
     ).not.toThrow()
   })
@@ -512,5 +471,425 @@ describe('robustness', () => {
     ])
     expect(rows).toHaveLength(1)
     expect(rows[0].kind).not.toBe('item')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The card the CLI sends today
+// ---------------------------------------------------------------------------
+
+// A run in the middle of everything the card can say: a size and a budget,
+// a detail line, a phase added at runtime, a replayed member, one that failed,
+// one the runtime reports in a word it does not name, a member outside any
+// phase, and a log whose head was trimmed.
+const AUDIT: CardRun = {
+  runId: 'wf_1',
+  name: 'audit',
+  description: 'Audit the repo',
+  size: 'large',
+  sizeAgents: 30,
+  budget: 500_000,
+  phases: [
+    { title: 'Scan', detail: 'find candidates' },
+    { title: 'Fix' },
+    { title: 'Verify auth', detail: '3 suspects', dynamic: true }
+  ],
+  agents: [
+    { instance: 'gp#1', task: 'scan a', phase: 'Scan', status: 'success' },
+    { instance: 'gp#2', task: 'scan b', phase: 'Scan', status: 'error' },
+    { instance: 'gp#3', task: 'scan c', phase: 'Scan', status: 'success', cached: true },
+    { instance: 'gp#4', task: 'fix a', phase: 'Fix', status: 'running' },
+    { instance: 'gp#5', task: 'fix b', phase: 'Fix', status: 'queued' },
+    { instance: 'gp#6', task: 'loose', status: 'running' }
+  ],
+  logs: ['3 findings', '⏸ cp-1 pick targets'],
+  dropped: 12
+}
+
+describe('reading the card’s text (an older CLI, or a chat saved before the metadata)', () => {
+  // The exact strings internal/acp/workflow_test.go expects render() to write,
+  // with the test line each comes from.
+
+  it('reads a pause and what it waits for (workflow_test.go:467)', () => {
+    const text = parseRenderedWorkflow(
+      '⏸ paused at cp-1 — waiting for orchestrator: which findings to fix?\n\n▸ Scan — 1/1 done\n    ✓ gp#1  scan a',
+      false
+    )
+    expect(text.status).toBe('paused')
+    expect(text.pausedAt).toEqual({ checkpointId: 'cp-1', message: 'which findings to fix?' })
+    // The pause line is not the description.
+    expect(text.description).toBe('')
+  })
+
+  it('reads a pause with no checkpoint id or message', () => {
+    const text = parseRenderedWorkflow('⏸ waiting for orchestrator\n\n○ Scan — pending', false)
+    expect(text.status).toBe('paused')
+    expect(text.pausedAt).toEqual({ checkpointId: '', message: '' })
+  })
+
+  it('reads a stop and its reason (workflow_test.go:778, :808)', () => {
+    for (const reason of ["at the orchestrator's request", 'paused for over 30m with no continue']) {
+      const text = parseRenderedWorkflow(`Audit\n\n■ stopped: ${reason}\n\n○ Scan — pending`, false)
+      expect(text.status).toBe('stopped')
+      expect(text.stoppedReason).toBe(reason)
+      expect(text.description).toBe('Audit')
+    }
+  })
+
+  it('reads the size line, with and without a budget (workflow_test.go:692-694)', () => {
+    const large = parseRenderedWorkflow('size: large (~30 agents, a guideline)\n\n○ Scan — pending', false)
+    expect([large.size, large.sizeAgents, large.budgetTokens]).toEqual(['large', 30, 0])
+    const unbounded = parseRenderedWorkflow(
+      'size: unbounded (no guideline) · budget 500k tokens\n\n○ Scan — pending',
+      false
+    )
+    expect([unbounded.size, unbounded.sizeAgents, unbounded.budgetTokens]).toEqual(['unbounded', 0, 500_000])
+    expect(unbounded.description).toBe('')
+  })
+
+  it('takes the size and budget suffixes off the title for the name (workflow_test.go:692-694)', () => {
+    expect(nameFromTitle('workflow audit')).toBe('audit')
+    expect(nameFromTitle('workflow audit · large')).toBe('audit')
+    expect(nameFromTitle('workflow audit · unbounded · budget 500k')).toBe('audit')
+    expect(nameFromTitle('[code#3] workflow audit · small')).toBe('audit')
+    expect(parseCompactTokens('1.5m')).toBe(1_500_000)
+    expect(parseCompactTokens('500k')).toBe(500_000)
+  })
+
+  it('reads detail lines and phases added at runtime (workflow_test.go:674)', () => {
+    const text = parseRenderedWorkflow(
+      '○ Scan — pending\n    ↳ find candidates\n○ Verify auth (added at runtime) — pending\n    ↳ 3 suspects',
+      false
+    )
+    expect(text.phases).toEqual([
+      { title: 'Scan', detail: 'find candidates', dynamic: false },
+      { title: 'Verify auth', detail: '3 suspects', dynamic: true }
+    ])
+  })
+
+  it('reads every member glyph, the replayed prefix and the no-phase bucket (workflow_test.go:826)', () => {
+    const text = parseRenderedWorkflow(
+      [
+        '▸ Scan — 2/3 done, 1 failed',
+        '    ✓ gp#1  scan a',
+        '    ✗ gp#2  scan b',
+        '    ▶ gp#3  replayed · scan c',
+        '▸ (no phase) — 0/1 done',
+        '    · gp#4  loose'
+      ].join('\n'),
+      false
+    )
+    expect(text.members.map((m) => [m.instance, m.status, m.replayed, m.phase, m.task])).toEqual([
+      ['gp#1', 'done', false, 'Scan', 'scan a'],
+      ['gp#2', 'failed', false, 'Scan', 'scan b'],
+      ['gp#3', 'running', true, 'Scan', 'scan c'],
+      ['gp#4', 'pending', false, '', 'loose']
+    ])
+    expect(text.phases.map((p) => p.title)).toEqual(['Scan', ''])
+  })
+
+  it('reads the log tail and how many lines were dropped before it', () => {
+    const text = parseRenderedWorkflow('○ Scan — pending\n\nlog:\n  … 12 earlier lines\n  3 findings', false)
+    expect(text.logs).toEqual(['3 findings'])
+    expect(text.droppedLogLines).toBe(12)
+  })
+
+  it('reads the finish summary and the continued prefix off the front', () => {
+    const finished = parseRenderedWorkflow('5 agents · 1 failed · 1 replayed\n\nAudit\n\n▸ Scan — 1/1 done\n    ✓ gp#1  a', false)
+    expect(finished.summary).toBe('5 agents · 1 failed · 1 replayed')
+    expect(finished.description).toBe('Audit')
+
+    const continued = parseRenderedWorkflow(
+      'continued in a later turn\n\nAudit\n\n⏸ paused at cp-1 — waiting for orchestrator: fix which?\n\n○ Scan — pending',
+      false
+    )
+    expect(continued.continued).toBe(true)
+    expect(continued.description).toBe('Audit')
+    expect(continued.status).toBe('paused')
+  })
+
+  it('treats a status the CLI does not name as still running (workflow.go render default)', () => {
+    const run = onlyWorkflow(
+      groupTranscript([workflowCard({ runId: 'wf_1', name: 'audit', status: 'draining' }, { meta: false })])
+    )
+    expect(run.status).toBe('running')
+  })
+
+  it('keeps a description that looks like the size line', () => {
+    const text = parseRenderedWorkflow(
+      'size: whatever I like, really\n\nsize: small (~5 agents, a guideline)\n\n○ A — pending',
+      false
+    )
+    expect(text.description).toBe('size: whatever I like, really')
+    expect(text.size).toBe('small')
+  })
+
+  it('draws the same run from the text as from the metadata', () => {
+    // The fallback is only worth having if it agrees with the real thing.
+    // Every state the card can be in, both ways.
+    const states: CardRun[] = [
+      AUDIT,
+      { ...AUDIT, status: 'paused', checkpointId: 'cp-1', waiting: 'fix which?' },
+      { ...AUDIT, status: 'stopped', stopReason: "at the orchestrator's request" },
+      { ...AUDIT, status: 'success', agents: AUDIT.agents?.map((a) => ({ ...a, status: 'success' })) }
+    ]
+    for (const state of states) {
+      resetWire()
+      const fromMeta = onlyWorkflow(groupTranscript([workflowCard(state)]))
+      resetWire()
+      const fromText = onlyWorkflow(groupTranscript([workflowCard(state, { meta: false, rawInput: null })]))
+      expect(fromMeta.source).toBe('meta')
+      expect(fromText.source).toBe('text')
+      const shape = (run: WorkflowRun): unknown => ({
+        name: run.name,
+        runId: run.runId,
+        status: run.status,
+        pausedAt: run.pausedAt,
+        stoppedReason: run.stoppedReason,
+        size: [run.size, run.sizeAgents, run.budgetTokens],
+        description: run.description,
+        phases: run.phases.map((p) => ({
+          title: p.title,
+          detail: p.detail,
+          dynamic: p.dynamic,
+          members: p.members.map((m) => [m.instance, m.status, m.cached, m.task])
+        })),
+        logs: [run.logs, run.droppedLogLines]
+      })
+      expect(shape(fromText)).toEqual(shape(fromMeta))
+    }
+  })
+})
+
+describe('the card’s metadata (`_meta["spettro.app/workflow"]`)', () => {
+  it('is the source of the run when present', () => {
+    const run = onlyWorkflow(groupTranscript([workflowCard(AUDIT)]))
+    expect(run.source).toBe('meta')
+    expect(run.name).toBe('audit')
+    expect(run.size).toBe('large')
+    expect(run.sizeAgents).toBe(30)
+    expect(run.budgetTokens).toBe(500_000)
+    expect(run.phases.map((p) => [p.title, p.dynamic])).toEqual([
+      ['Scan', false],
+      ['Fix', false],
+      ['Verify auth', true],
+      ['', false]
+    ])
+    expect(run.phases[0].detail).toBe('find candidates')
+    expect(run.droppedLogLines).toBe(12)
+  })
+
+  it('counts a phase’s failed members as finished, as the CLI’s “d/n done” does', () => {
+    const run = onlyWorkflow(groupTranscript([workflowCard(AUDIT)]))
+    const scan = run.phases[0]
+    expect(scan.counts.done + scan.counts.failed).toBe(3)
+    expect(scan.counts.failed).toBe(1)
+    expect(scan.counts.cached).toBe(1)
+  })
+
+  it('keeps a member it reports in an unnamed state as not started', () => {
+    const run = onlyWorkflow(groupTranscript([workflowCard(AUDIT)]))
+    const fix = run.phases[1]
+    expect(fix.members.map((m) => m.status)).toEqual(['running', 'pending'])
+  })
+
+  it('wins over text it disagrees with', () => {
+    const item = workflowCard(AUDIT)
+    if (item.kind === 'tool') item.tool.output = '▸ Bogus — 0/0 done'
+    const run = onlyWorkflow(groupTranscript([item]))
+    expect(run.phases.map((p) => p.title)).not.toContain('Bogus')
+  })
+
+  it('falls back to the text for a version it was not written for', () => {
+    const item = workflowCard(AUDIT)
+    if (item.kind === 'tool') item.tool.workflow = { version: 2, phases: [] }
+    const run = onlyWorkflow(groupTranscript([item]))
+    expect(run.source).toBe('text')
+    expect(run.phases.map((p) => p.title)).toContain('Verify auth')
+  })
+
+  it('matches listed members to their own calls, and stands in for missing ones', () => {
+    const rows = groupTranscript([
+      workflowCard(AUDIT),
+      member({ instance: 'gp#1', task: 'scan a', runId: 'wf_1', workflow: 'audit', phase: 'Scan', status: 'completed' }),
+      childCall('gp#1', 'read', { file_path: 'a.go' })
+    ])
+    const run = onlyWorkflow(rows)
+    // One row: the member and its call are inside the card.
+    expect(rows).toHaveLength(1)
+    const [gp1, gp2] = run.phases[0].members
+    expect(gp1.children).toHaveLength(1)
+    // gp#2's call never reached this transcript; the card still lists it.
+    expect(gp2.instance).toBe('gp#2')
+    expect(gp2.status).toBe('failed')
+    expect(gp2.children).toEqual([])
+  })
+
+  it('reads a pause as waiting, never as running', () => {
+    const run = onlyWorkflow(
+      groupTranscript([workflowCard({ ...AUDIT, status: 'paused', checkpointId: 'cp-1', waiting: 'fix which?' })])
+    )
+    expect(run.status).toBe('paused')
+    expect(run.pausedAt).toEqual({ checkpointId: 'cp-1', message: 'fix which?' })
+  })
+
+  it('reads a stop as stopped — not done, though the card closes completed', () => {
+    const run = onlyWorkflow(
+      groupTranscript([workflowCard({ ...AUDIT, status: 'stopped', stopReason: 'the session closed' })])
+    )
+    expect(run.tool.status).toBe('completed')
+    expect(run.status).toBe('stopped')
+    expect(run.stoppedReason).toBe('the session closed')
+  })
+
+  it('reads a cancelled run as stopped, not as a failure', () => {
+    const run = onlyWorkflow(groupTranscript([workflowCard({ ...AUDIT, status: 'cancelled' })]))
+    expect(run.tool.status).toBe('failed')
+    expect(run.status).toBe('stopped')
+    expect(run.stoppedReason).toBe('cancelled')
+  })
+
+  it('carries the summary of a finished run', () => {
+    const done = { ...AUDIT, status: 'success', agents: AUDIT.agents?.slice(0, 3) }
+    const run = onlyWorkflow(groupTranscript([workflowCard(done, { summary: '3 agents · 1 failed · 1 replayed' })]))
+    expect(run.status).toBe('done')
+    expect(run.summary).toBe('3 agents · 1 failed · 1 replayed')
+  })
+})
+
+describe('a run continued in a later turn', () => {
+  // workflow_test.go:490-540: a run pauses in turn one, turn two continues it.
+  // Turn one's card closes "continued in a later turn" with `continuedIn`
+  // and its state as it paused; turn two opens `workflow-wf_1-2`.
+  const paused: CardRun = {
+    runId: 'wf_1',
+    name: 'audit',
+    phases: [{ title: 'Scan' }, { title: 'Fix' }],
+    agents: [{ instance: 'gp#1', task: 'scan a', phase: 'Scan', status: 'success' }],
+    status: 'paused',
+    checkpointId: 'cp-1',
+    waiting: 'fix which?'
+  }
+  const resumed: CardRun = {
+    ...paused,
+    status: 'running',
+    attach: 2,
+    continuedFrom: 'workflow-wf_1',
+    agents: [...(paused.agents ?? []), { instance: 'gp#2', task: 'fix a', phase: 'Fix', status: 'running' }]
+  }
+
+  function transcript(o: { meta?: boolean } = {}): TranscriptRow[] {
+    return groupTranscript([
+      message('user', 'ultracode audit'),
+      workflowCard(paused, { continuedIn: 'workflow-wf_1-2', meta: o.meta }),
+      member({ instance: 'gp#1', task: 'scan a', runId: 'wf_1', workflow: 'audit', phase: 'Scan', status: 'completed' }),
+      childCall('gp#1', 'read', { file_path: 'a.go' }),
+      message('user', 'fix the first one'),
+      workflowCard(resumed, { meta: o.meta, rawInput: o.meta === false ? null : undefined }),
+      member({ instance: 'gp#2', task: 'fix a', runId: 'wf_1', workflow: 'audit', phase: 'Fix' })
+    ])
+  }
+
+  for (const meta of [true, false]) {
+    describe(meta ? 'with metadata' : 'from the text', () => {
+      it('marks the earlier card continued, still showing the pause', () => {
+        const [first] = runs(transcript({ meta }))
+        expect(first.continued).toBe(true)
+        expect(first.status).toBe('paused')
+        if (meta) expect(first.continuedIn).toBe('workflow-wf_1-2')
+      })
+
+      it('gives the later card every member, with the calls an earlier turn made', () => {
+        const [, second] = runs(transcript({ meta }))
+        expect(second.continued).toBe(false)
+        expect(second.status).toBe('running')
+        expect(second.runId).toBe('wf_1')
+        expect(second.name).toBe('audit')
+        const scan = second.phases.find((p) => p.title === 'Scan')
+        expect(scan?.members[0].instance).toBe('gp#1')
+        // Turn one's member call, children and all, found from turn two's card.
+        expect(scan?.members[0].children).toHaveLength(1)
+        expect(second.counts.total).toBe(2)
+      })
+
+      it('shows only the later card as live', () => {
+        const live = activeRuns(transcript({ meta }))
+        expect(live).toHaveLength(1)
+        expect(live[0].tool.id).toBe('workflow-wf_1-2')
+      })
+    })
+  }
+
+  it('folds the model’s reply to the checkpoint into the run', () => {
+    const rows = groupTranscript([
+      workflowCard(paused, { continuedIn: 'workflow-wf_1-2' }),
+      tool({
+        title: 'workflow {"continue_run_id": "wf_1", "reply": {"fix": ["a"]}}',
+        kind: 'think',
+        argsJSON: JSON.stringify({ continue_run_id: 'wf_1', reply: { fix: ['a'] } }),
+        output: '<workflow_result name="audit" run_id="wf_1">\n</workflow_result>'
+      }),
+      workflowCard(resumed)
+    ])
+    expect(rows.map((r) => r.kind)).toEqual(['run', 'run'])
+  })
+
+  it('keeps a refused reply visible, since it is the only place the refusal is said', () => {
+    // internal/agent/workflow.go:456 — continuing under Ask first is refused.
+    const rows = groupTranscript([
+      workflowCard(paused),
+      tool({
+        title: 'workflow {"continue_run_id": "wf_1"}',
+        kind: 'think',
+        status: 'failed',
+        argsJSON: JSON.stringify({ continue_run_id: 'wf_1', reply: 'go' }),
+        output: 'workflow: continuing run wf_1 starts sub-agents again, which needs restricted or yolo permission (current: ask-first)'
+      })
+    ])
+    expect(rows.map((r) => r.kind)).toEqual(['run', 'script'])
+  })
+})
+
+describe('telling a run’s card from things that look like one', () => {
+  it('never opens a run for an escaped checkpoint trace (desktop gap #21)', () => {
+    // internal/acp/tools.go toolCallTitle: a progress trace that finds no open
+    // card goes out as an ordinary call — `workflow audit ⏸ cp-2`, args with
+    // `workflow` and no `agent`, exactly what a card's args look like.
+    const rows = groupTranscript([
+      tool({
+        title: 'workflow audit ⏸ cp-2',
+        kind: 'think',
+        argsJSON: JSON.stringify({ run_id: 'wf_1', workflow: 'audit', kind: 'checkpoint', checkpoint_id: 'cp-2', message: 'm' })
+      }),
+      tool({
+        title: 'workflow audit',
+        kind: 'think',
+        argsJSON: JSON.stringify({ run_id: 'wf_1', workflow: 'audit', checkpoint_id: 'cp-2', message: 'm' })
+      })
+    ])
+    expect(runs(rows)).toEqual([])
+  })
+
+  it('recognises a re-announced card with no args by its id and title', () => {
+    // A card a later turn opened through a member trace carries no rawInput
+    // (announceWorkflowLocked(w, nil)), and an older desktop kept no meta.
+    const rows = groupTranscript([
+      workflowCard(
+        { runId: 'wf_20261006_ab12cd34', name: 'audit', size: 'unbounded', budget: 1_500_000, attach: 2 },
+        { meta: false, rawInput: null }
+      )
+    ])
+    const run = onlyWorkflow(rows)
+    expect(run.name).toBe('audit')
+    expect(run.runId).toBe('wf_20261006_ab12cd34')
+    expect(run.budgetTokens).toBe(1_500_000)
+  })
+
+  it('does not take a member’s own call for a card', () => {
+    const rows = groupTranscript([
+      workflowCard(AUDIT),
+      member({ instance: 'gp#1', task: 'scan a', runId: 'wf_1', workflow: 'audit', phase: 'Scan' })
+    ])
+    expect(runs(rows)).toHaveLength(1)
   })
 })

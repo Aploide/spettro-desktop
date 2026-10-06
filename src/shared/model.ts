@@ -75,6 +75,10 @@ export interface ToolCallItem {
   rawOutput?: string
   /** The full ACP rawInput re-encoded as JSON — the reliable argument source. */
   argsJSON?: string
+  /** A workflow card's structured state (`_meta["spettro.app/workflow"]`),
+   *  replaced whole by every update that carries one. Absent on every other
+   *  call, and on workflow cards from a CLI that predates it. */
+  workflow?: JSONValue
   timestamp: number
 }
 

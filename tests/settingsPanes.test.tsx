@@ -95,6 +95,15 @@ describe('Settings', () => {
     ])
   })
 
+  it('draws every sidebar glyph as an outline (a solid disc reads as selected)', () => {
+    expect(PANES.filter((p) => p.icon.endsWith('.fill'))).toEqual([])
+  })
+
+  it('keeps Done neutral: the accent is the pane’s own main action', () => {
+    render(<SettingsView pane="updates" onClose={() => undefined} />)
+    expect(screen.getByRole('button', { name: 'Done' }).classList.contains('btn--prominent')).toBe(false)
+  })
+
   it('opens another pane from the sidebar', async () => {
     render(<SettingsView pane="general" onClose={() => undefined} />)
     fireEvent.click(screen.getByRole('tab', { name: 'Permissions' }))

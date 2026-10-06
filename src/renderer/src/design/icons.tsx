@@ -29,6 +29,7 @@ export type IconName =
   | 'chevron.right'
   | 'chevron.down'
   | 'info.circle.fill'
+  | 'info.circle'
   | 'exclamationmark.triangle.fill'
   | 'flowchart'
   | 'bolt'
@@ -49,6 +50,7 @@ export type IconName =
   | 'iphone.radiowaves'
   | 'plus'
   | 'arrow.down.circle.fill'
+  | 'arrow.down.circle'
   | 'exclamationmark.triangle'
   | 'checkmark.seal.fill'
   | 'checkmark'
@@ -387,6 +389,21 @@ const STROKE_ICONS: Record<string, ReactNode> = {
       d="M8 1.9l1.85 3.9 4.15.6-3 3 .7 4.3L8 11.7l-3.7 2 .7-4.3-3-3 4.15-.6z"
       fill="currentColor"
     />
+  ),
+  // The outline forms, for lists of glyphs that must all be the same weight
+  // (Settings' sidebar): a solid disc among strokes reads as selected.
+  'info.circle': (
+    <>
+      <circle cx="8" cy="8" r="6.6" />
+      <path d="M8 7.2v3.9" />
+      <circle cx="8" cy="4.9" r=".55" fill="currentColor" />
+    </>
+  ),
+  'arrow.down.circle': (
+    <>
+      <circle cx="8" cy="8" r="6.6" />
+      <path d="M8 4.7v6.3M5.4 8.5 8 11.1l2.6-2.6" />
+    </>
   )
 }
 

@@ -64,10 +64,10 @@ export const PANES: { id: SettingsPane; label: string; icon: IconName }[] = [
   { id: 'permissions', label: 'Permissions', icon: 'lock.shield' },
   { id: 'memory', label: 'Memory', icon: 'brain' },
   { id: 'remote', label: 'Remote', icon: 'iphone' },
-  { id: 'updates', label: 'Updates', icon: 'arrow.down.circle.fill' },
+  { id: 'updates', label: 'Updates', icon: 'arrow.down.circle' },
   { id: 'advanced', label: 'Advanced', icon: 'wrench.and.screwdriver' },
   { id: 'shortcuts', label: 'Keyboard Shortcuts', icon: 'keyboard' },
-  { id: 'about', label: 'About', icon: 'info.circle.fill' }
+  { id: 'about', label: 'About', icon: 'info.circle' }
 ]
 
 const DASHBOARD_URL = 'https://spettro.app/dashboard'
@@ -144,7 +144,10 @@ export default function SettingsView({ pane, onClose }: Props): JSX.Element {
           <div className="settings-main">
             <header className="settings-head">
               <h2 className="settings-head-title">{current.label}</h2>
-              <button type="button" className="btn btn--prominent" onClick={onClose}>
+              {/* Neutral: the accent belongs to the pane's own main action
+                  (Update now, Pair a device, Manage providers…), and closing
+                  is never the thing a pane is for. */}
+              <button type="button" className="btn" onClick={onClose}>
                 Done
               </button>
             </header>

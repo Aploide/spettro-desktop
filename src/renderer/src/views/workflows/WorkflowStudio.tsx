@@ -290,7 +290,7 @@ export default function WorkflowStudio({
           <Icon name="flowchart" size={15} />
           <h2>Workflows</h2>
           <span className="wfs-spacer" />
-          <button type="button" className="btn btn--prominent" onClick={() => void close()}>
+          <button type="button" className="btn" onClick={() => void close()}>
             Done
           </button>
         </header>
@@ -327,7 +327,7 @@ export default function WorkflowStudio({
             <SpettroSpinner size={11} /> {busy}
           </span>
         )}
-        <button type="button" className="btn btn--prominent" onClick={() => void close()}>
+        <button type="button" className="btn" onClick={() => void close()}>
           Done
         </button>
       </header>

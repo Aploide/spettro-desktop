@@ -105,21 +105,10 @@
   color: var(--text-secondary);
 }
 
-.remote__rename-link {
-  border: none;
-  background: none;
-  padding: 0;
-  margin-top: 2px;
-  font-size: 11px;
-  color: var(--text-secondary);
-  text-align: left;
-  text-decoration: underline;
-  text-decoration-color: var(--hairline);
-  cursor: pointer;
-}
-
-.remote__rename-link:hover {
-  color: var(--text-primary);
+/* "Rename" after the name: an accent text button (.link), at the line's size. */
+.remote__switch-text .remote__rename-link {
+  font-size: inherit;
+  margin-left: 2px;
 }
 
 .remote__rename-input {
@@ -239,7 +228,8 @@
   color: var(--text-primary);
   background: var(--surface-raised);
   border: 1px solid var(--hairline);
-  border-radius: var(--rad-sm);
+  /* A pill, like every other button in Settings (.btn). */
+  border-radius: 999px;
   cursor: pointer;
 }
 
@@ -273,10 +263,16 @@
   justify-content: space-between;
 }
 
+/* The same small-caps eyebrow as every other Settings section
+   (.form-section-title), with "Pair a device" on its row. */
 .remote__devices-title {
   margin: 0;
-  font-size: 13px;
+  padding: 0 var(--sp-md);
+  font-size: 11px;
   font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
 }
 
 .remote__device-list {

@@ -150,15 +150,18 @@ function SwitchRow({ remote }: { remote: RemoteHostState }): JSX.Element {
             />
           </span>
         ) : (
-          <button
-            className="remote__rename-link"
-            onClick={() => {
-              setDraftName(remote.hostName)
-              setRenaming(true)
-            }}
-          >
-            Shown to your devices as “{remote.hostName}” — rename
-          </button>
+          <span className="remote__status-detail">
+            Shown to your devices as “{remote.hostName}”{' '}
+            <button
+              className="link remote__rename-link"
+              onClick={() => {
+                setDraftName(remote.hostName)
+                setRenaming(true)
+              }}
+            >
+              Rename
+            </button>
+          </span>
         )}
       </div>
       <label className="remote__toggle">

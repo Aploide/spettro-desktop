@@ -102,6 +102,15 @@ const HANDSHAKE_TIMEOUT_MS = 20_000
  *  restart surfaces a failure instead of restarting again. */
 const CRASH_LOOP_WINDOW_MS = 10_000
 
+/** Whether the CLI keeps config option `id` for every session rather than
+ *  per session. Only the mode is a session's own; the model, permission,
+ *  thinking level, Ultra and the workflow size live in ~/.spettro, shared
+ *  by every session and by a TUI running alongside (bridge.go
+ *  sharedSettings), so for those the CLI, not a chat, is the truth. */
+function isSharedConfig(id: string): boolean {
+  return id !== 'mode'
+}
+
 export class AppModel extends EventEmitter {
   // -- Published state ------------------------------------------------------
 
@@ -758,11 +767,17 @@ export class AppModel extends EventEmitter {
     if (selected) this.warmSession(selected)
   }
 
-  /** Pushes the config the user was shown (plus any changes queued while the
-   *  chat was cold) onto a freshly attached live session, so the displayed
-   *  model/mode/permission is exactly what the agent runs with. Values that
-   *  no longer exist in the live option set are skipped, and the agent's
-   *  refreshed options become the new display state after each push. */
+  /** Brings a freshly attached live session in line with what the user
+   *  chose: the chat's own mode as it was shown, plus every change the user
+   *  made that hasn't reached the CLI yet (queued in this chat while it was
+   *  cold, or a default set while nothing was live). Shared settings the chat
+   *  merely *showed* are never pushed: that display can be days old, and
+   *  pushing it would rewrite ~/.spettro for every session and the TUI —
+   *  opening an old chat could quietly turn YOLO back on. For those the
+   *  session's own options are the truth, and they are passed on to every
+   *  other chat. Values that no longer exist in the live option set are
+   *  skipped, and the agent's refreshed options become the new display state
+   *  after each push. */
   private async syncDisplayedConfig(
     session: ChatSession,
     previouslyDisplayed: Record<string, ConfigValue>,
@@ -770,11 +785,20 @@ export class AppModel extends EventEmitter {
   ): Promise<void> {
     const agent = this.agent
     if (!agent) return
+    const own = Object.entries(previouslyDisplayed).filter(([id]) => !isSharedConfig(id))
+    const queuedDefaults = this.prefs.pendingDefaults
     const desired: Record<string, ConfigValue> = {
-      ...previouslyDisplayed,
+      ...Object.fromEntries(own),
+      ...queuedDefaults,
       ...session.pendingConfigChanges
     }
+    // What the user chose rather than merely saw: it supersedes whatever the
+    // other chats have queued for the same settings.
+    const chosen = new Set(
+      [...Object.keys(queuedDefaults), ...Object.keys(session.pendingConfigChanges)].filter(isSharedConfig)
+    )
     session.pendingConfigChanges = {}
+    if (Object.keys(queuedDefaults).length > 0) this.prefs.pendingDefaults = {}
 
     // The CLI's own default for "mode" is Plan mode, but the coding agent is
     // what's actually used most, so steer fresh sessions (no prior mode
@@ -796,6 +820,7 @@ export class AppModel extends EventEmitter {
 
     if (Object.keys(desired).length === 0) {
       this.rememberConfig(session.configOptions)
+      this.spreadSharedConfig(session, chosen)
       return
     }
 
@@ -816,12 +841,46 @@ export class AppModel extends EventEmitter {
       }
     }
     this.rememberConfig(session.configOptions)
+    this.spreadSharedConfig(session, chosen)
     this.persist()
   }
 
   private rememberConfig(options: ACPConfigOption[]): void {
     if (options.length === 0) return
     this.prefs.lastConfigOptions = options
+  }
+
+  /** Shows `source`'s shared settings (see isSharedConfig) in every other
+   *  chat. The CLI tells only its live sessions when one changes; a cold
+   *  chat still showing the old value would be wrong on screen, and a chip
+   *  change there would start from it. A chat's own queued choice for a
+   *  setting stays on screen, unless that setting is in `changed`: a newer
+   *  choice made elsewhere has superseded it. */
+  private spreadSharedConfig(source: ChatSession, changed: ReadonlySet<string> = new Set()): void {
+    const values = Object.entries(source.displayedConfigValues()).filter(([id]) => isSharedConfig(id))
+    if (values.length === 0) return
+    for (const other of this.sessions) {
+      if (other === source || other.isScratch) continue
+      const shown = other.displayedConfigValues()
+      for (const [id, value] of values) {
+        if (changed.has(id)) delete other.pendingConfigChanges[id]
+        else if (other.pendingConfigChanges[id] !== undefined) continue
+        if (shown[id] !== undefined && shown[id] !== value) other.applyLocalConfigValue(id, value)
+      }
+    }
+  }
+
+  /** The shared settings whose shown value differs between two snapshots
+   *  of displayedConfigValues(). */
+  private changedSharedConfig(
+    before: Record<string, ConfigValue>,
+    after: Record<string, ConfigValue>
+  ): Set<string> {
+    return new Set(
+      Object.keys(after).filter(
+        (id) => isSharedConfig(id) && before[id] !== undefined && before[id] !== after[id]
+      )
+    )
   }
 
   // -------------------------------------------------------------------------
@@ -1361,10 +1420,9 @@ export class AppModel extends EventEmitter {
         // The agent this resumed on was replaced meanwhile: the id routes to
         // nothing live.
         if (agent !== this.agent) return null
-        // What the chat shows now, not when the resume was asked for: a
-        // default changed while it was in flight (Settings, the new-session
-        // chips) is already on screen, and pushing the older values would
-        // put the old level back for every session.
+        // What the chat shows now, not when the resume was asked for. Only
+        // its mode is pushed back (syncDisplayedConfig); a default changed
+        // while the resume was in flight is queued and goes too.
         const displayed = session.displayedConfigValues()
         // Register only after a successful resume: updates emitted before
         // this point belong to no session the UI should show.
@@ -1388,6 +1446,7 @@ export class AppModel extends EventEmitter {
       session.setAcpSessionId(result.sessionId)
       session.setConfigOptions(result.configOptions)
       this.sessionsByACPID.set(result.sessionId, session)
+      this.prefs.rememberSession(result.sessionId)
       // Push the config the user was shown before prompting, so the first
       // message already runs with the displayed settings.
       await this.syncDisplayedConfig(session, displayed, result.sessionId)
@@ -1430,6 +1489,9 @@ export class AppModel extends EventEmitter {
    *  running turn is cancelled, then the session is closed on the agent,
    *  which also stops any workflow paused in it. */
   private releaseSession(session: ChatSession): void {
+    // The CLI keeps the conversation on disk (it can't delete one), so it
+    // must not come back as a session "started in a terminal".
+    if (session.acpSessionId) this.prefs.rememberSession(session.acpSessionId)
     const acpId = this.liveACPSessionId(session)
     if (session.isBusy) this.cancel(session.id)
     const agent = this.agent
@@ -1444,15 +1506,17 @@ export class AppModel extends EventEmitter {
   // -------------------------------------------------------------------------
 
   /** Conversations the CLI keeps for `projectPath` that no chat here is
-   *  linked to — started in the terminal, say — newest first. Empty when the
-   *  agent isn't running or can't list. */
+   *  linked to — started in the terminal, say — newest first. Sessions this
+   *  app started are never among them, even once their chat (or a Workflow
+   *  Studio run's scratch chat) is deleted. Empty when the agent isn't
+   *  running or can't list. */
   async listCLISessions(projectPath: string): Promise<CLISessionEntry[]> {
     const agent = this.agent
     if (!agent || !agent.capabilities.listSessions) return []
     const linked = new Set(this.sessions.map((s) => s.acpSessionId).filter((id) => id !== null))
     const entries = await agent.listSessions(projectPath)
     return entries
-      .filter((e) => !linked.has(e.sessionId))
+      .filter((e) => !linked.has(e.sessionId) && !this.prefs.isKnownSession(e.sessionId))
       .map(({ sessionId, title, updatedAt }) => ({ sessionId, title, updatedAt }))
   }
 
@@ -1479,6 +1543,7 @@ export class AppModel extends EventEmitter {
     // Routed before the call: the replay arrives before session/load answers.
     this.sessionsByACPID.set(sessionId, session)
     session.isReplaying = true
+    this.prefs.rememberSession(sessionId)
     let configOptions: ACPConfigOption[]
     try {
       configOptions = (await agent.loadSession(sessionId, projectPath)).configOptions
@@ -1635,7 +1700,8 @@ export class AppModel extends EventEmitter {
     if (!session) return
     // What the agent last told us this option was — the value to fall back to
     // if it turns out the agent won't take the new one.
-    const previous = session.displayedConfigValues()[configId]
+    const before = session.displayedConfigValues()
+    const previous = before[configId]
     // Reflect the choice in the UI immediately; the agent is synced below,
     // or when a live session attaches if there isn't one yet.
     session.applyLocalConfigValue(configId, value)
@@ -1652,6 +1718,10 @@ export class AppModel extends EventEmitter {
       const options = await agent.setConfigOption(acpId, configId, value)
       session.setConfigOptions(options)
       this.rememberConfig(options)
+      // The CLI tells its other live sessions; the cold chats hear it here.
+      const changed = this.changedSharedConfig(before, session.displayedConfigValues())
+      if (isSharedConfig(configId)) changed.add(configId)
+      this.spreadSharedConfig(session, changed)
       this.persist()
     } catch (err) {
       // Named as the user knows it ("Model"), not by its wire id.
@@ -1680,6 +1750,8 @@ export class AppModel extends EventEmitter {
       if (refused) {
         if (previous !== undefined) session.applyLocalConfigValue(configId, previous)
         delete session.pendingConfigChanges[configId]
+        // Settings may already have shown the refused value in every chat.
+        if (isSharedConfig(configId)) this.spreadSharedConfig(session)
       } else {
         session.pendingConfigChanges[configId] = value
       }
@@ -1690,8 +1762,8 @@ export class AppModel extends EventEmitter {
   /** Settings' defaults (the permission level). The CLI keeps these for
    *  every session, so changing one through a live session changes it
    *  everywhere — the selected chat's if it is live, else any live one. The
-   *  seed new chats start with is updated either way, and a chat attached
-   *  later pushes it like any shown value. */
+   *  seed new chats start with is updated either way; with nothing live the
+   *  change waits in prefs.pendingDefaults for the next chat to attach. */
   async setDefaultOption(configId: string, value: ConfigValue): Promise<void> {
     this.setSeedValue(configId, value)
 
@@ -1700,17 +1772,22 @@ export class AppModel extends EventEmitter {
       (selected && this.liveACPSessionId(selected) ? selected : null) ??
       this.sessions.find((s) => !s.isScratch && this.liveACPSessionId(s) !== null) ??
       null
-    // Every other chat shows the new value too. A cold chat pushes what it
-    // shows when it attaches, so one still showing the old level would put
-    // it back for every session the moment it was opened.
+    // Every other chat shows the new value too, and any change one of them
+    // had queued for this setting is superseded.
     for (const session of this.sessions) {
       if (session === target || session.isScratch) continue
       if (!session.configOptions.some((o) => o.id === configId)) continue
       session.applyLocalConfigValue(configId, value)
       delete session.pendingConfigChanges[configId]
     }
-    if (target) await this.setConfigValue(target.id, configId, value)
-    else this.persist()
+    if (target) {
+      await this.setConfigValue(target.id, configId, value)
+    } else {
+      if (isSharedConfig(configId)) {
+        this.prefs.pendingDefaults = { ...this.prefs.pendingDefaults, [configId]: value }
+      }
+      this.persist()
+    }
   }
 
   /** A choice made in the new-session composer, before its chat exists. It
@@ -2063,10 +2140,21 @@ export class AppModel extends EventEmitter {
         break
       case 'config_option_update':
         if (update.options.length > 0) {
+          const before = session.displayedConfigValues()
           session.setConfigOptions(update.options)
           this.rememberConfig(update.options)
+          // A change made in another session or by a slash command
+          // (/permission, /thinking, /ultra): the cold chats show it too.
+          this.spreadSharedConfig(session, this.changedSharedConfig(before, session.displayedConfigValues()))
           this.persist()
         }
+        break
+      case 'current_mode_update':
+        // Spettro reports its mode as the "mode" config option; an agent that
+        // also speaks ACP's session modes moves the same chip.
+        delete session.pendingConfigChanges['mode']
+        session.applyLocalConfigValue('mode', update.modeId)
+        this.persist()
         break
       case 'plan':
         session.setPlan(update.entries)

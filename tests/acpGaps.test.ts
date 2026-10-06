@@ -10,7 +10,13 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { AcpAgent, AcpConnection, parseAgentCapabilities, parseToolCallEvent } from '@main/acp'
+import {
+  AcpAgent,
+  AcpConnection,
+  parseAgentCapabilities,
+  parseConfigOptions,
+  parseToolCallEvent
+} from '@main/acp'
 import { AppModel } from '@main/model/appModel'
 import type { ChatSession } from '@main/model/chatSession'
 import type { ACPPermissionRequest, JSONValue } from '@shared/acp'
@@ -19,6 +25,9 @@ import type { StoredSession } from '@shared/model'
 import {
   agentChunk,
   compactRequest,
+  configOptionUpdate,
+  configOptions,
+  currentModeUpdate,
   initializeResult,
   permissionAttached,
   permissionFresh,
@@ -826,5 +835,179 @@ describe('workflow calls for a chat with no live session', () => {
     const session = model.newChat('/work/acme')
     await expect(model.listWorkflows(session.id)).rejects.toThrow(/doesn't support/)
     expect(fake.calls('_spettro/workflow/list')).toHaveLength(0)
+  })
+})
+
+describe('settings the CLI shares across sessions', () => {
+  // Only the mode is a session's own; the model, permission, thinking level,
+  // Ultra and workflow size live in ~/.spettro (bridge.go sharedSettings).
+  // A chat that has been cold since launch still shows whatever they were
+  // when it was last open, and pushing that on resume rewrote them for every
+  // session and the TUI: opening an old chat could turn YOLO back on.
+
+  /** Stored chat `id` (ACP session `acpId`), last seen showing `shown`. */
+  function storedShowing(id: string, acpId: string, shown: Parameters<typeof configOptions>[0]): StoredSession {
+    return { ...stored(id, acpId), configOptions: parseConfigOptions(configOptions(shown)) }
+  }
+
+  /** The set_config_option calls the app made, as `id=value`. */
+  function pushed(): string[] {
+    return fake.calls('session/set_config_option').map((m) => {
+      const p = m.params as { configId: string; value: string | boolean }
+      return `${p.configId}=${String(p.value)}`
+    })
+  }
+
+  function answerSetConfig(current: Parameters<typeof configOptions>[0]): void {
+    fake.handlers['session/set_config_option'] = (params) => {
+      const p = params as { configId: string; value: string }
+      Object.assign(current, { [p.configId]: p.value })
+      return { configOptions: configOptions(current) }
+    }
+  }
+
+  const shownIn = (chatId: string): Record<string, unknown> =>
+    model.sessionById(chatId)?.displayedConfigValues() ?? {}
+
+  it('a resumed chat adopts them from the CLI instead of pushing its stale ones', async () => {
+    liveModel([storedShowing('a', 'old-a', { permission: 'yolo', thinking: 'off' })])
+    fake.handlers['session/resume'] = () => ({
+      configOptions: configOptions({ permission: 'ask-first', thinking: 'max' })
+    })
+    answerSetConfig({ permission: 'ask-first', thinking: 'max' })
+    model.openChat('a')
+    await settle()
+    expect(pushed()).toEqual([])
+    expect(shownIn('a')).toMatchObject({ permission: 'ask-first', thinking: 'max' })
+  })
+
+  it('a change in one chat reaches the cold ones, and opening them keeps it', async () => {
+    liveModel([storedShowing('a', 'old-a', { thinking: 'off', permission: 'ask-first' })])
+    const cli = { thinking: 'off', permission: 'ask-first' }
+    fake.handlers['session/new'] = () => ({ sessionId: 's1', configOptions: configOptions(cli) })
+    answerSetConfig(cli)
+    const b = model.newChat(dir)
+    await settle()
+    await model.setConfigValue(b.id, 'thinking', 'max')
+    await model.setConfigValue(b.id, 'permission', 'yolo')
+    expect(shownIn('a')).toMatchObject({ thinking: 'max', permission: 'yolo' })
+
+    fake.handlers['session/resume'] = () => ({ configOptions: configOptions(cli) })
+    model.openChat('a')
+    await settle()
+    expect(pushed()).toEqual(['thinking=max', 'permission=yolo'])
+    expect(cli).toMatchObject({ thinking: 'max', permission: 'yolo' })
+    expect(b.displayedConfigValues()).toMatchObject({ thinking: 'max', permission: 'yolo' })
+  })
+
+  it('a slash command’s config_option_update reaches the cold chats and supersedes their queue', async () => {
+    const a = storedShowing('a', 'old-a', { permission: 'yolo' })
+    a.pendingConfigChanges = { permission: 'yolo' }
+    liveModel([a])
+    fake.handlers['session/new'] = () => ({ sessionId: 's1', configOptions: configOptions({ permission: 'yolo' }) })
+    const b = model.newChat(dir)
+    await settle()
+    // `/permission ask-first` typed in b (bridge.go, the handled-slash path).
+    fake.update('s1', configOptionUpdate(configOptions({ permission: 'ask-first' })))
+    await settle()
+    expect(shownIn('a')).toMatchObject({ permission: 'ask-first' })
+    expect(model.sessionById('a')?.pendingConfigChanges).toEqual({})
+
+    fake.handlers['session/resume'] = () => ({ configOptions: configOptions({ permission: 'ask-first' }) })
+    model.openChat('a')
+    await settle()
+    expect(pushed()).toEqual([])
+    expect(b.displayedConfigValues()).toMatchObject({ permission: 'ask-first' })
+  })
+
+  it('a change the user queued in the cold chat itself still goes through', async () => {
+    const a = storedShowing('a', 'old-a', { thinking: 'high' })
+    a.pendingConfigChanges = { thinking: 'high' }
+    liveModel([a])
+    fake.handlers['session/resume'] = () => ({ configOptions: configOptions({ thinking: 'low' }) })
+    answerSetConfig({ thinking: 'low' })
+    model.openChat('a')
+    await settle()
+    expect(pushed()).toEqual(['thinking=high'])
+  })
+
+  it('the chat’s own mode is still put back on resume', async () => {
+    liveModel([storedShowing('a', 'old-a', { mode: 'ask', permission: 'yolo' })])
+    fake.handlers['session/resume'] = () => ({ configOptions: configOptions({ mode: 'plan' }) })
+    answerSetConfig({ mode: 'plan' })
+    model.openChat('a')
+    await settle()
+    expect(pushed()).toEqual(['mode=ask'])
+    expect(shownIn('a')).toMatchObject({ mode: 'ask', permission: 'ask-first' })
+  })
+
+  it('a default set with nothing live waits for the next chat, which pushes it once', async () => {
+    liveModel([storedShowing('a', 'old-a', {}), storedShowing('b', 'old-b', {})])
+    await model.setDefaultOption('permission', 'restricted')
+    expect(pushed()).toEqual([])
+    expect(shownIn('a')).toMatchObject({ permission: 'restricted' })
+
+    const cli = { permission: 'ask-first' }
+    fake.handlers['session/resume'] = () => ({ configOptions: configOptions(cli) })
+    answerSetConfig(cli)
+    model.openChat('a')
+    await settle()
+    model.openChat('b')
+    await settle()
+    expect(pushed()).toEqual(['permission=restricted'])
+    expect(shownIn('b')).toMatchObject({ permission: 'restricted' })
+  })
+})
+
+describe('the mode chip', () => {
+  it('follows a config_option_update, as `/plan <task>` sends', async () => {
+    liveModel()
+    fake.handlers['session/new'] = () => ({ sessionId: 's1', configOptions: configOptions({ mode: 'coding' }) })
+    const chat = model.newChat(dir)
+    await settle()
+    fake.update('s1', configOptionUpdate(configOptions({ mode: 'plan' })))
+    await settle()
+    expect(chat.displayedConfigValues()['mode']).toBe('plan')
+    expect(events.some((e) => e.type === 'chat-meta' && e.chatId === chat.id && e.meta.configOptions)).toBe(true)
+  })
+
+  it('follows ACP’s current_mode_update too', async () => {
+    liveModel()
+    fake.handlers['session/new'] = () => ({ sessionId: 's1', configOptions: configOptions({ mode: 'coding' }) })
+    const chat = model.newChat(dir)
+    await settle()
+    fake.update('s1', currentModeUpdate('ask'))
+    await settle()
+    expect(chat.displayedConfigValues()['mode']).toBe('ask')
+  })
+})
+
+describe('sessions the app started', () => {
+  it('never come back as "started in a terminal" once their chat is deleted', async () => {
+    liveModel([stored('a', 'old-a')])
+    fake.handlers['session/close'] = () => ({})
+    fake.handlers['session/list'] = () =>
+      sessionList([
+        { id: 'old-a', cwd: '/work/acme', title: 'hello' },
+        { id: 's1', cwd: '/work/acme', title: 'a chat from today' },
+        { id: 'scratch-1', cwd: '/work/acme', title: '/workflows run review' },
+        { id: 'tui-1', cwd: '/work/acme', title: 'from the terminal' }
+      ])
+    const today = await liveChat()
+    // A Workflow Studio run's scratch chat, discarded when the studio closes.
+    fake.handlers['session/new'] = () => ({ sessionId: 'scratch-1', configOptions: [] })
+    fake.handlers['session/prompt'] = () => promptResult({})
+    const scratch = model.runWorkflow(today.id, 'review') as string
+    await settle()
+    model.discardScratchChat(scratch)
+    model.closeChat(today.id)
+    model.closeChat('a')
+    const entries = await model.listCLISessions('/work/acme')
+    expect(entries.map((e) => e.sessionId)).toEqual(['tui-1'])
+
+    // …and that holds across a relaunch.
+    const again = new AppModel({ userDataDir: dir, appVersion: '0.0.0-test' })
+    const prefs = (again as unknown as { prefs: { isKnownSession(id: string): boolean } }).prefs
+    expect(['old-a', 's1', 'scratch-1'].every((id) => prefs.isKnownSession(id))).toBe(true)
   })
 })

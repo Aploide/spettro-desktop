@@ -360,6 +360,10 @@ export function parseSessionUpdate(update: JSONValue): ACPSessionUpdate | null {
       return { kind: 'available_commands_update', commands: parseCommands(obj['availableCommands']) }
     case 'config_option_update':
       return { kind: 'config_option_update', options: parseConfigOptions(obj['configOptions']) }
+    case 'current_mode_update': {
+      const modeId = stringValue(obj['currentModeId'])
+      return modeId ? { kind: 'current_mode_update', modeId } : null
+    }
     case 'plan':
       return { kind: 'plan', entries: parsePlan(obj['entries']) }
     case 'usage_update': {

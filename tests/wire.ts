@@ -734,3 +734,36 @@ export function planUpdate(
     }))
   }
 }
+
+/**
+ * A session's config options as the CLI reports them (internal/acp
+ * config_options.go buildConfigOptions), cut to the ones a test needs: the
+ * per-session mode, and the permission and thinking level the CLI keeps in
+ * ~/.spettro for every session (bridge.go sharedSettings).
+ */
+export function configOptions(o: { mode?: string; permission?: string; thinking?: string }): JSON[] {
+  const select = (id: string, name: string, currentValue: string, values: string[]): JSON => ({
+    id,
+    name,
+    type: 'select',
+    currentValue,
+    options: values.map((value) => ({ name: value, value }))
+  })
+  return [
+    select('mode', 'Mode', o.mode ?? 'coding', ['plan', 'coding', 'ask']),
+    select('permission', 'Permission', o.permission ?? 'ask-first', ['ask-first', 'restricted', 'yolo']),
+    select('thinking', 'Thinking', o.thinking ?? 'medium', ['off', 'low', 'medium', 'high', 'x-high', 'max'])
+  ]
+}
+
+/** A `config_option_update` (bridge.go syncOtherSessions, the handled-slash
+ *  path, and `/plan <task>`): the session's whole option set. */
+export function configOptionUpdate(options: JSON[]): JSON {
+  return { sessionUpdate: 'config_option_update', configOptions: options }
+}
+
+/** ACP's `current_mode_update`. Spettro reports its mode as a config option
+ *  instead and never sends this; an agent that speaks session modes does. */
+export function currentModeUpdate(modeId: string): JSON {
+  return { sessionUpdate: 'current_mode_update', currentModeId: modeId }
+}

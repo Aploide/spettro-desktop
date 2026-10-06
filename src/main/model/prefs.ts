@@ -29,6 +29,12 @@
 //                     — the home folder (or /) the user said "Continue" for on
 //                       the new-session warning, so it isn't asked again on
 //                       every new session and every launch
+//   pendingDefaults   — shared settings (model, permission, thinking, ultra,
+//                       workflow size) the user changed while no session was
+//                       live; the next session to attach pushes them, once
+//   knownSessionIds   — every CLI session id this app created or imported,
+//                       kept after the chat is deleted: the CLI keeps those
+//                       on disk, and they are not "started in a terminal"
 
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'fs'
 import { dirname, join } from 'path'
@@ -45,6 +51,8 @@ interface PrefsData {
   providerSetupSkipped: boolean
   notifyWhenDone: boolean
   approvedBroadFolders: string[]
+  pendingDefaults: Record<string, string | boolean>
+  knownSessionIds: string[]
 }
 
 /** The commands-cache key for "the last list seen in any folder". */
@@ -53,6 +61,9 @@ const ANY_PROJECT = ''
 /** Folders whose command lists are remembered, besides the fallback. Oldest
  *  written goes first, so the file can't grow with every folder ever opened. */
 const MAX_CACHED_PROJECTS = 40
+
+/** Session ids remembered as the app's own; the oldest go first. */
+const MAX_KNOWN_SESSIONS = 2000
 
 function defaults(): PrefsData {
   return {
@@ -64,7 +75,9 @@ function defaults(): PrefsData {
     appearance: 'system',
     providerSetupSkipped: false,
     notifyWhenDone: true,
-    approvedBroadFolders: []
+    approvedBroadFolders: [],
+    pendingDefaults: {},
+    knownSessionIds: []
   }
 }
 
@@ -103,6 +116,14 @@ function sanitize(raw: unknown): PrefsData {
   if (typeof obj.notifyWhenDone === 'boolean') data.notifyWhenDone = obj.notifyWhenDone
   if (Array.isArray(obj.approvedBroadFolders)) {
     data.approvedBroadFolders = obj.approvedBroadFolders.filter((p): p is string => typeof p === 'string')
+  }
+  if (typeof obj.pendingDefaults === 'object' && obj.pendingDefaults !== null) {
+    for (const [id, value] of Object.entries(obj.pendingDefaults)) {
+      if (typeof value === 'string' || typeof value === 'boolean') data.pendingDefaults[id] = value
+    }
+  }
+  if (Array.isArray(obj.knownSessionIds)) {
+    data.knownSessionIds = obj.knownSessionIds.filter((id): id is string => typeof id === 'string')
   }
   return data
 }
@@ -244,6 +265,26 @@ export class Prefs {
   approveBroadFolder(path: string): void {
     if (this.data.approvedBroadFolders.includes(path)) return
     this.data.approvedBroadFolders = [...this.data.approvedBroadFolders, path]
+    this.save()
+  }
+
+  /** Shared settings waiting for a live session to carry them to the CLI. */
+  get pendingDefaults(): Record<string, string | boolean> {
+    return { ...this.data.pendingDefaults }
+  }
+
+  set pendingDefaults(values: Record<string, string | boolean>) {
+    this.data.pendingDefaults = { ...values }
+    this.save()
+  }
+
+  isKnownSession(id: string): boolean {
+    return this.data.knownSessionIds.includes(id)
+  }
+
+  rememberSession(id: string): void {
+    if (this.data.knownSessionIds.includes(id)) return
+    this.data.knownSessionIds = [...this.data.knownSessionIds, id].slice(-MAX_KNOWN_SESSIONS)
     this.save()
   }
 }

@@ -131,6 +131,7 @@ export type ACPSessionUpdate =
   | { kind: 'tool_call_update'; event: ACPToolCallEvent }
   | { kind: 'available_commands_update'; commands: ACPCommand[] }
   | { kind: 'config_option_update'; options: ACPConfigOption[] }
+  | { kind: 'current_mode_update'; modeId: string }
   | { kind: 'plan'; entries: ACPPlanEntry[] }
   | { kind: 'usage_update'; usage: ACPUsage }
   | { kind: 'other'; tag: string }

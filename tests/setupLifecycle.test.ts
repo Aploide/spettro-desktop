@@ -13,7 +13,10 @@ import type { ChildProcess } from 'child_process'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { configValue } from '@shared/ipc'
 
-vi.mock('@main/model/cliLocator', () => ({ locateCLI: vi.fn(async () => null) }))
+vi.mock('@main/model/cliLocator', async (original) => ({
+  ...(await original<typeof import('@main/model/cliLocator')>()),
+  locateCLI: vi.fn(async () => null)
+}))
 
 const { CLIInstaller, phaseForLine } = await import('@main/model/cliInstaller')
 const { AppModel } = await import('@main/model/appModel')

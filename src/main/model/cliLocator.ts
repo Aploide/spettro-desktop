@@ -15,7 +15,7 @@
 // beside the CLI repo can still see the first-run setup screens.
 
 import { execFile } from 'child_process'
-import { accessSync, constants, statSync } from 'fs'
+import { accessSync, constants, existsSync, statSync } from 'fs'
 import { homedir } from 'os'
 import { delimiter, dirname, join } from 'path'
 
@@ -136,4 +136,39 @@ export async function locateCLI(explicitPath: string | null): Promise<LocatedCLI
     }
   }
   return null
+}
+
+/** Why a file the user chose can't be the CLI. */
+export type ExplicitCLIProblem = 'missing' | 'not-runnable' | 'not-spettro'
+
+/** Each problem, said so it points the right way: a path with nothing at it
+ *  is not "the wrong file". */
+export const EXPLICIT_CLI_PROBLEM: Record<ExplicitCLIProblem, string> = {
+  missing: 'There’s no file at that path.',
+  'not-runnable': 'Spettro can’t run that file. Check that it’s the spettro program.',
+  'not-spettro': 'That file isn’t Spettro. Choose the file named “spettro”.'
+}
+
+/** Whether `--version` output is Spettro's: "spettro v2.8.2", "spettro dev",
+ *  or a bare version from a build that prints only that. */
+export function looksLikeSpettroVersion(output: string | null): boolean {
+  if (output === null) return false
+  return /\bspettro\b/i.test(output) || /^v?\d+\.\d+(?:\.\d+)?(?:[-+.\w]*)$/.test(output.trim())
+}
+
+/**
+ * A file the user chose ("Use an existing copy…", "Type a path"), checked
+ * before it is saved: it must exist, be runnable, and say it is Spettro when
+ * asked its version. Unlike locateCLI, it never falls back to another copy.
+ */
+export async function checkExplicitCLI(
+  path: string,
+  version: (p: string) => Promise<string | null> = readVersion
+): Promise<{ ok: true; cli: LocatedCLI } | { ok: false; problem: ExplicitCLIProblem }> {
+  const trimmed = path.trim()
+  if (trimmed === '' || !existsSync(trimmed)) return { ok: false, problem: 'missing' }
+  if (!isExecutable(trimmed)) return { ok: false, problem: 'not-runnable' }
+  const said = await version(trimmed)
+  if (!looksLikeSpettroVersion(said)) return { ok: false, problem: 'not-spettro' }
+  return { ok: true, cli: { path: trimmed, version: said, isDev: false } }
 }

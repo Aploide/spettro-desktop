@@ -332,9 +332,15 @@ export interface AppStateDTO {
   /** "Continue without" on the setup's connect step, remembered. */
   providerSetupSkipped: boolean
   notifyWhenDone: boolean
+  /** Broad folders (home, /) the user has said "Continue" for. */
+  approvedBroadFolders: string[]
   /** The options new sessions start with (the last set any session had):
    *  what Settings shows as the defaults, e.g. the permission level. */
   defaultConfigOptions: ACPConfigOption[]
   /** Chats with a turn running — what quitting or updating would stop. */
   busyTasks: number
 }
+
+/** The folder in the home folder where "New project folder…" makes
+ *  projects (main/model/projectFolder.ts). */
+export const PROJECTS_FOLDER = 'Spettro Projects'

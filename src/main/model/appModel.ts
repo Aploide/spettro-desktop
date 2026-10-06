@@ -17,9 +17,9 @@
 
 import { EventEmitter } from 'events'
 import { randomUUID } from 'crypto'
-import { statSync } from 'fs'
+import { mkdirSync, statSync } from 'fs'
 import { homedir } from 'os'
-import { basename } from 'path'
+import { basename, join } from 'path'
 import type {
   ACPConfigOption,
   ACPContentBlock,
@@ -47,7 +47,7 @@ import type {
   SubscriptionState,
   TurnSummary
 } from '../../shared/model'
-import { isAppearance } from '../../shared/model'
+import { isAppearance, PROJECTS_FOLDER } from '../../shared/model'
 import type {
   ConnectResult,
   LocalProbeResult,
@@ -67,9 +67,10 @@ import { AcpAgent, AcpConnection, AcpError } from '../acp'
 import type { WorkflowTarget } from '../acp/extensions'
 import { ChatSession, type ConfigValue } from './chatSession'
 import { CLIInstaller, type InstallFailure } from './cliInstaller'
-import { locateCLI } from './cliLocator'
+import { checkExplicitCLI, EXPLICIT_CLI_PROBLEM, locateCLI } from './cliLocator'
 import { ExtensionStores } from './extensionStores'
 import { Prefs } from './prefs'
+import { newProjectPath } from './projectFolder'
 import { cleanMention, promptBlocks, type PromptAttachment } from './promptBlocks'
 import { SessionStore } from './sessionStore'
 import { SubscriptionStore } from './subscriptionStore'
@@ -290,9 +291,10 @@ export class AppModel extends EventEmitter {
       missingProjects: this.missingProjects(),
       homePath: homedir(),
       appearance: this.prefs.appearance,
-      noModel: this.extensions.needsProviderSetup && !this.extensions.isSignedIn,
+      noModel: this.noModel,
       providerSetupSkipped: this.prefs.providerSetupSkipped,
       notifyWhenDone: this.prefs.notifyWhenDone,
+      approvedBroadFolders: this.prefs.approvedBroadFolders,
       defaultConfigOptions: this.prefs.lastConfigOptions,
       busyTasks: this.busyCount()
     }
@@ -520,9 +522,11 @@ export class AppModel extends EventEmitter {
     const agent = new AcpAgent(connection)
     this.pendingConnection = connection
 
+    let answered = false
     try {
       await connection.start()
       const info = await this.handshake(agent, connection)
+      answered = true
       // A teardown landed while we were waiting: this process is no longer
       // the one the app wants. Kill it and leave the phase to whoever
       // superseded us.
@@ -560,7 +564,15 @@ export class AppModel extends EventEmitter {
       connection.stop()
       if (token !== this.connectionToken) return
       this.connectionState = 'ok'
-      this.setPhase({ kind: 'failed', message: errMessage(err) })
+      // Gone before it said a word: not a crash worth one more try — the file
+      // is not Spettro (any executable can be chosen), or a damaged copy.
+      const quitEarly = !answered && err instanceof AcpError && (err.kind === 'terminated' || err.kind === 'transport')
+      this.setPhase({
+        kind: 'failed',
+        message: quitEarly
+          ? `${errMessage(err)} It quit before answering — it may not be Spettro.`
+          : errMessage(err)
+      })
     } finally {
       if (this.pendingConnection === connection) this.pendingConnection = null
     }
@@ -851,6 +863,9 @@ export class AppModel extends EventEmitter {
       this.setPhase({ kind: 'needsSetup' })
       return
     }
+    // Installing means "use the copy Spettro installs": a file chosen earlier
+    // (perhaps the wrong one) must not keep winning at launch.
+    this.prefs.explicitCLIPath = ''
     this.cli = { path: found.path, version: found.version, isDev: found.isDev }
     this.installLog.push(`Installed at ${found.path}`)
     this.install = { stage: 'done', failure: null }
@@ -885,12 +900,17 @@ export class AppModel extends EventEmitter {
   }
 
   async useExplicitPath(path: string): Promise<void> {
-    const found = await locateCLI(path)
-    if (!found) {
-      this.showBanner('That file isn’t the Spettro app. Choose the file named “spettro”.')
+    // Checked here, and never swapped for another copy: an invalid choice is
+    // said in words and nothing changes. (Any executable used to pass, and a
+    // path with nothing at it fell through to whichever spettro the search
+    // found, saved as the choice while another binary ran.)
+    const checked = await checkExplicitCLI(path)
+    if (!checked.ok) {
+      this.showBanner(EXPLICIT_CLI_PROBLEM[checked.problem])
       return
     }
-    this.prefs.explicitCLIPath = path
+    const found = checked.cli
+    this.prefs.explicitCLIPath = found.path
     this.cli = { path: found.path, version: found.version, isDev: found.isDev }
     // Pointing at a different binary means the running one has to go: a
     // plain connect() would decline to displace it and strand the UI.
@@ -918,6 +938,25 @@ export class AppModel extends EventEmitter {
     this.prefs.lastProjectPath = path
     this.prefs.addRecentProject(path)
     this.emitAppState()
+  }
+
+  /** "Continue" on the new-session warning about working in the home folder
+   *  (or /): remembered for that folder, so it is asked once, not on every
+   *  new session and every launch. */
+  approveBroadFolder(path: string): void {
+    this.prefs.approveBroadFolder(path)
+    this.emitAppState()
+  }
+
+  /** "New project folder…": someone with nothing to open yet ("a website for
+   *  my bakery") gets a folder of its own, ~/Spettro Projects/<name>, chosen
+   *  for the next session like any other. A name already taken gets a
+   *  number rather than mixing two projects in one folder. */
+  createProjectFolder(name: string): string {
+    const path = newProjectPath(join(homedir(), PROJECTS_FOLDER), name)
+    mkdirSync(path, { recursive: true })
+    this.rememberProject(path)
+    return path
   }
 
   /** "Remove from recents". Only the shortcut goes: chats in that folder and
@@ -1106,6 +1145,11 @@ export class AppModel extends EventEmitter {
     void this.runTurn(session, blocks, steering ? message.id : null)
   }
 
+  /** Nothing can run a prompt: no provider, no local model, not signed in. */
+  private get noModel(): boolean {
+    return this.extensions.needsProviderSetup && !this.extensions.isSignedIn
+  }
+
   /** "Try again" on a turn that failed: sends the newest prompt again,
    *  images and @-mentioned files and all, as a new message — the failed attempt stays above it,
    *  so the transcript still says what happened. Does nothing while a turn
@@ -1113,6 +1157,9 @@ export class AppModel extends EventEmitter {
   retryLast(chatId: string): void {
     const session = this.sessionById(chatId)
     if (!session || session.isBusy) return
+    // With no model connected the retry can only fail the same way, adding
+    // another copy of the message and the error under it each time.
+    if (this.noModel) return
     const last = session.items.findLast(
       (item) => item.kind === 'message' && item.message.role === 'user'
     )

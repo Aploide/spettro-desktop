@@ -108,6 +108,17 @@ const RULES: Rule[] = [
     })
   },
   {
+    // Gone before the handshake (main adds the sentence): any executable can
+    // be chosen as the engine, and /usr/bin/true "starts" and exits 0. One
+    // more start won't change that; another file or a fresh install will.
+    test: /quit before answering/i,
+    build: () => ({
+      title: 'That file doesn’t seem to be Spettro',
+      detail: 'It quit as soon as it started. Choose another file, or install Spettro.',
+      action: action('reinstall', 'Install Spettro')
+    })
+  },
+  {
     test: /exited(?: unexpectedly)?\s*\((?:exit )?code (-?\d+)\)|\bexit(?:ed)? (?:with )?(?:code|status) (-?\d+)/i,
     build: () => ({
       title: 'Spettro stopped unexpectedly',

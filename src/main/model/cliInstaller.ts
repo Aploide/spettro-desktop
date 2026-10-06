@@ -1,7 +1,8 @@
 // Runs the official Spettro install script, streaming output lines to a
 // callback — the port of CLIInstaller in CLILocator.swift.
 //
-// POSIX: `sh -c "curl -sSfL <install.sh> | sh"`, installing to ~/.local/bin.
+// POSIX: `sh -c` downloading <install.sh> with curl, then running it with
+// sh (a failed download fails the install), installing to ~/.local/bin.
 //
 // Windows: `powershell -Command "irm <install.ps1> | iex"`, installing to
 // %LOCALAPPDATA%\Programs\spettro. The script adds that directory to the user
@@ -210,7 +211,7 @@ export class CLIInstaller {
 const PHASE_ORDER: InstallPhase[] = ['checking', 'downloading', 'verifying', 'installing']
 
 /** The shell invocation for this platform. */
-function installCommand(platform: NodeJS.Platform): [string, string[]] {
+export function installCommand(platform: NodeJS.Platform): [string, string[]] {
   if (platform === 'win32') {
     // -NoProfile keeps a user's profile out of the pipeline, and silencing the
     // progress preference stops Invoke-WebRequest's progress bar, which makes
@@ -221,7 +222,18 @@ function installCommand(platform: NodeJS.Platform): [string, string[]] {
       ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', script]
     ]
   }
-  return ['sh', ['-c', `curl -sSfL ${CLIInstaller.installScriptURL} | sh`]]
+  // Downloaded first, run second. Piped (`curl … | sh`), a failed download
+  // fed sh nothing, sh exited 0 — "the installer finished" — and the log
+  // then contradicted the "Couldn't download Spettro" above it.
+  return [
+    'sh',
+    [
+      '-c',
+      `script="$(curl -sSfL ${CLIInstaller.installScriptURL})" || ` +
+        `{ status=$?; echo "Couldn't download the installer (curl exited $status)." >&2; exit $status; }; ` +
+        `printf '%s\\n' "$script" | sh`
+    ]
+  ]
 }
 
 function killTree(child: ChildProcess, platform: NodeJS.Platform): void {

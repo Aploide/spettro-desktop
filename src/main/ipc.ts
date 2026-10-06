@@ -47,6 +47,8 @@ export function registerIpc(
     chooseProject: async (path) => model.chooseProject(path),
     rememberProject: async (path) => model.rememberProject(path),
     removeRecentProject: async (path) => model.removeRecentProject(path),
+    approveBroadFolder: async (path) => model.approveBroadFolder(path),
+    createProjectFolder: async (name) => model.createProjectFolder(name),
     setAppearance: async (mode) => model.setAppearance(mode),
     setNotifyWhenDone: async (on) => model.setNotifyWhenDone(on),
     setDefaultOption: (configId, value) => model.setDefaultOption(configId, value),

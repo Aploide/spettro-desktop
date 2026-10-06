@@ -25,6 +25,10 @@
 //                       (the no-model bar above the composer remains)
 //   notifyWhenDone    — a system notification when a turn finishes while the
 //                       window is in the background
+//   approvedBroadFolders
+//                     — the home folder (or /) the user said "Continue" for on
+//                       the new-session warning, so it isn't asked again on
+//                       every new session and every launch
 
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'fs'
 import { dirname, join } from 'path'
@@ -40,6 +44,7 @@ interface PrefsData {
   appearance: Appearance
   providerSetupSkipped: boolean
   notifyWhenDone: boolean
+  approvedBroadFolders: string[]
 }
 
 /** The commands-cache key for "the last list seen in any folder". */
@@ -58,7 +63,8 @@ function defaults(): PrefsData {
     cachedCommandsByProject: {},
     appearance: 'system',
     providerSetupSkipped: false,
-    notifyWhenDone: true
+    notifyWhenDone: true,
+    approvedBroadFolders: []
   }
 }
 
@@ -95,6 +101,9 @@ function sanitize(raw: unknown): PrefsData {
   if (isAppearance(obj.appearance)) data.appearance = obj.appearance
   if (typeof obj.providerSetupSkipped === 'boolean') data.providerSetupSkipped = obj.providerSetupSkipped
   if (typeof obj.notifyWhenDone === 'boolean') data.notifyWhenDone = obj.notifyWhenDone
+  if (Array.isArray(obj.approvedBroadFolders)) {
+    data.approvedBroadFolders = obj.approvedBroadFolders.filter((p): p is string => typeof p === 'string')
+  }
   return data
 }
 
@@ -225,6 +234,16 @@ export class Prefs {
 
   set notifyWhenDone(value: boolean) {
     this.data.notifyWhenDone = value
+    this.save()
+  }
+
+  get approvedBroadFolders(): string[] {
+    return [...this.data.approvedBroadFolders]
+  }
+
+  approveBroadFolder(path: string): void {
+    if (this.data.approvedBroadFolders.includes(path)) return
+    this.data.approvedBroadFolders = [...this.data.approvedBroadFolders, path]
     this.save()
   }
 }

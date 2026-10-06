@@ -105,6 +105,11 @@ export interface RendererApi {
    *  recents) without creating a chat. */
   rememberProject(path: string): Promise<void>
   removeRecentProject(path: string): Promise<void>
+  /** "Continue" in the home folder: don't warn about this folder again. */
+  approveBroadFolder(path: string): Promise<void>
+  /** "New project folder…": makes ~/Spettro Projects/<name> (numbered if
+   *  taken), remembers it like a chosen folder, and resolves to its path. */
+  createProjectFolder(name: string): Promise<string>
   /** Opens a native folder picker; resolves to the chosen path or null. */
   pickFolder(): Promise<string | null>
   /** Opens a native file picker for the CLI binary (NSOpenPanel port);

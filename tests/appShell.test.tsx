@@ -59,6 +59,7 @@ const STATE: AppStateDTO = {
   noModel: false,
   providerSetupSkipped: false,
   notifyWhenDone: true,
+  approvedBroadFolders: [],
   defaultConfigOptions: [],
   busyTasks: 0
 }

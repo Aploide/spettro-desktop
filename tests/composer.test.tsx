@@ -49,20 +49,26 @@ const CATALOG: ModelEntry[] = [
   model('ollama', 'qwen', { local: true, favorite: true })
 ]
 
-vi.mock('@renderer/state/store', () => ({
-  // No approval or question is waiting.
-  useStore: <T,>(select: (s: { permissions: never[]; questions: never[] }) => T): T =>
-    select({ permissions: [], questions: [] }),
-  call: (method: string, ...args: unknown[]) => {
-    calls.push([method, args])
-    return Promise.resolve(method === 'listProjectFiles' ? FILES : null)
-  },
-  getState: () => ({ app: null, chats: {}, permissions: [], questions: [] }),
-  useApp: () => ({
-    phase: { kind: ready ? 'ready' : 'connecting' },
-    extensions: { models: { models: CATALOG, activeProvider: null, activeModel: null } }
-  })
-}))
+vi.mock('@renderer/state/store', () => {
+  const mocked = {
+    // No approval or question is waiting.
+    useStore: <T,>(select: (s: { permissions: never[]; questions: never[] }) => T): T =>
+      select({ permissions: [], questions: [] }),
+    call: (method: string, ...args: unknown[]) => {
+      calls.push([method, args])
+      return Promise.resolve(method === 'listProjectFiles' ? FILES : null)
+    },
+    getState: () => ({ app: null, chats: {}, permissions: [], questions: [] }),
+    useApp: () => ({
+      // "Not ready" here is the engine restarting under the shell.
+      phase: { kind: 'ready' },
+      connection: ready ? 'ok' : 'reconnecting',
+      extensions: { models: { models: CATALOG, activeProvider: null, activeModel: null } }
+    })
+  }
+  // quietCall is call without the failure toast; to a test they are one.
+  return { ...mocked, quietCall: mocked.call }
+})
 
 beforeEach(() => {
   calls.length = 0
@@ -178,7 +184,7 @@ describe('sending', () => {
   it('keeps the draft and says so while reconnecting', () => {
     ready = false
     render(<Composer chat={chat()} />)
-    expect(input().placeholder).toBe('Reconnecting…')
+    expect(input().placeholder).toBe('Spettro is reconnecting — you can keep typing…')
     type('hello')
     fireEvent.keyDown(input(), { key: 'Enter' })
     expect(sent()).toEqual([])
@@ -191,6 +197,45 @@ describe('sending', () => {
     const pdf = new File(['x'], 'spec.pdf', { type: 'application/pdf' })
     fireEvent.drop(card, { dataTransfer: { files: [pdf] } })
     expect(screen.getByRole('status').textContent).toBe('Only images can be attached for now')
+  })
+})
+
+describe('drafts', () => {
+  /** Node's own `localStorage` global shadows jsdom's (see appShell.test). */
+  function memoryStorage(): Storage {
+    const data = new Map<string, string>()
+    return {
+      get length() {
+        return data.size
+      },
+      clear: () => data.clear(),
+      getItem: (k: string) => data.get(k) ?? null,
+      key: (i: number) => [...data.keys()][i] ?? null,
+      removeItem: (k: string) => void data.delete(k),
+      setItem: (k: string, v: string) => void data.set(k, String(v))
+    }
+  }
+
+  it('keeps what was typed when the composer goes away and comes back, per chat', () => {
+    Object.defineProperty(globalThis, 'localStorage', { value: memoryStorage(), configurable: true })
+    const { unmount } = render(<Composer chat={chat()} />)
+    type('half a thought')
+    unmount()
+    render(<Composer chat={chat()} />)
+    expect(input().value).toBe('half a thought')
+    cleanup()
+    render(<Composer chat={{ ...chat(), id: 'other' }} />)
+    expect(input().value).toBe('')
+  })
+
+  it('forgets the draft once it is sent', () => {
+    Object.defineProperty(globalThis, 'localStorage', { value: memoryStorage(), configurable: true })
+    const { unmount } = render(<Composer chat={chat()} />)
+    type('ship it')
+    fireEvent.keyDown(input(), { key: 'Enter' })
+    unmount()
+    render(<Composer chat={chat()} />)
+    expect(input().value).toBe('')
   })
 })
 

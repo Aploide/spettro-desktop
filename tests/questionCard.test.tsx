@@ -14,12 +14,16 @@ import { ARM_DELAY_MS } from '@renderer/views/chat/prompts'
 
 const calls: [string, unknown[]][] = []
 
-vi.mock('@renderer/state/store', () => ({
-  call: (method: string, ...args: unknown[]) => {
-    calls.push([method, args])
-    return Promise.resolve()
+vi.mock('@renderer/state/store', () => {
+  const mocked = {
+    call: (method: string, ...args: unknown[]) => {
+      calls.push([method, args])
+      return Promise.resolve()
+    }
   }
-}))
+  // quietCall is call without the failure toast; to a test they are one.
+  return { ...mocked, quietCall: mocked.call }
+})
 
 function form(): ACPQuestionRequest {
   return {

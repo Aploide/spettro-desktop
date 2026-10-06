@@ -18,6 +18,8 @@ interface Panel {
   pty: IPty
   projectPath: string
   alive: boolean
+  /** The shell's own process name ("bash", "powershell.exe"). */
+  shellName: string
 }
 
 export class TerminalManager {
@@ -55,7 +57,12 @@ export class TerminalManager {
       env
     })
 
-    const panel: Panel = { pty, projectPath, alive: true }
+    const panel: Panel = {
+      pty,
+      projectPath,
+      alive: true,
+      shellName: shell.split(/[\\/]/).pop() ?? shell
+    }
     this.panels.set(id, panel)
 
     pty.onData((data) => {
@@ -98,6 +105,27 @@ export class TerminalManager {
         // Already gone.
       }
     }
+  }
+
+  /** Whether something other than the shell itself is in the foreground
+   *  (node-pty names the foreground process) — closing the tab would kill
+   *  it, which deserves a question first. */
+  hasProcess(id: string): boolean {
+    const panel = this.panels.get(id)
+    if (!panel || !panel.alive) return false
+    try {
+      const running = (panel.pty.process ?? '').split(/[\\/]/).pop() ?? ''
+      return running !== '' && running !== panel.shellName
+    } catch {
+      return false
+    }
+  }
+
+  /** Tabs with a command running in them, across every project. */
+  runningCount(): number {
+    let count = 0
+    for (const id of this.panels.keys()) if (this.hasProcess(id)) count += 1
+    return count
   }
 
   /** termIds scoped to one project — per-project tabs, doc 17. */

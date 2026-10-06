@@ -13,5 +13,10 @@ const mode = new URLSearchParams(location.search).get('mode') ?? 'welcome'
 localStorage.setItem('spettro.sidebarCollapsed', mode === 'collapsed' ? '1' : '0')
 localStorage.removeItem('spettro.sidebarWidth')
 localStorage.setItem('spettro.terminalDrawerVisible', '0')
+// Unsent drafts are kept per chat (state/drafts.ts); one scene's typing must not
+// show up in the next scene's composer.
+for (const key of Object.keys(localStorage)) {
+  if (key.startsWith('spettro.draft.')) localStorage.removeItem(key)
+}
 
 export {}

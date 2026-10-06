@@ -1,32 +1,56 @@
 // Port of ContentView.swift + the SpettroApp command layer: routes exactly one
-// screen per app phase, hosts the app-wide sheets (settings, remote access,
-// and the fallback for an approval no chat claims) so they are reachable in
-// every phase, shows the transient banner as a top toast, and binds the
-// global keyboard shortcuts.
+// screen per app phase, hosts the app-wide sheets (settings, the workflow
+// studio, and the fallback for an approval no chat claims) so they are
+// reachable in every phase, draws the toasts and alerts, and binds the
+// global keyboard shortcuts and the application menu's commands.
 //
 // Once the agent is up the shell is persistent, like the Claude Code tab: the
 // sidebar stays put (unless collapsed with Ctrl/Cmd+B) and the main column
-// shows either the selected session or the new-session empty state.
+// shows either the selected session or the new-session empty state. It stays
+// up through an engine restart, too — main keeps the phase and says
+// "reconnecting" instead — so a crash or an update never unmounts a draft.
 
 import { useEffect, useState } from 'react'
 import './design/theme.css'
 import './design/shell.css'
-import { call, ensureChatLoaded, getState, initStore, useApp, useStore } from './state/store'
-import { focusComposer, startNewSession, toggleSidebar, toggleTerminal, useShell } from './state/shell'
+import type { MenuCommand } from '@shared/shortcuts'
+import {
+  call,
+  ensureChatLoaded,
+  getState,
+  initStore,
+  quietCall,
+  setFailureReporter,
+  useApp,
+  useStore
+} from './state/store'
+import {
+  closeSettings,
+  focusComposer,
+  openSettings,
+  setNewSessionPath,
+  startNewSession,
+  toggleSidebar,
+  toggleTerminal,
+  useShell
+} from './state/shell'
+import { pendingDeletes, usePendingDeletes } from './state/pendingDeletes'
 import LoadingView from './views/shell/LoadingView'
 import FailureView from './views/shell/FailureView'
 import Sidebar from './views/shell/Sidebar'
 import NewSessionView from './views/shell/NewSessionView'
 import QuickSwitcher from './views/shell/QuickSwitcher'
-import OnboardingView from './views/shell/OnboardingView'
-import SettingsView, { type SettingsPane } from './views/shell/SettingsView'
+import SetupAssistant from './views/shell/OnboardingView'
+import SettingsView from './views/shell/SettingsView'
+import { reportActionFailure } from './views/shell/actions'
 import { visibleSessionOrder } from './views/shell/sessionGroups'
 import { isMac } from './views/shell/util'
+import { ConfirmHost, isConfirmOpen } from './views/common/ConfirmDialog'
+import { showToast, ToastHost } from './views/common/Toast'
+import { mayClose } from './views/common/closeGuard'
 import ChatView from '@renderer/views/chat/ChatView'
 import PermissionCard from '@renderer/views/chat/PermissionCard'
 import QuestionCard from '@renderer/views/chat/QuestionCard'
-import RemoteAccessView from '@renderer/views/remote/RemoteAccessView'
-import ConnectProvidersView from '@renderer/views/providers/ConnectProvidersView'
 import WorkflowStudio from '@renderer/views/workflows/WorkflowStudio'
 
 export default function App(): JSX.Element {
@@ -34,12 +58,12 @@ export default function App(): JSX.Element {
   const permissions = useStore((s) => s.permissions)
   const questions = useStore((s) => s.questions)
 
-  // Settings sheet visibility is local renderer state (the sidebar gear, the
-  // failure view, and Ctrl/Cmd+, all funnel here); the value doubles as the
-  // pane the sheet opens on.
-  const [settingsPane, setSettingsPane] = useState<SettingsPane | null>(null)
-  const [remoteOpen, setRemoteOpen] = useState(false)
+  // Settings is opened from all over (the sidebar, Ctrl/Cmd+, the menu, a
+  // toast, the composer's "Connect a model" bar), so its pane lives in the
+  // shell store; null is closed.
+  const settingsPane = useShell((s) => s.settingsPane)
   const [switcherOpen, setSwitcherOpen] = useState(false)
+  const deleting = usePendingDeletes()
   const sidebarCollapsed = useShell((s) => s.sidebarCollapsed)
   // The studio is pinned to the chat that opened it, not to whatever is
   // selected now: it holds an unsaved draft, and having the project shift out
@@ -48,13 +72,15 @@ export default function App(): JSX.Element {
   const [workflowsChatId, setWorkflowsChatId] = useState<string | null>(null)
 
   // Port of AppModel.providerSetupSkipped: the user chose to continue without
-  // finishing provider setup, so the gate doesn't pull them back. The chat
-  // will fail on its first prompt if nothing is connected, which is theirs to
-  // decide — being unable to reach settings, sessions, or the sidebar is not a
-  // reasonable price for an unfinished setup step.
-  const [providerSetupSkipped, setProviderSetupSkipped] = useState(false)
+  // finishing provider setup, so the gate doesn't pull them back (main keeps
+  // the choice across launches; the local flag releases the screen at once).
+  // The composer's "Connect a model" bar stays as the way back.
+  const [skippedHere, setSkippedHere] = useState(false)
+  const providerSetupSkipped = skippedHere || app?.providerSetupSkipped === true
 
   useEffect(() => {
+    // Every failed action becomes a toast in words from here on.
+    setFailureReporter(reportActionFailure)
     initStore()
   }, [])
 
@@ -75,9 +101,11 @@ export default function App(): JSX.Element {
   // Ctrl+`, which is how you get out of it.
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
+      // An alert is up: it owns the keyboard (it answers Escape itself).
+      if (isConfirmOpen()) return
       const state = getState().app
       const phase = state?.phase.kind
-      const sheetOpen = remoteOpen || workflowsChatId !== null || settingsPane !== null
+      const sheetOpen = workflowsChatId !== null || settingsPane !== null
       const shellUp =
         phase === 'ready' ||
         phase === 'needsProject' ||
@@ -93,10 +121,11 @@ export default function App(): JSX.Element {
       if (e.target instanceof Element && e.target.closest('.xterm')) return
 
       if (e.key === 'Escape') {
+        // The studio and Settings may hold unsaved edits: they are asked
+        // (mayClose) rather than dropped.
         if (switcherOpen) setSwitcherOpen(false)
-        else if (remoteOpen) setRemoteOpen(false)
-        else if (workflowsChatId) setWorkflowsChatId(null)
-        else if (settingsPane) setSettingsPane(null)
+        else if (workflowsChatId) void closeWorkflows()
+        else if (settingsPane) void requestCloseSettings()
         return
       }
       // Cmd on macOS, Ctrl elsewhere: on a Mac, Ctrl+K and friends are text
@@ -105,10 +134,10 @@ export default function App(): JSX.Element {
       const key = e.key.toLowerCase()
       if (e.key === ',') {
         e.preventDefault()
-        setSettingsPane('general')
+        openSettings('general')
       } else if (key === 'r' && e.shiftKey) {
         e.preventDefault()
-        setRemoteOpen(true)
+        openSettings('remote')
       } else if (key === 'w' && e.shiftKey) {
         const selected = state?.selectedSessionId ?? null
         if (selected) {
@@ -132,7 +161,8 @@ export default function App(): JSX.Element {
         e.preventDefault()
         focusComposer()
       } else if (/^[1-9]$/.test(e.key)) {
-        const target = visibleSessionOrder(state?.sessions ?? [])[Number(e.key) - 1]
+        const sessions = (state?.sessions ?? []).filter((s) => !pendingDeletes.isPending(s.id))
+        const target = visibleSessionOrder(sessions)[Number(e.key) - 1]
         if (target) {
           e.preventDefault()
           void call('openChat', target.id)
@@ -141,22 +171,27 @@ export default function App(): JSX.Element {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [remoteOpen, settingsPane, workflowsChatId, providerSetupSkipped, switcherOpen])
+  }, [settingsPane, workflowsChatId, providerSetupSkipped, switcherOpen])
 
-  // The transient banner toast. It re-arms whenever the banner text changes
-  // and hides itself; onboarding shows the same banner inline, so the toast
-  // stays out of the way there.
-  const banner = app?.banner ?? null
-  const [toast, setToast] = useState<string | null>(null)
+  // The application menu's items (main/menu.ts): the same actions as the
+  // shortcuts, for whoever looks for them there.
   useEffect(() => {
-    if (!banner) {
-      setToast(null)
-      return
-    }
-    setToast(banner)
-    const timer = setTimeout(() => setToast(null), 5000)
-    return () => clearTimeout(timer)
-  }, [banner])
+    return window.spettro.onEvent((event) => {
+      if (event.type === 'menu') runMenuCommand(event.command)
+    })
+  })
+
+  // Main's one-off messages (a bad CLI path, the engine restarting). Keyed
+  // on the nonce, so the same message twice is shown twice. Setup shows its
+  // own inline.
+  const bannerNonce = app?.bannerNonce ?? 0
+  useEffect(() => {
+    const current = getState().app
+    if (!current?.banner || bannerNonce === 0) return
+    const kind = current.phase.kind
+    if (kind === 'needsSetup' || kind === 'installing') return
+    showToast({ title: current.banner, key: 'banner' })
+  }, [bannerNonce])
 
   // A prompt is shown inline when its chat can be on screen: a chat in the
   // sidebar, or the one selected (a draft that isn't listed yet).
@@ -166,15 +201,69 @@ export default function App(): JSX.Element {
   const orphanQuestion = questions.find((q) => isOrphan(q.chatId))
 
   const phase = app?.phase ?? { kind: 'locating' as const }
-  const onboarding = phase.kind === 'needsSetup' || phase.kind === 'installing'
+
+  async function closeWorkflows(): Promise<void> {
+    if (await mayClose('workflows')) setWorkflowsChatId(null)
+  }
+
+  async function requestCloseSettings(): Promise<void> {
+    if (await mayClose('settings')) closeSettings()
+  }
+
+  function runMenuCommand(command: MenuCommand): void {
+    const state = getState().app
+    const kind = state?.phase.kind
+    const shellUp = kind === 'ready' || (kind === 'needsProvider' && providerSetupSkipped)
+    switch (command) {
+      case 'settings':
+        openSettings('general')
+        break
+      case 'shortcuts':
+        openSettings('shortcuts')
+        break
+      case 'about':
+        openSettings('about')
+        break
+      case 'remote':
+        openSettings('remote')
+        break
+      case 'new-session':
+        if (shellUp) startNewSession()
+        break
+      case 'open-folder':
+        if (!shellUp) break
+        void quietCall('pickFolder').then((path) => {
+          if (!path) return
+          startNewSession(path)
+          setNewSessionPath(path)
+          void call('rememberProject', path)
+        })
+        break
+      case 'toggle-sidebar':
+        if (shellUp) toggleSidebar()
+        break
+      case 'toggle-terminal':
+        if (shellUp && state?.selectedSessionId) toggleTerminal()
+        break
+      case 'quick-switcher':
+        if (shellUp) setSwitcherOpen(true)
+        break
+      case 'focus-composer':
+        if (shellUp) focusComposer()
+        break
+      case 'workflows':
+        if (state?.selectedSessionId) setWorkflowsChatId(state.selectedSessionId)
+        break
+    }
+  }
 
   return (
     <div className="app-root">
       {renderPhase()}
 
-      {settingsPane && <SettingsView initialPane={settingsPane} onClose={() => setSettingsPane(null)} />}
+      {settingsPane && <SettingsView pane={settingsPane} onClose={() => void requestCloseSettings()} />}
 
-      {switcherOpen && <QuickSwitcher onClose={() => setSwitcherOpen(false)} />}
+      {switcherOpen && <QuickSwitcher onClose={() => setSwitcherOpen(false)} hidden={deleting} />}
 
       {workflowsChatId && (
         <div className="modal-backdrop" role="presentation">
@@ -185,24 +274,6 @@ export default function App(): JSX.Element {
             aria-label="Workflows"
           >
             <WorkflowStudio chatId={workflowsChatId} onClose={() => setWorkflowsChatId(null)} />
-          </div>
-        </div>
-      )}
-
-      {remoteOpen && (
-        <div className="modal-backdrop" role="presentation">
-          <div
-            className={
-              'modal-panel modal-panel--remote' +
-              (app?.remote?.pairingQR ? ' modal-panel--remote-pairing' : '')
-            }
-            role="dialog"
-            aria-modal="true"
-            aria-label="Remote Access"
-          >
-            {/* The view carries its own header (with the close button) and
-                footer, so the panel adds chrome only — no nested card. */}
-            <RemoteAccessView onClose={() => setRemoteOpen(false)} />
           </div>
         </div>
       )}
@@ -222,7 +293,8 @@ export default function App(): JSX.Element {
         </div>
       ) : null}
 
-      {toast && !onboarding && <div className="toast">{toast}</div>}
+      <ConfirmHost />
+      <ToastHost />
     </div>
   )
 
@@ -230,36 +302,27 @@ export default function App(): JSX.Element {
     switch (phase.kind) {
       case 'locating':
       case 'connecting':
-        return (
-          <LoadingView
-            message={
-              phase.kind === 'connecting' ? 'Starting the Spettro agent…' : 'Looking for the Spettro CLI…'
-            }
-          />
-        )
+        return <LoadingView message="Starting Spettro…" onOpenSettings={() => openSettings('advanced')} />
       case 'needsSetup':
       case 'installing':
-        return <OnboardingView />
+        // Setup, step 1 of 2: install the helper app.
+        return <SetupAssistant step="install" />
       case 'failed':
-        return <FailureView message={phase.message} onOpenSettings={() => setSettingsPane('agent')} />
+        return <FailureView message={phase.message} onOpenSettings={() => openSettings('advanced')} />
       case 'needsProvider':
-        // The CLI is running but has no model to run: finish setup here rather
-        // than dropping the user into a chat that would fail on its first
-        // prompt. Skipping falls through to the normal shell below.
+        // Setup, step 2 of 2: the CLI is running but has no model to run.
+        // Finish here rather than dropping the user into a chat that would
+        // fail on its first prompt. Skipping falls through to the shell.
         if (!providerSetupSkipped) {
           return (
-            <ConnectProvidersView
-              presentation="gate"
-              isOnboarding
-              // Main re-evaluates the gate when the extension state refreshes,
-              // which is what moves the phase back to `ready`.
-              onComplete={() => void call('refreshExtensions')}
+            <SetupAssistant
+              step="connect"
               onSkip={() => {
                 // Main owns the gate (`skipProviderSetup` moves the phase to
-                // ready and keeps it there); the local flag releases the
-                // screen immediately either way.
+                // ready and remembers the choice); the local flag releases
+                // the screen immediately either way.
                 void call('skipProviderSetup')
-                setProviderSetupSkipped(true)
+                setSkippedHere(true)
               }}
             />
           )
@@ -270,11 +333,7 @@ export default function App(): JSX.Element {
         return (
           <div className="split">
             {!sidebarCollapsed && (
-              <Sidebar
-                onOpenSettings={(pane) => setSettingsPane(pane ?? 'general')}
-                onOpenRemote={() => setRemoteOpen(true)}
-                onOpenWorkflows={() => selectedId && setWorkflowsChatId(selectedId)}
-              />
+              <Sidebar onOpenWorkflows={() => selectedId && setWorkflowsChatId(selectedId)} />
             )}
             <main className="detail">
               {phase.kind !== 'needsProject' && selectedId ? (

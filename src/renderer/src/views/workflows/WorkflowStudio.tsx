@@ -21,6 +21,9 @@
 //     on save teaches you about your typo at the worst moment; one that treats
 //     a mid-keystroke script as an error is just noise. So the compile runs
 //     debounced, and "does not compile yet" is a quiet state, not an alarm.
+//
+// Closing with unsaved edits (Escape, the close button) asks "Save changes?",
+// and deleting a workflow asks first — it's a file in the repo.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { JSX } from 'react'
@@ -31,7 +34,10 @@ import type {
   WorkflowValidation
 } from '@shared/extensions'
 import { EMPTY_WORKFLOW_LIST } from '@shared/extensions'
-import { call, useChat } from '@renderer/state/store'
+import { humanizeError } from '@shared/humanize'
+import { call, quietCall, useChat } from '@renderer/state/store'
+import { confirmDialog } from '@renderer/views/common/ConfirmDialog'
+import { askToSave, mayClose, useCloseGuard } from '@renderer/views/common/closeGuard'
 import { groupTranscript } from '@renderer/views/chat/transcript/orchestration'
 import { groupToolRuns } from '@renderer/views/chat/transcript/toolGroups'
 import { TranscriptRowView } from '@renderer/views/chat/transcript/TranscriptItemView'
@@ -91,7 +97,7 @@ export default function WorkflowStudio({
 
   const refresh = useCallback(async () => {
     try {
-      setList(await call('workflowList', chatId))
+      setList(await quietCall('workflowList', chatId))
       setUnsupported(null)
     } catch (err) {
       const message = messageOf(err)
@@ -127,9 +133,11 @@ export default function WorkflowStudio({
     }
     let cancelled = false
     const timer = setTimeout(() => {
-      void call('workflowValidate', chatId, script).then((result) => {
-        if (!cancelled) setValidation(result)
-      })
+      void quietCall('workflowValidate', chatId, script)
+        .then((result) => {
+          if (!cancelled) setValidation(result)
+        })
+        .catch(() => undefined)
     }, VALIDATE_DEBOUNCE_MS)
     return () => {
       cancelled = true
@@ -158,36 +166,59 @@ export default function WorkflowStudio({
     setDraft({ name: '', scope: 'project', script: STARTER_SCRIPT, dirty: true })
   }, [])
 
-  const save = useCallback(async () => {
-    if (!draft) return
+  /** Resolves true once the draft is on disk (false: it isn't, and why is
+   *  on screen), so "Save changes?" knows whether closing is safe. */
+  const save = useCallback(async (): Promise<boolean> => {
+    if (!draft) return true
     // The header's own name is the default, so a script you have only ever
     // named inside meta does not need naming twice.
     const name = draft.name || validation?.name || ''
     if (name === '') {
       setError('Give the workflow a name — in meta.name, or by saving it as one.')
-      return
+      return false
     }
     setError(null)
     setBusy(`Saving ${name}…`)
     try {
-      const saved = await call('workflowWrite', chatId, name, draft.scope, draft.script)
+      const saved = await quietCall('workflowWrite', chatId, name, draft.scope, draft.script)
       if (saved) {
         setDraft({ name: saved.name, scope: saved.scope, script: draft.script, dirty: false })
         await refresh()
+        return true
       }
+      return false
     } catch (err) {
       setError(messageOf(err))
+      return false
     } finally {
       setBusy(null)
     }
   }, [chatId, draft, validation, refresh])
 
+  // Escape (App) and the close button both ask before edits are lost.
+  useCloseGuard('workflows', async () =>
+    draft?.dirty ? askToSave(`“${draft.name || validation?.name || 'the new workflow'}”`, save) : true
+  )
+  const close = async (): Promise<void> => {
+    if (await mayClose('workflows')) onClose()
+  }
+
   const remove = useCallback(
     async (info: WorkflowInfo) => {
+      const answer = await confirmDialog({
+        title: `Delete the workflow “${info.name}”?`,
+        message:
+          info.scope === 'global'
+            ? 'It’s removed from every project on this computer.'
+            : 'Its file is removed from this project.',
+        confirmLabel: 'Delete',
+        destructive: true
+      })
+      if (answer !== 'confirm') return
       setError(null)
       setBusy(`Deleting ${info.name}…`)
       try {
-        await call('workflowDelete', chatId, info.name, info.scope)
+        await quietCall('workflowDelete', chatId, info.name, info.scope)
         if (draft?.name === info.name) setDraft(null)
         await refresh()
       } catch (err) {
@@ -213,7 +244,7 @@ export default function WorkflowStudio({
     if (draft.dirty) {
       setBusy('Saving before the run…')
       try {
-        await call('workflowWrite', chatId, name, draft.scope, draft.script)
+        await quietCall('workflowWrite', chatId, name, draft.scope, draft.script)
         setDraft({ ...draft, name, dirty: false })
         await refresh()
       } catch (err) {
@@ -236,7 +267,7 @@ export default function WorkflowStudio({
           <Icon name="flowchart" size={15} />
           <h2>Workflows</h2>
           <span className="wfs-spacer" />
-          <button className="icon-btn" onClick={onClose} title="Close" aria-label="Close workflows">
+          <button className="icon-btn" onClick={() => void close()} title="Close" aria-label="Close workflows">
             <Icon name="xmark.circle.fill" size={15} />
           </button>
         </header>
@@ -269,7 +300,7 @@ export default function WorkflowStudio({
             <SpettroSpinner size={11} /> {busy}
           </span>
         )}
-        <button className="icon-btn" onClick={onClose} title="Close" aria-label="Close workflows">
+        <button className="icon-btn" onClick={() => void close()} title="Close" aria-label="Close workflows">
           <Icon name="xmark.circle.fill" size={15} />
         </button>
       </header>
@@ -516,8 +547,10 @@ function RunPane({ chatId }: { chatId: string }): JSX.Element {
 }
 
 function messageOf(err: unknown): string {
-  if (err instanceof Error) return err.message
-  return String(err)
+  const human = humanizeError(err)
+  // The unsupported check reads the raw text, so it is kept for that.
+  if (isUnsupported(human.raw)) return human.raw
+  return human.known ? `${human.title}. ${human.detail}` : human.detail
 }
 
 /** The main process raises UnsupportedExtensionError when the CLI answers a

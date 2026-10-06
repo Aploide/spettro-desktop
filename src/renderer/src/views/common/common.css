@@ -1,0 +1,267 @@
+/* The app-wide pieces every screen borrows: toasts, the alert, and the
+   "Show details" disclosure. Tokens only, like every view stylesheet. */
+
+/* ------------------------------------------------------------------ toasts */
+
+/* Top centre, just under the title bar: clear of the composer (where the eye
+   is while typing) and of the transcript's end. Under a modal alert, never
+   over one — a toast about the thing an alert is asking would be noise. */
+.toast-stack {
+  position: fixed;
+  left: 50%;
+  top: 52px;
+  transform: translateX(-50%);
+  z-index: 170;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-sm);
+  pointer-events: none;
+  width: min(520px, calc(100vw - 48px));
+}
+
+.toast-card {
+  pointer-events: auto;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-sm);
+  padding: 9px 10px 9px 14px;
+  background: var(--surface-raised);
+  border: 1px solid var(--hairline);
+  border-radius: var(--rad-md);
+  box-shadow: var(--shadow-md);
+  font-size: var(--fs-md);
+  color: var(--text-primary);
+  animation: toast-rise 180ms ease-out;
+}
+
+@keyframes toast-rise {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .toast-card {
+    animation: none;
+  }
+}
+
+.toast-icon {
+  flex: none;
+  display: inline-flex;
+  color: var(--text-secondary);
+}
+
+.toast-card--error .toast-icon {
+  color: var(--danger);
+}
+
+.toast-card--success .toast-icon {
+  color: var(--success);
+}
+
+.toast-texts {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.toast-title {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.toast-detail {
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.toast-action {
+  flex: none;
+  appearance: none;
+  font: inherit;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border: none;
+  border-radius: 999px;
+  padding: 4px 12px;
+  cursor: default;
+}
+
+.toast-action:hover {
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+}
+
+.toast-close {
+  flex: none;
+  appearance: none;
+  background: none;
+  border: none;
+  padding: 4px;
+  border-radius: 6px;
+  color: var(--text-tertiary);
+  display: inline-flex;
+  cursor: default;
+}
+
+.toast-close:hover {
+  color: var(--text-primary);
+  background: var(--hover-fill);
+}
+
+/* ------------------------------------------------------------------- alert */
+
+.confirm-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 180;
+  background: var(--scrim);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: modal-fade 120ms ease-out;
+}
+
+.confirm-card {
+  width: 380px;
+  max-width: calc(100vw - 48px);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--sp-sm);
+  padding: var(--sp-xl) var(--sp-xl) var(--sp-lg);
+  background: var(--surface-raised);
+  border: 1px solid var(--hairline);
+  border-radius: var(--rad-md);
+  box-shadow: var(--shadow-lg);
+  animation: modal-rise 140ms ease-out;
+}
+
+.confirm-icon {
+  display: inline-flex;
+  color: var(--warning);
+  margin-bottom: var(--sp-2xs);
+}
+
+.confirm-icon--danger {
+  color: var(--danger);
+}
+
+.confirm-title {
+  font-size: var(--fs-body);
+  font-weight: 600;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.confirm-message {
+  font-size: var(--fs-md);
+  line-height: 1.5;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.confirm-buttons {
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-sm);
+  margin-top: var(--sp-md);
+}
+
+.confirm-spacer {
+  flex: 1;
+}
+
+.btn.btn--destructive {
+  color: var(--danger);
+}
+
+.btn.btn--destructive-fill {
+  background: var(--danger);
+  border-color: transparent;
+  color: var(--accent-contrast);
+  font-weight: 500;
+}
+
+.btn.btn--destructive-fill:hover {
+  background: var(--danger);
+  filter: brightness(1.08);
+}
+
+.confirm-card .btn:focus-visible,
+.toast-card button:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 70%, transparent);
+  outline-offset: 2px;
+}
+
+/* -------------------------------------------------------------- disclosure */
+
+.disclosure {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-sm);
+  width: 100%;
+}
+
+.disclosure-toggle {
+  appearance: none;
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: none;
+  border: none;
+  padding: 2px 0;
+  font: inherit;
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+  cursor: default;
+}
+
+.disclosure-toggle:hover {
+  color: var(--text-primary);
+}
+
+.disclosure-chevron {
+  display: inline-flex;
+  transition: transform 140ms ease-out;
+}
+
+.disclosure--open .disclosure-chevron {
+  transform: rotate(90deg);
+}
+
+.disclosure-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-sm);
+}
+
+.diagnostics-log {
+  max-height: 160px;
+  overflow-y: auto;
+  padding: var(--sp-sm) var(--sp-md);
+  background: var(--surface-sunken);
+  border: 1px solid var(--hairline);
+  border-radius: var(--rad-sm);
+  user-select: text;
+}
+
+.diagnostics-empty {
+  font-size: var(--fs-sm);
+  color: var(--text-tertiary);
+}
+
+.diagnostics-actions {
+  display: flex;
+  justify-content: flex-end;
+}

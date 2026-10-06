@@ -483,7 +483,9 @@ export class ChatSession {
   }
 
   /** `endsTurn` marks the error a turn ended on (see ChatMessage.endsTurn). */
-  appendNotice(text: string, isError: boolean, endsTurn = false): void {
+  /** `detail` is the raw error behind an error notice's sentence, for its
+   *  "Show details" (left off when it would only repeat the text). */
+  appendNotice(text: string, isError: boolean, endsTurn = false, detail?: string): void {
     const message: ChatMessage = {
       id: randomUUID(),
       role: 'notice',
@@ -494,6 +496,9 @@ export class ChatSession {
       timestamp: Date.now()
     }
     if (isError && endsTurn) message.endsTurn = true
+    if (isError && detail && detail.trim() !== '' && !text.includes(detail.trim())) {
+      message.detail = detail.trim()
+    }
     const item: TranscriptItem = { kind: 'message', message }
     this.items.push(item)
     this.emitItem(item)

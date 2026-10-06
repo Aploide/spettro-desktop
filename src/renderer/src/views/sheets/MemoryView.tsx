@@ -1,22 +1,28 @@
 // Port of Platforms/macOS/Views/MemoryView.swift (docs 32-memory-editor.md,
-// 15-memory-files.md). An editor for the CLI's two persistent memory files —
-// the same plain-markdown files the CLI's /memory command and save-memory
-// tool read and write. The CLI ingests memory at session start, so changes
-// take effect at the next session start (the footer says so verbatim).
+// 15-memory-files.md), as Settings › Memory. An editor for the CLI's two
+// persistent memory files — the same plain-markdown files the CLI's /memory
+// command and save-memory tool read and write — named for what they hold:
+// facts about you (every project) and facts about this project. The CLI reads
+// memory when a session starts, so changes take effect at the next one (the
+// caption says so).
 //
 // File I/O lives in the main process (MemoryStore port) behind
 // loadMemory/saveMemory; this view holds only transient editing state.
-// Keyboard: Ctrl+S saves (⌘S on the Mac), Esc closes.
+// Edits are never dropped silently: switching between the two files, or
+// leaving Settings (Escape, Done, another pane) with changes, asks "Save
+// changes?" first. Ctrl+S (⌘S on the Mac) saves.
 
-import { useEffect, useRef, useState } from 'react'
-import { call } from '@renderer/state/store'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { humanizeError } from '@shared/humanize'
+import { quietCall } from '@renderer/state/store'
+import { askToSave, useCloseGuard } from '@renderer/views/common/closeGuard'
 import './sheets.css'
 
 type MemoryScope = 'user' | 'project'
 
-const SCOPES: { scope: MemoryScope; title: string }[] = [
-  { scope: 'user', title: 'User Memory' },
-  { scope: 'project', title: 'Project Memory' }
+const SCOPES: { scope: MemoryScope; title: string; noun: string }[] = [
+  { scope: 'user', title: 'Facts about you', noun: 'facts about you' },
+  { scope: 'project', title: 'Facts about this project', noun: 'facts about this project' }
 ]
 
 /** Display-only path hint. The authoritative resolution (walking up from the
@@ -27,13 +33,7 @@ function pathHint(scope: MemoryScope, projectPath: string | null): string {
   return projectPath !== null ? `${projectPath}/.spettro/memory.md` : ''
 }
 
-export default function MemoryView({
-  projectPath,
-  onClose
-}: {
-  projectPath: string | null
-  onClose: () => void
-}): JSX.Element {
+export default function MemoryView({ projectPath }: { projectPath: string | null }): JSX.Element {
   const [scope, setScope] = useState<MemoryScope>('user')
   const [text, setText] = useState('')
   /** Last-known on-disk contents — the dirty baseline (Revert restores it). */
@@ -47,14 +47,14 @@ export default function MemoryView({
 
   // Project scope needs a project; fall back to user when it goes away.
   const effectiveScope: MemoryScope = scope === 'project' && projectPath === null ? 'user' : scope
+  const noun = SCOPES.find((s) => s.scope === effectiveScope)?.noun ?? 'memory'
 
-  // Reload on appear and whenever scope or project changes. Switching scope
-  // or project replaces the buffer — unsaved edits to the other scope are
-  // discarded, matching the Mac editor.
+  // Reload on appear and whenever scope or project changes. A switch with
+  // edits has already been asked about (switchScope).
   useEffect(() => {
     const token = ++loadToken.current
     setSaveError(null)
-    void call('loadMemory', effectiveScope, projectPath ?? undefined)
+    void quietCall('loadMemory', effectiveScope, projectPath ?? undefined)
       .then((content) => {
         if (loadToken.current !== token) return
         setLoaded(content)
@@ -74,23 +74,32 @@ export default function MemoryView({
     }
   }, [])
 
-  const save = async (): Promise<void> => {
-    if (!isDirty) return
+  /** Resolves true once the text is on disk. A failed save keeps the edits
+   *  (and says why), so whoever asked to leave stays. */
+  const save = useCallback(async (): Promise<boolean> => {
+    if (!isDirty) return true
     try {
-      await call('saveMemory', effectiveScope, text, projectPath ?? undefined)
+      await quietCall('saveMemory', effectiveScope, text, projectPath ?? undefined)
       setLoaded(text)
       setSaveError(null)
       setSavedFlash(true)
       if (flashTimer.current !== null) clearTimeout(flashTimer.current)
       flashTimer.current = setTimeout(() => setSavedFlash(false), 2000)
+      return true
     } catch (err) {
-      // Surface write failures inline rather than silently dropping: mutate
-      // the baseline (keeps the editor dirty; Revert reveals the annotation)
-      // and show the message in place.
-      const message = err instanceof Error ? err.message : String(err)
-      setLoaded(text + `\n\n(save failed: ${message})`)
-      setSaveError(`Save failed: ${message}`)
+      const human = humanizeError(err)
+      setSaveError(`Couldn’t save. ${human.known ? `${human.title}. ${human.detail}` : human.detail}`)
+      return false
     }
+  }, [isDirty, effectiveScope, text, projectPath])
+
+  // Leaving Settings with edits asks first (App's Escape, Done, another pane).
+  useCloseGuard('settings', async () => (isDirty ? askToSave(noun, save) : true))
+
+  const switchScope = async (next: MemoryScope): Promise<void> => {
+    if (next === effectiveScope) return
+    if (isDirty && !(await askToSave(noun, save))) return
+    setScope(next)
   }
 
   const revert = (): void => setText(loaded)
@@ -100,79 +109,75 @@ export default function MemoryView({
       if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 's') {
         e.preventDefault()
         void save()
-      } else if (e.key === 'Escape') {
-        e.preventDefault()
-        onClose()
       }
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  })
+  }, [save])
 
   const path = pathHint(effectiveScope, projectPath)
 
   return (
-    <div className="sheet-backdrop" role="presentation">
-      <div className="sheet-card sheet-card--memory" role="dialog" aria-modal="true" aria-label="Memory">
-        <div className="sheet-header">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-            <path d="M12 4.5c-1.2-1.4-3-2-4.8-1.6C5 3.4 3.5 5.2 3.5 7.4c0 .5.08 1 .24 1.44A4.4 4.4 0 0 0 2.5 12c0 1.3.56 2.46 1.44 3.27-.1.36-.14.74-.14 1.13 0 2.35 1.9 4.25 4.25 4.25.75 0 1.45-.2 2.06-.53.55.24 1.2.38 1.89.38s1.34-.14 1.89-.38c.61.34 1.31.53 2.06.53 2.35 0 4.25-1.9 4.25-4.25 0-.39-.05-.77-.14-1.13A4.38 4.38 0 0 0 21.5 12a4.4 4.4 0 0 0-1.24-3.16c.16-.45.24-.94.24-1.44 0-2.2-1.5-4-3.7-4.5-1.8-.4-3.6.2-4.8 1.6z" />
-            <path d="M12 4.5v15.8" />
-          </svg>
-          <span className="sheet-headline">Memory</span>
-          <button className="mem-close" onClick={onClose} aria-label="Close" title="Close (Esc)">
-            ✕
-          </button>
+    <div className="mem-pane" aria-label="Memory">
+      <div className="mem-toolbar">
+        <div className="mem-segmented" role="tablist" aria-label="Which memory">
+          {SCOPES.map(({ scope: s, title }) => (
+            <button
+              key={s}
+              role="tab"
+              aria-selected={effectiveScope === s}
+              className={`mem-segment ${effectiveScope === s ? 'mem-segment--active' : ''}`}
+              disabled={s === 'project' && projectPath === null}
+              onClick={() => void switchScope(s)}
+            >
+              {title}
+            </button>
+          ))}
         </div>
 
-        <div className="mem-toolbar">
-          <div className="mem-segmented" role="tablist">
-            {SCOPES.map(({ scope: s, title }) => (
-              <button
-                key={s}
-                role="tab"
-                aria-selected={effectiveScope === s}
-                className={`mem-segment ${effectiveScope === s ? 'mem-segment--active' : ''}`}
-                disabled={s === 'project' && projectPath === null}
-                onClick={() => setScope(s)}
-              >
-                {title}
-              </button>
-            ))}
-          </div>
+        <span style={{ flex: 1 }} />
 
-          <span style={{ flex: 1 }} />
+        {savedFlash && (
+          <span className="mem-saved">
+            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+              <path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm-1.4 14.2L6.8 12.4l1.4-1.4 2.4 2.4 5.2-5.2 1.4 1.4-6.6 6.6z" />
+            </svg>
+            Saved
+          </span>
+        )}
+        {isDirty && !savedFlash && <span className="mem-dirty">Unsaved changes</span>}
 
-          {savedFlash && (
-            <span className="mem-saved">
-              <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-                <path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm-1.4 14.2L6.8 12.4l1.4-1.4 2.4 2.4 5.2-5.2 1.4 1.4-6.6 6.6z" />
-              </svg>
-              Saved
-            </span>
-          )}
-          {isDirty && !savedFlash && <span className="mem-dirty">Unsaved changes</span>}
-
-          <button className="sheet-btn sheet-btn--subtle" style={{ minWidth: 0 }} disabled={!isDirty} onClick={revert}>
-            Revert
-          </button>
-          <button className="sheet-btn sheet-btn--prominent" style={{ minWidth: 0 }} disabled={!isDirty} onClick={() => void save()} title="Ctrl+S">
-            Save
-          </button>
-        </div>
-
-        {path.length > 0 && <div className="mem-path mono">{path}</div>}
-        {saveError !== null && <div className="mem-error">{saveError}</div>}
-
-        <textarea
-          className="mem-editor"
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          spellCheck={false}
-        />
-
-        <div className="mem-caption">One fact per line. Changes take effect at the next session start.</div>
+        <button className="sheet-btn sheet-btn--subtle" style={{ minWidth: 0 }} disabled={!isDirty} onClick={revert}>
+          Revert
+        </button>
+        <button
+          className="sheet-btn sheet-btn--prominent"
+          style={{ minWidth: 0 }}
+          disabled={!isDirty}
+          onClick={() => void save()}
+          title="Ctrl+S"
+        >
+          Save
+        </button>
       </div>
+
+      {path.length > 0 && <div className="mem-path mono">{path}</div>}
+      {saveError !== null && <div className="mem-error">{saveError}</div>}
+
+      <textarea
+        className="mem-editor"
+        aria-label={SCOPES.find((s) => s.scope === effectiveScope)?.title}
+        value={text}
+        placeholder={
+          effectiveScope === 'user'
+            ? 'For example: I prefer small, focused commits.'
+            : 'For example: This repo uses pnpm, not npm.'
+        }
+        onChange={(e) => setText(e.target.value)}
+        spellCheck={false}
+      />
+
+      <div className="mem-caption">One fact per line. Spettro reads these when a session starts.</div>
     </div>
   )
 }

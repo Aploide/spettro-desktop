@@ -1,17 +1,26 @@
-// The Settings > Updates pane. Two rows — this app and the CLI it drives —
-// each showing the installed version against the newest GitHub release, with
-// the button that applies it.
+// Settings › Updates. To the person using it Spettro is one thing, so the pane
+// leads with one row: "Spettro is up to date ✓", or "An update is available"
+// with Update Now — which updates whichever halves need it (the engine first,
+// then the app, since installing the app restarts it). Running work is asked
+// about first: update now, or when it finishes.
+//
+// The two halves — this app and the CLI engine it drives — are still there,
+// under "Details", with their versions, their own buttons and their release
+// notes rendered as the markdown they are.
 //
 // The check runs on its own in the main process (every few hours, and once
-// shortly after launch); this pane only renders `app.update` and offers a
-// manual re-check. Nothing installs without the button being pressed: the app
-// update replaces this build and restarts it, and the CLI update re-runs the
-// official install script and reconnects the agent underneath the open chats.
+// shortly after launch); this pane renders `app.update` and offers a manual
+// re-check. Nothing installs without a button being pressed.
 
 import { useEffect } from 'react'
-import { call, useApp } from '@renderer/state/store'
-import { isUpdateBusy, type ComponentUpdate } from '@shared/update'
+import { humanizeError } from '@shared/humanize'
+import { isUpdateBusy, type ComponentUpdate, type UpdateState } from '@shared/update'
+import { quietCall, useApp } from '@renderer/state/store'
+import Disclosure from '@renderer/views/common/Disclosure'
+import { MarkdownText } from '@renderer/views/chat/transcript/MarkdownText'
+import { Icon } from '@renderer/design/icons'
 import Spinner from './Spinner'
+import { updateEverything } from './actions'
 import { DownloadIcon, WarningIcon } from './icons'
 
 export default function UpdatesPane(): JSX.Element {
@@ -19,122 +28,177 @@ export default function UpdatesPane(): JSX.Element {
   const update = app?.update
   const appUpdate = update?.app
   const cliUpdate = update?.cli
-  const canInstallApp = update?.canInstallApp ?? false
   const checking = appUpdate?.status === 'checking' || cliUpdate?.status === 'checking'
 
   // Opening this pane is exactly when the versions need to be current — the
   // background check may be hours old.
   useEffect(() => {
-    void call('checkForUpdates')
+    void quietCall('checkForUpdates')
   }, [])
 
   return (
     <div className="form-scroll">
       <section className="form-section">
-        <div className="form-section-title">Spettro Desktop</div>
-        <div className="form-card">
-          <VersionRows update={appUpdate} />
-          <StatusRow update={appUpdate} />
-
-          <div className="form-row form-row--actions">
-            {appUpdate?.available && canInstallApp && (
-              <button
-                className="btn btn--prominent"
-                disabled={isUpdateBusy(appUpdate)}
-                onClick={() => void call('installAppUpdate')}
-              >
-                <span className="btn-icon">
-                  <DownloadIcon size={12} />
-                </span>
-                Update to {appUpdate.latest}
-              </button>
-            )}
-            {appUpdate?.available && !canInstallApp && (
-              <button
-                className="btn btn--prominent"
-                onClick={() => void call('openExternal', appUpdate.releaseUrl ?? '')}
-              >
-                Download {appUpdate.latest}…
-              </button>
-            )}
-            {!appUpdate?.available && <span className="form-text">{idleText(appUpdate)}</span>}
-            <span className="form-spacer" />
-            {appUpdate?.releaseUrl && (
-              <button
-                className="link"
-                onClick={() => void call('openExternal', appUpdate.releaseUrl ?? '')}
-              >
-                Release notes
-              </button>
-            )}
-          </div>
-
-          <ReleaseNotes update={appUpdate} />
-        </div>
+        <div className="form-card">{update && <SummaryRow update={update} />}</div>
         <div className="form-footer">
-          {appUpdate?.available && canInstallApp
-            ? 'Spettro downloads the installer, closes itself, and reopens on the new version.'
-            : appUpdate?.available
-              ? 'This build can’t replace itself — install the download by hand, over the current copy.'
-              : 'Checked against the published releases of Spettro Desktop.'}
+          <span>{lastChecked(appUpdate, cliUpdate)}</span>
+          {' · '}
+          <button className="link" disabled={checking} onClick={() => void quietCall('checkForUpdates')}>
+            {checking ? 'Checking…' : 'Check Now'}
+          </button>
         </div>
       </section>
 
       <section className="form-section">
-        <div className="form-section-title">Spettro CLI</div>
-        <div className="form-card">
-          <VersionRows update={cliUpdate} />
-          <StatusRow update={cliUpdate} />
-
-          <div className="form-row form-row--actions">
-            <button
-              className={`btn${cliUpdate?.available ? ' btn--prominent' : ''}`}
-              disabled={!cliUpdate || isUpdateBusy(cliUpdate)}
-              onClick={() => void call('installCLIUpdate')}
-            >
-              <span className="btn-icon">
-                <DownloadIcon size={12} />
-              </span>
-              {cliUpdate?.available ? `Update to ${cliUpdate.latest}` : 'Reinstall Latest'}
-            </button>
-            <span className="form-spacer" />
-            {cliUpdate?.releaseUrl && (
-              <button
-                className="link"
-                onClick={() => void call('openExternal', cliUpdate.releaseUrl ?? '')}
-              >
-                Release notes
-              </button>
+        <Disclosure label="Details" openLabel="Details" className="updates-details">
+          <div className="form-section-title">Spettro app</div>
+          <div className="form-card">
+            <ComponentRows update={appUpdate} />
+            {appUpdate?.available && !update?.canInstallApp && (
+              <div className="form-row form-row--actions">
+                <span className="form-text">This copy can&rsquo;t update itself.</span>
+                <span className="form-spacer" />
+                <button
+                  className="btn btn--small"
+                  onClick={() => void quietCall('openExternal', appUpdate.releaseUrl ?? '')}
+                >
+                  Download {appUpdate.latest}…
+                </button>
+              </div>
             )}
+            <ReleaseNotes update={appUpdate} />
           </div>
-
-          <ReleaseNotes update={cliUpdate} />
-        </div>
-        <div className="form-footer">
-          Runs the official install script, then restarts the agent on the new binary. Open chats
-          keep their transcripts.
-        </div>
-      </section>
-
-      <section className="form-section">
-        <div className="form-card">
-          <div className="form-row form-row--actions">
-            <button className="btn" disabled={checking} onClick={() => void call('checkForUpdates')}>
-              Check Now
-            </button>
-            {checking && <Spinner size={14} />}
-            <span className="form-spacer" />
-            <span className="form-value">{lastChecked(appUpdate, cliUpdate)}</span>
+          <div className="form-section-title">Spettro engine</div>
+          <div className="form-card">
+            <ComponentRows update={cliUpdate} />
+            <div className="form-row form-row--actions">
+              <span className="form-text">The engine is the part that talks to the model.</span>
+              <span className="form-spacer" />
+              <button
+                className="btn btn--small"
+                disabled={!cliUpdate || isUpdateBusy(cliUpdate)}
+                onClick={() => void quietCall('installCLIUpdate', false)}
+              >
+                Reinstall
+              </button>
+            </div>
+            <ReleaseNotes update={cliUpdate} />
           </div>
-        </div>
-        <div className="form-footer">Spettro checks for updates automatically every few hours.</div>
+        </Disclosure>
       </section>
     </div>
   )
 }
 
+/** The one row: up to date, an update waiting, one in progress, or what
+ *  went wrong. */
+function SummaryRow({ update }: { update: UpdateState }): JSX.Element {
+  const { app, cli } = update
+  const busy = isUpdateBusy(app) ? app : isUpdateBusy(cli) ? cli : null
+  const failed = app.status === 'failed' ? app : cli.status === 'failed' ? cli : null
+  const available = app.available || cli.available
+  const checked = app.latest !== null || cli.latest !== null
+
+  if (busy) {
+    return (
+      <div className="form-row form-row--stack">
+        <div className="update-status">
+          <Spinner size={12} />
+          <span className="update-status-text">{busy.message ?? 'Updating…'}</span>
+          {busy.progress !== null && <span className="update-percent">{Math.round(busy.progress * 100)}%</span>}
+        </div>
+        {busy.progress !== null && (
+          <span className="update-track" aria-hidden="true">
+            <span className="update-fill" style={{ width: `${Math.round(busy.progress * 100)}%` }} />
+          </span>
+        )}
+      </div>
+    )
+  }
+
+  return (
+    <>
+      <div className="form-row form-row--actions">
+        {available ? (
+          <span className="update-summary">
+            <span className="update-summary-icon update-summary-icon--new">
+              <DownloadIcon size={14} />
+            </span>
+            <span className="update-summary-texts">
+              <span className="update-summary-title">An update is available</span>
+              <span className="update-summary-sub">{availableText(update)}</span>
+            </span>
+          </span>
+        ) : checked ? (
+          <span className="update-summary">
+            <span className="update-summary-icon update-summary-icon--ok">
+              <Icon name="checkmark.circle.fill" size={15} />
+            </span>
+            <span className="update-summary-texts">
+              <span className="update-summary-title">Spettro is up to date</span>
+              <span className="update-summary-sub">
+                Version {app.current ?? 'unknown'}
+                {cli.current ? ` · engine ${cli.current}` : ''}
+              </span>
+            </span>
+          </span>
+        ) : (
+          <span className="update-summary">
+            <span className="update-summary-icon">
+              {app.status === 'checking' ? <Spinner size={13} /> : <WarningIcon size={14} />}
+            </span>
+            <span className="update-summary-texts">
+              <span className="update-summary-title">
+                {app.status === 'checking' ? 'Checking for updates…' : 'Couldn’t check for updates'}
+              </span>
+              {app.status !== 'checking' && app.message && (
+                <span className="update-summary-sub">{humanizeError(app.message).detail}</span>
+              )}
+            </span>
+          </span>
+        )}
+        <span className="form-spacer" />
+        {available && (
+          <button className="btn btn--prominent" onClick={() => void updateEverything(update)}>
+            <span className="btn-icon">
+              <DownloadIcon size={12} />
+            </span>
+            Update Now
+          </button>
+        )}
+      </div>
+      {failed && (
+        <div className="form-row">
+          <span className="form-error">
+            <span className="form-note-icon">
+              <WarningIcon size={12} />
+            </span>
+            {humanizeError(failed.message ?? 'The update failed.').detail}
+          </span>
+        </div>
+      )}
+      {!failed && (app.status === 'done' || cli.status === 'done') && (
+        <div className="form-row">
+          <span className="form-note">{(cli.status === 'done' ? cli.message : app.message) ?? 'Updated.'}</span>
+        </div>
+      )}
+    </>
+  )
+}
+
+/** "Engine 2.9.1 is ready to install." — what moved, and what updating
+ *  will do about it. */
+function availableText(update: UpdateState): string {
+  const parts: string[] = []
+  if (update.app.available) parts.push(`Spettro ${update.app.latest}`)
+  if (update.cli.available) parts.push(`${parts.length > 0 ? 'engine' : 'Engine'} ${update.cli.latest}`)
+  const verb = parts.length > 1 ? 'are' : 'is'
+  const tail = update.app.available && update.canInstallApp ? ' Spettro restarts to finish.' : ''
+  return `${parts.join(' and ')} ${verb} ready to install.${tail}`
+}
+
 /** Installed / latest, with the "new" marker on the latest when it is ahead. */
-function VersionRows({ update }: { update: ComponentUpdate | undefined }): JSX.Element {
+function ComponentRows({ update }: { update: ComponentUpdate | undefined }): JSX.Element {
   return (
     <>
       <div className="form-row">
@@ -152,87 +216,26 @@ function VersionRows({ update }: { update: ComponentUpdate | undefined }): JSX.E
   )
 }
 
-/** Whatever the update is doing right now: the progress bar while a download
- *  runs, the installer's last line while it installs, the error when it
- *  failed. Idle rows render nothing so the card stays quiet. */
-function StatusRow({ update }: { update: ComponentUpdate | undefined }): JSX.Element | null {
-  if (!update) return null
-
-  if (update.status === 'failed') {
-    return (
-      <div className="form-row">
-        <span className="form-error">
-          <span className="form-note-icon">
-            <WarningIcon size={12} />
-          </span>
-          {update.message ?? 'The update failed.'}
-        </span>
-      </div>
-    )
-  }
-
-  // Two things still worth a line while the row is idle: a finished install,
-  // and a check that never reached GitHub — staying silent about the latter
-  // would read as "up to date", which is exactly what it doesn't know.
-  if (!isUpdateBusy(update)) {
-    const unreachable = update.status !== 'checking' && update.latest === null
-    if (update.message === null || (update.status !== 'done' && !unreachable)) return null
-    return (
-      <div className="form-row">
-        <span className="form-note">
-          {unreachable && (
-            <span className="form-note-icon">
-              <WarningIcon size={12} />
-            </span>
-          )}
-          {unreachable ? `Couldn’t check for updates — ${update.message}` : update.message}
-        </span>
-      </div>
-    )
-  }
-
+/** The release body, rendered as the markdown it is — only for a release
+ *  the user could install; notes for a version already running are noise. */
+function ReleaseNotes({ update }: { update: ComponentUpdate | undefined }): JSX.Element | null {
+  if (!update?.available || !update.releaseNotes) return null
   return (
     <div className="form-row form-row--stack">
-      <div className="update-status">
-        <Spinner size={12} />
-        <span className="update-status-text">{update.message ?? 'Working…'}</span>
-        {update.progress !== null && (
-          <span className="update-percent">{Math.round(update.progress * 100)}%</span>
-        )}
+      <div className="update-notes update-notes--md">
+        <MarkdownText source={update.releaseNotes} />
       </div>
-      {update.progress !== null && (
-        <span className="update-track" aria-hidden="true">
-          <span className="update-fill" style={{ width: `${Math.round(update.progress * 100)}%` }} />
-        </span>
+      {update.releaseUrl && (
+        <button className="link" onClick={() => void quietCall('openExternal', update.releaseUrl ?? '')}>
+          Full release notes
+        </button>
       )}
     </div>
   )
 }
 
-/** The release body, shown only when the release is one the user could
- *  install — notes for a version already running are noise. */
-function ReleaseNotes({ update }: { update: ComponentUpdate | undefined }): JSX.Element | null {
-  if (!update?.available || !update.releaseNotes) return null
-  return (
-    <div className="form-row form-row--stack">
-      <div className="update-notes">{update.releaseNotes}</div>
-    </div>
-  )
-}
-
-/** What the action row says when there is nothing to install: only claim
- *  "up to date" once a release has actually been read. */
-function idleText(update: ComponentUpdate | undefined): string {
-  if (!update || update.status === 'checking') return 'Checking…'
-  if (update.latest === null) return 'Latest version unknown.'
-  return 'Spettro is up to date.'
-}
-
-function lastChecked(
-  appUpdate: ComponentUpdate | undefined,
-  cliUpdate: ComponentUpdate | undefined
-): string {
+function lastChecked(appUpdate: ComponentUpdate | undefined, cliUpdate: ComponentUpdate | undefined): string {
   const latest = Math.max(appUpdate?.checkedAt ?? 0, cliUpdate?.checkedAt ?? 0)
-  if (latest === 0) return 'Not checked yet'
-  return `Checked ${new Date(latest).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`
+  if (latest === 0) return 'Spettro checks for updates every few hours'
+  return `Last checked ${new Date(latest).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`
 }

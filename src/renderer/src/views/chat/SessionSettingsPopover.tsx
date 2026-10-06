@@ -58,6 +58,12 @@ export function permissionName(choice: ACPConfigChoice): string {
   return PERMISSION_NAMES[choice.value] ?? choice.name
 }
 
+/** The level's one-line meaning ("Ask before acting"), when it is one this
+ *  app knows. */
+export function permissionGloss(choice: ACPConfigChoice): string | null {
+  return PERMISSION_GLOSS[choice.value] ?? null
+}
+
 /** The agent guideline of each size tier, for a CLI whose descriptions do
  *  not carry it (internal/workflow/size.go SizeTiers). */
 const WORKFLOW_SIZE_AGENTS: Record<string, number> = { small: 5, medium: 10, large: 30 }

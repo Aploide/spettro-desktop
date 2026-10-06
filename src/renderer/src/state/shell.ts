@@ -1,5 +1,6 @@
 // Renderer-only window state: the sidebar's width and collapsed flag, the
-// terminal drawer, and the folder the next new session will start in.
+// terminal drawer, the folder the next new session will start in, and which
+// Settings pane is open (if any).
 //
 // None of it belongs to the model in main — it describes this window, not the
 // user's work — but several distant views share it (Ctrl+B in App, the
@@ -24,6 +25,19 @@ export const SIDEBAR_DEFAULT_WIDTH = 264
  *  rather than a ref so whichever composer is on screen answers it. */
 export const FOCUS_COMPOSER_EVENT = 'spettro:focus-composer'
 
+/** Settings' panes, in the order its sidebar lists them. */
+export type SettingsPane =
+  | 'general'
+  | 'account'
+  | 'models'
+  | 'permissions'
+  | 'memory'
+  | 'remote'
+  | 'updates'
+  | 'advanced'
+  | 'shortcuts'
+  | 'about'
+
 export interface ShellState {
   sidebarWidth: number
   sidebarCollapsed: boolean
@@ -32,6 +46,10 @@ export interface ShellState {
    *  app's default folder". Set when a session is started from a specific
    *  project (its group's +, or New session while that project was open). */
   newSessionPath: string | null
+  /** The Settings window and the pane it shows; null when closed. Opened
+   *  from the sidebar, Ctrl/Cmd+, the menu, a toast's action or the
+   *  composer's "Connect a model" bar, so it lives here rather than in App. */
+  settingsPane: SettingsPane | null
 }
 
 export function clampSidebarWidth(width: number): number {
@@ -59,7 +77,8 @@ let state: ShellState = {
   sidebarWidth: clampSidebarWidth(Number(read(SIDEBAR_WIDTH_KEY) ?? SIDEBAR_DEFAULT_WIDTH)),
   sidebarCollapsed: read(SIDEBAR_COLLAPSED_KEY) === '1',
   terminalVisible: read(TERMINAL_VISIBLE_KEY) === '1',
-  newSessionPath: null
+  newSessionPath: null,
+  settingsPane: null
 }
 const listeners = new Set<() => void>()
 
@@ -135,4 +154,12 @@ export function startNewSession(projectPath?: string): void {
   update({ newSessionPath: projectPath ?? selected?.projectPath ?? null })
   if (app?.selectedSessionId) void call('selectSession', null)
   focusComposer()
+}
+
+export function openSettings(pane: SettingsPane = 'general'): void {
+  update({ settingsPane: pane })
+}
+
+export function closeSettings(): void {
+  if (state.settingsPane !== null) update({ settingsPane: null })
 }

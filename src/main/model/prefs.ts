@@ -19,6 +19,12 @@
 //                       migrated into that fallback.
 //   appearance        — 'system' | 'light' | 'dark'; main applies it to
 //                       nativeTheme.themeSource before the window exists
+//   providerSetupSkipped
+//                     — the user chose "Continue without" on the connect
+//                       step; the setup screen stays away on later launches
+//                       (the no-model bar above the composer remains)
+//   notifyWhenDone    — a system notification when a turn finishes while the
+//                       window is in the background
 
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'fs'
 import { dirname, join } from 'path'
@@ -32,6 +38,8 @@ interface PrefsData {
   recentProjects: string[]
   cachedCommandsByProject: Record<string, ACPCommand[]>
   appearance: Appearance
+  providerSetupSkipped: boolean
+  notifyWhenDone: boolean
 }
 
 /** The commands-cache key for "the last list seen in any folder". */
@@ -48,7 +56,9 @@ function defaults(): PrefsData {
     lastConfigOptions: [],
     recentProjects: [],
     cachedCommandsByProject: {},
-    appearance: 'system'
+    appearance: 'system',
+    providerSetupSkipped: false,
+    notifyWhenDone: true
   }
 }
 
@@ -83,6 +93,8 @@ function sanitize(raw: unknown): PrefsData {
     if (obj.cachedCommands.length > 0) data.cachedCommandsByProject[ANY_PROJECT] = obj.cachedCommands
   }
   if (isAppearance(obj.appearance)) data.appearance = obj.appearance
+  if (typeof obj.providerSetupSkipped === 'boolean') data.providerSetupSkipped = obj.providerSetupSkipped
+  if (typeof obj.notifyWhenDone === 'boolean') data.notifyWhenDone = obj.notifyWhenDone
   return data
 }
 
@@ -195,6 +207,24 @@ export class Prefs {
 
   set appearance(value: Appearance) {
     this.data.appearance = value
+    this.save()
+  }
+
+  get providerSetupSkipped(): boolean {
+    return this.data.providerSetupSkipped
+  }
+
+  set providerSetupSkipped(value: boolean) {
+    this.data.providerSetupSkipped = value
+    this.save()
+  }
+
+  get notifyWhenDone(): boolean {
+    return this.data.notifyWhenDone
+  }
+
+  set notifyWhenDone(value: boolean) {
+    this.data.notifyWhenDone = value
     this.save()
   }
 }

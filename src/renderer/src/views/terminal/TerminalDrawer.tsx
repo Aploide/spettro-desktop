@@ -9,10 +9,21 @@
 // Drawer height persists across relaunches via localStorage
 // ("spettro.terminalDrawerHeight" — the @AppStorage analog). Tabs persist
 // only while the app runs, restored from main via terminalList.
+//
+// Opening the drawer for the first time starts a shell straight away — an
+// empty drawer with a "New Terminal" button is one click nobody wanted. A
+// shell that exits keeps its tab and its output, with "press Enter to
+// restart" (a new shell in the same tab, scrollback intact), instead of
+// vanishing two seconds later. Closing a tab that is still running a command
+// asks first, and a terminal that can't be opened says why.
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Terminal, type ITheme } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
+import { humanizeError } from '@shared/humanize'
+import { quietCall } from '@renderer/state/store'
+import { confirmDialog } from '@renderer/views/common/ConfirmDialog'
+import { showToast } from '@renderer/views/common/Toast'
 import '@xterm/xterm/css/xterm.css'
 import './terminal.css'
 
@@ -20,11 +31,16 @@ const HEIGHT_KEY = 'spettro.terminalDrawerHeight'
 const MIN_HEIGHT = 120
 const MAX_HEIGHT = 700
 const DEFAULT_HEIGHT = 280
-/** How long the "process exited" state lingers before the tab closes. */
-const EXIT_LINGER_MS = 2200
+
+/** Written into a tab whose shell has exited. */
+const EXITED_LINE = '\r\n\x1b[2m[Process exited — press Enter to restart]\x1b[0m\r\n'
 
 interface Tab {
+  /** The tab's own identity: its first shell's id, kept across restarts so
+   *  the xterm (and its scrollback) stays attached. */
   id: string
+  /** The shell running in it now (a restart replaces it). */
+  termId: string
   projectPath: string
   title: string
   running: boolean
@@ -124,9 +140,14 @@ export default function TerminalDrawer({
   const [selectedByProject, setSelectedByProject] = useState<Record<string, string>>({})
 
   const sessions = useRef(new Map<string, TermSession>())
-  /** Output that arrived before the tab's xterm attached; flushed on attach. */
+  /** Output that arrived before the tab's xterm attached, by termId; flushed
+   *  on attach. */
   const pendingData = useRef(new Map<string, string[]>())
   const tabsRef = useRef<Tab[]>([])
+  /** Projects whose drawer has already started its first shell this run. */
+  const autoStarted = useRef(new Set<string>())
+  /** Tabs whose shell is being restarted right now. */
+  const restarting = useRef(new Set<string>())
 
   const allTabs = Object.values(tabsByProject).flat()
   useEffect(() => {
@@ -184,6 +205,7 @@ export default function TerminalDrawer({
               ...prev,
               [projectPath]: ids.map((id) => ({
                 id,
+                termId: id,
                 projectPath,
                 title: basename(projectPath),
                 running: true
@@ -198,17 +220,64 @@ export default function TerminalDrawer({
   }, [projectPath])
 
   // ---- tab lifecycle ------------------------------------------------------
+  /** A new shell in `projectPath`, or null (with a toast saying why). */
+  const spawnShell = useCallback(async (path: string): Promise<string | null> => {
+    try {
+      return await quietCall('terminalCreate', path)
+    } catch (err) {
+      const human = humanizeError(err)
+      showToast({
+        tone: 'error',
+        key: 'terminal-create',
+        title: 'Couldn’t open a terminal',
+        detail: human.known ? `${human.title}. ${human.detail}` : human.detail
+      })
+      return null
+    }
+  }, [])
+
   const newTerminal = useCallback(async () => {
-    const id = await window.spettro.call('terminalCreate', projectPath)
+    const id = await spawnShell(projectPath)
+    if (!id) return
     setTabsByProject((prev) => ({
       ...prev,
       [projectPath]: [
         ...(prev[projectPath] ?? []),
-        { id, projectPath, title: basename(projectPath), running: true }
+        { id, termId: id, projectPath, title: basename(projectPath), running: true }
       ]
     }))
     setSelectedByProject((prev) => ({ ...prev, [projectPath]: id }))
-  }, [projectPath])
+  }, [projectPath, spawnShell])
+
+  // The first time the drawer is shown for a project, a shell is already
+  // there. Only once: after the last tab is closed on purpose, the empty
+  // state (and its button) is the answer.
+  const listed = tabsByProject[projectPath] !== undefined
+  useEffect(() => {
+    if (!visible || !listed || autoStarted.current.has(projectPath)) return
+    autoStarted.current.add(projectPath)
+    if ((tabsByProject[projectPath] ?? []).length === 0) void newTerminal()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible, listed, projectPath])
+
+  /** Enter in an exited tab: a fresh shell, same tab, same scrollback. */
+  const restartTab = useCallback(
+    async (tabId: string) => {
+      const tab = tabsRef.current.find((t) => t.id === tabId)
+      // One restart at a time: a second Enter mustn't start a second shell.
+      if (!tab || tab.running || restarting.current.has(tabId)) return
+      restarting.current.add(tabId)
+      const termId = await spawnShell(tab.projectPath).finally(() => restarting.current.delete(tabId))
+      if (!termId) return
+      updateTab(setTabsByProject, tabId, { termId, running: true })
+      const session = sessions.current.get(tabId)
+      if (session) {
+        session.term.write('\r\n')
+        void quietCall('terminalResize', termId, session.term.cols, session.term.rows)
+      }
+    },
+    [spawnShell]
+  )
 
   const closeTabById = useCallback((id: string) => {
     const session = sessions.current.get(id)
@@ -217,8 +286,9 @@ export default function TerminalDrawer({
       session.term.dispose()
       sessions.current.delete(id)
     }
-    pendingData.current.delete(id)
-    void window.spettro.call('terminalDispose', id)
+    const termId = tabsRef.current.find((t) => t.id === id)?.termId ?? id
+    pendingData.current.delete(termId)
+    void quietCall('terminalDispose', termId)
     setTabsByProject((prev) => {
       const next: Record<string, Tab[]> = {}
       let changed = false
@@ -266,36 +336,48 @@ export default function TerminalDrawer({
     return () => query.removeEventListener('change', onChange)
   }, [])
 
+  // Closing a tab with a command still running in it asks first; an idle
+  // shell (or an exited one) just closes.
+  const requestCloseTab = useCallback(
+    async (id: string) => {
+      const tab = tabsRef.current.find((t) => t.id === id)
+      if (tab?.running && (await quietCall('terminalHasProcess', tab.termId).catch(() => false))) {
+        const answer = await confirmDialog({
+          title: 'Close this terminal?',
+          message: 'A command is still running in it. Closing the terminal stops it.',
+          confirmLabel: 'Close',
+          destructive: true
+        })
+        if (answer !== 'confirm') return
+      }
+      closeTabById(id)
+    },
+    [closeTabById]
+  )
+
   // ---- terminal-data / terminal-exit events (not routed via the store) ----
   useEffect(() => {
+    const tabFor = (termId: string): Tab | undefined => tabsRef.current.find((t) => t.termId === termId)
     return window.spettro.onEvent((event) => {
       if (event.type === 'terminal-data') {
-        const session = sessions.current.get(event.termId)
+        const tab = tabFor(event.termId)
+        const session = tab ? sessions.current.get(tab.id) : undefined
         if (session) {
           session.term.write(event.data)
-        } else if (tabsRef.current.some((t) => t.id === event.termId) || pendingData.current.has(event.termId)) {
+        } else if (tab || pendingData.current.has(event.termId)) {
           const queue = pendingData.current.get(event.termId) ?? []
           queue.push(event.data)
           pendingData.current.set(event.termId, queue)
         }
       } else if (event.type === 'terminal-exit') {
-        const owned = tabsRef.current.some((t) => t.id === event.termId)
-        if (!owned && !sessions.current.has(event.termId)) return
-        sessions.current.get(event.termId)?.term.write('\r\n\x1b[2m[process exited]\x1b[0m\r\n')
-        setTabsByProject((prev) => {
-          const next: Record<string, Tab[]> = {}
-          for (const [project, tabs] of Object.entries(prev)) {
-            next[project] = tabs.map((t) =>
-              t.id === event.termId ? { ...t, running: false } : t
-            )
-          }
-          return next
-        })
-        // Subtle exited state lingers briefly, then the tab closes.
-        window.setTimeout(() => closeTabById(event.termId), EXIT_LINGER_MS)
+        const tab = tabFor(event.termId)
+        if (!tab) return
+        // The tab stays, with its output, until the user restarts or closes it.
+        sessions.current.get(tab.id)?.term.write(EXITED_LINE)
+        updateTab(setTabsByProject, tab.id, { running: false })
       }
     })
-  }, [closeTabById])
+  }, [])
 
   // ---- xterm attach (once per tab; DOM persists across tab switches) ------
   const attachTerminal = useCallback(
@@ -313,13 +395,19 @@ export default function TerminalDrawer({
       term.loadAddon(fit)
       term.open(el)
 
+      // Always the tab's current shell: a restart swaps it underneath.
+      const current = (): Tab | undefined => tabsRef.current.find((t) => t.id === tab.id)
       term.onData((data) => {
-        void window.spettro.call('terminalWrite', tab.id, data)
+        const now = current()
+        if (!now) return
+        if (now.running) void quietCall('terminalWrite', now.termId, data)
+        else if (data.includes('\r')) void restartTab(now.id)
       })
       term.onTitleChange((title) => setTitle(tab.id, title))
       // fit.fit() resizes the xterm grid; propagate the new grid to the pty.
       term.onResize(({ cols, rows }) => {
-        void window.spettro.call('terminalResize', tab.id, cols, rows)
+        const now = current()
+        if (now?.running) void quietCall('terminalResize', now.termId, cols, rows)
       })
 
       const observer = new ResizeObserver(() => {
@@ -330,9 +418,9 @@ export default function TerminalDrawer({
       sessions.current.set(tab.id, { term, fit, observer })
 
       // Flush output that raced ahead of the first render.
-      const queued = pendingData.current.get(tab.id)
+      const queued = pendingData.current.get(tab.termId)
       if (queued) {
-        pendingData.current.delete(tab.id)
+        pendingData.current.delete(tab.termId)
         for (const chunk of queued) term.write(chunk)
       }
 
@@ -341,7 +429,7 @@ export default function TerminalDrawer({
         term.focus()
       })
     },
-    [setTitle]
+    [setTitle, restartTab]
   )
 
   // Refit + focus the active terminal when it becomes visible or the drawer
@@ -405,7 +493,7 @@ export default function TerminalDrawer({
                 aria-label="Close terminal"
                 onClick={(e) => {
                   e.stopPropagation()
-                  closeTabById(tab.id)
+                  void requestCloseTab(tab.id)
                 }}
               >
                 &#215;
@@ -444,7 +532,6 @@ export default function TerminalDrawer({
             }
           >
             <div className="terminal-slot__host" ref={(el) => attachTerminal(tab, el)} />
-            {!tab.running && <div className="terminal-slot__exited">process exited</div>}
           </div>
         ))}
         {currentTabs.length === 0 && (
@@ -458,4 +545,19 @@ export default function TerminalDrawer({
       </div>
     </div>
   )
+}
+
+/** Patches one tab, wherever it is filed. */
+function updateTab(
+  set: React.Dispatch<React.SetStateAction<Record<string, Tab[]>>>,
+  tabId: string,
+  patch: Partial<Tab>
+): void {
+  set((prev) => {
+    const next: Record<string, Tab[]> = {}
+    for (const [project, tabs] of Object.entries(prev)) {
+      next[project] = tabs.map((t) => (t.id === tabId ? { ...t, ...patch } : t))
+    }
+    return next
+  })
 }

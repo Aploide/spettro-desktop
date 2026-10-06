@@ -47,6 +47,9 @@ export interface ChatMessage {
    *  an error too, but resending the last prompt would not fix it. */
   endsTurn?: boolean
   text: string
+  /** Only on error notices: the error exactly as it arrived, shown behind
+   *  "Show details" — `text` is the sentence a person can act on. */
+  detail?: string
   attachments: ImageAttachmentDTO[]
   isStreaming: boolean
   /** ms since epoch */
@@ -222,8 +225,13 @@ export interface RemoteHostState {
   pairingOpen: boolean
   /** spettro-pair:// URL while a pairing window is open. */
   pairingURL: string | null
-  /** QR code for pairingURL as a data: URL (SVG/PNG). */
+  /** QR code for pairingURL as a data: URL (SVG/PNG). Null when it couldn't
+   *  be drawn — the pairing link is still offered to copy. */
   pairingQR: string | null
+  /** When the open code stops working (ms since epoch). */
+  pairingExpiresAt: number | null
+  /** The last code ran out on its own (not closed with Done). */
+  pairingExpired: boolean
   devices: PairedDeviceDTO[]
   connectedDeviceIds: string[]
 }
@@ -252,13 +260,38 @@ export function isAppearance(value: unknown): value is Appearance {
   return value === 'system' || value === 'light' || value === 'dark'
 }
 
+/** Where a CLI install stands, as setup draws it: a determinate bar over
+ *  the installer's phases, then done — or why it failed. A cancelled install
+ *  goes back to idle; that is not a failure to explain. */
+export type InstallStage = 'idle' | 'checking' | 'downloading' | 'verifying' | 'installing' | 'done' | 'failed'
+
+export type InstallFailureReason =
+  | { kind: 'missing-tool'; tool: string }
+  | { kind: 'timeout' }
+  | { kind: 'launch' }
+  | { kind: 'failed' }
+
+export interface InstallState {
+  stage: InstallStage
+  failure: InstallFailureReason | null
+}
+
 export interface AppStateDTO {
   phase: Phase
+  /** 'reconnecting' while the engine restarts underneath a shell that is
+   *  already on screen (a crash, Restart engine, a CLI update): the window
+   *  keeps everything it shows — drafts, scroll, terminals — and only Send
+   *  waits. Phases before the shell first appeared still use `phase`. */
+  connection: 'ok' | 'reconnecting'
   cli: CLIInfo | null
   agentVersion: string | null
   selectedSessionId: string | null
   sessions: ChatSummary[]
+  /** A one-off message for the user. Shown once per `bannerNonce`, so the
+   *  same message twice (the same bad path, picked again) shows twice. */
   banner: string | null
+  bannerNonce: number
+  install: InstallState
   installLog: string[]
   agentLog: string[]
   subscription: SubscriptionState
@@ -281,4 +314,15 @@ export interface AppStateDTO {
    *  agent everything the user owns, which the new-session view warns about. */
   homePath: string
   appearance: Appearance
+  /** Nothing can run a prompt: no provider, no local server, not signed in
+   *  — known for certain, never guessed (an unloaded list is not "none"). */
+  noModel: boolean
+  /** "Continue without" on the setup's connect step, remembered. */
+  providerSetupSkipped: boolean
+  notifyWhenDone: boolean
+  /** The options new sessions start with (the last set any session had):
+   *  what Settings shows as the defaults, e.g. the permission level. */
+  defaultConfigOptions: ACPConfigOption[]
+  /** Chats with a turn running — what quitting or updating would stop. */
+  busyTasks: number
 }

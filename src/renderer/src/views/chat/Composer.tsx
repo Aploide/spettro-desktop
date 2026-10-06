@@ -16,6 +16,12 @@
 // It also serves the new-session view, where no chat exists yet: there it is
 // handed a draft (see draftChat) and an `onSubmit`, and the caller creates the
 // chat with the first message.
+//
+// What is typed survives everything short of sending it: the text is kept per
+// chat in localStorage (state/drafts.ts), so switching chats, the engine
+// restarting underneath, or a relaunch gives it back. While the engine is
+// reconnecting the field stays open; only Send waits. With no model
+// connected at all, a bar above the card says so and leads to Settings.
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { JSX, ReactNode } from 'react'
@@ -25,7 +31,8 @@ import { workflowRequested } from '@shared/workflowActivation'
 import { budgetDirectivesLive, parseBudgetDirective } from '@shared/workflowBudget'
 import type { ChatDetail } from '@shared/model'
 import { call, useApp, useStore } from '@renderer/state/store'
-import { FOCUS_COMPOSER_EVENT } from '@renderer/state/shell'
+import { loadDraft, saveDraft } from '@renderer/state/drafts'
+import { FOCUS_COMPOSER_EVENT, openSettings } from '@renderer/state/shell'
 import { Icon } from '@renderer/design/icons'
 import ConfigBar, { nextMode } from './ConfigBar'
 import ModelMenu from './ModelMenu'
@@ -105,7 +112,17 @@ export function draftChat(projectPath: string): ChatDetail {
 
 export default function Composer({ chat, promptSeed, dock, onSubmit }: ComposerProps): JSX.Element {
   const app = useApp()
-  const [draft, setDraft] = useState('')
+  // The chat's unsent text, kept across chat switches, reconnects and
+  // relaunches. The composer is remounted per chat (ChatView is keyed), so
+  // reading it once is enough.
+  const [draft, setDraftState] = useState(() => loadDraft(chat.id))
+  const setDraft = useCallback(
+    (next: string): void => {
+      setDraftState(next)
+      saveDraft(chat.id, next)
+    },
+    [chat.id]
+  )
   const [attachments, setAttachments] = useState<PendingAttachment[]>([])
   const [mentions, setMentions] = useState<string[]>([])
   const [commandIndex, setCommandIndex] = useState(0)
@@ -125,7 +142,9 @@ export default function Composer({ chat, promptSeed, dock, onSubmit }: ComposerP
   const waitingOnUser = useStore(
     (s) => s.permissions.some((p) => p.chatId === chat.id) || s.questions.some((q) => q.chatId === chat.id)
   )
-  const ready = app?.phase.kind === 'ready'
+  // Sending waits for a live engine; typing never does.
+  const reconnecting = app?.connection === 'reconnecting'
+  const ready = app?.phase.kind === 'ready' && !reconnecting
   const busy = chat.isBusy && !onSubmit
   const gate = workflowGate(chat.configOptions)
   const requested = workflowRequested(draft)
@@ -375,7 +394,9 @@ export default function Composer({ chat, promptSeed, dock, onSubmit }: ComposerP
   // The new-session view names the folder right under the field, so there
   // the placeholder says what to type instead of where.
   const placeholder = !ready
-    ? 'Reconnecting…'
+    ? reconnecting
+      ? 'Spettro is reconnecting — you can keep typing…'
+      : 'Starting Spettro…'
     : onSubmit
       ? 'Describe a task, or ask about your code…'
       : 'Ask Spettro to build, fix, or explain…'
@@ -383,6 +404,7 @@ export default function Composer({ chat, promptSeed, dock, onSubmit }: ComposerP
   return (
     <div className="composer-outer">
       <div className="composer-column">
+        {app?.noModel && <NoModelBar />}
         {dock}
         {!onSubmit && <TodoList plan={chat.plan} busy={chat.isBusy} folded={waitingOnUser} />}
 
@@ -572,6 +594,20 @@ export default function Composer({ chat, promptSeed, dock, onSubmit }: ComposerP
           />
         )}
       </div>
+    </div>
+  )
+}
+
+/** Nothing can run a prompt — no provider, no local model, not signed in.
+ *  Said before the first message fails, with the way to fix it. */
+function NoModelBar(): JSX.Element {
+  return (
+    <div className="no-model-bar" role="status" data-testid="no-model-bar">
+      <Icon name="key" size={13} />
+      <span className="no-model-text">Connect a model to start.</span>
+      <button type="button" className="no-model-action" onClick={() => openSettings('models')}>
+        Connect…
+      </button>
     </div>
   )
 }

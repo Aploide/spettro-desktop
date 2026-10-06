@@ -14,7 +14,7 @@ import { call, useApp } from '@renderer/state/store'
 import { setNewSessionPath, useShell } from '@renderer/state/shell'
 import { Icon } from '@renderer/design/icons'
 import Composer, { draftChat, type PromptSeed, type SubmitAttachment } from '@renderer/views/chat/Composer'
-import { SidebarReopenButton, useDismiss } from '@renderer/views/chat/ChatHeader'
+import { ReconnectingPill, SidebarReopenButton, useDismiss } from '@renderer/views/chat/ChatHeader'
 import StarterPrompts from '@renderer/views/chat/StarterPrompts'
 import { basename, isBroadFolder } from './util'
 
@@ -59,6 +59,8 @@ export default function NewSessionView(): JSX.Element {
     <div className="new-session">
       <div className="new-session-bar">
         <SidebarReopenButton />
+        <span className="new-session-bar-spacer" />
+        <ReconnectingPill />
       </div>
       <div className="new-session-body">
         <h1 className="new-session-greeting">What should we build?</h1>

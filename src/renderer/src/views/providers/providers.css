@@ -332,3 +332,97 @@
   outline: 2px solid color-mix(in srgb, var(--accent) 60%, transparent);
   outline-offset: -2px;
 }
+
+/* "Use a model on this computer": what the scan found. */
+.local-found {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-sm);
+}
+
+.local-status {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-sm);
+  padding: var(--sp-md);
+  font-size: var(--fs-md);
+  color: var(--text-secondary);
+  background: var(--surface-raised);
+  border: 1px solid var(--hairline);
+  border-radius: var(--rad-sm);
+}
+
+.local-status--empty span:nth-child(2) {
+  flex: 1;
+  line-height: 1.45;
+}
+
+.local-status-icon {
+  display: inline-flex;
+  flex: none;
+  color: var(--text-tertiary);
+}
+
+.local-server {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-md);
+  padding: var(--sp-md);
+  background: var(--surface-raised);
+  border: 1px solid var(--hairline);
+  border-radius: var(--rad-sm);
+}
+
+.local-server-icon {
+  display: inline-flex;
+  flex: none;
+  color: var(--warning);
+}
+
+.local-server-icon--ok {
+  color: var(--success);
+}
+
+.local-server-texts {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.local-server-name {
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+
+.local-server-count {
+  font-weight: 400;
+  color: var(--text-secondary);
+}
+
+.local-server-sub {
+  font-size: var(--fs-sm);
+  line-height: 1.45;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.local-custom-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* Sized to what it holds: the scan's answer is one or three rows. */
+.modal-panel--local {
+  height: auto;
+  min-height: 0;
+}
+
+.local {
+  text-align: left;
+}
+
+.local-footer {
+  justify-content: flex-end;
+}

@@ -7,6 +7,7 @@ import type { ACPPermissionRequest, ACPQuestionRequest } from '@shared/acp'
 import type { MainEvent, SpettroBridge } from '@shared/ipc'
 import type { AppStateDTO, ChatDetail } from '@shared/model'
 import { transcriptItemId } from '@shared/model'
+import { saveDraft } from './drafts'
 
 export interface RendererState {
   app: AppStateDTO | null
@@ -57,6 +58,8 @@ function reduce(event: MainEvent): void {
       break
     }
     case 'chat-removed': {
+      // A deleted chat's unsent words go with it.
+      saveDraft(event.chatId, '')
       const { [event.chatId]: _, ...rest } = state.chats
       emit({ ...state, chats: rest })
       break
@@ -103,6 +106,42 @@ export async function ensureChatLoaded(chatId: string): Promise<void> {
   if (chat) reduce({ type: 'chat-reset', chat })
 }
 
-/** Shorthand for window.spettro.call. */
-export const call: SpettroBridge['call'] = (method, ...args) =>
+const invoke: SpettroBridge['call'] = (method, ...args) =>
   (window.spettro.call as (...a: unknown[]) => never)(method, ...args)
+
+/**
+ * window.spettro.call, with failures said out loud.
+ *
+ * Most actions are fire-and-forget (`void call('remoteSetEnabled', true)`),
+ * and a rejection there used to vanish: the switch flipped back, or nothing
+ * happened, and the user was left guessing. Every rejection now becomes a
+ * toast in words (shared/humanize.ts). The promise still rejects, so a
+ * caller that awaits can react as well — and a caller that shows the error
+ * itself (an inline field error, a sheet's own failure state) uses
+ * `quietCall` so it isn't said twice.
+ */
+export const call: SpettroBridge['call'] = (method, ...args) => {
+  const promise = invoke(method, ...args)
+  // A handler on the original marks it handled, so `void call(…)` never
+  // surfaces as an unhandled rejection; awaiting callers still see it.
+  ;(promise as Promise<unknown>).catch((err: unknown) => reportFailure(method, err))
+  return promise
+}
+
+/** `call` for sites that show their own failure (or poll in the
+ *  background, where a toast per tick would be noise). */
+export const quietCall: SpettroBridge['call'] = invoke
+
+/** Hook for the toast layer, set by App; a plain log until then (and in
+ *  tests that render a view without it). */
+let failureReporter: (method: string, err: unknown) => void = (method, err) => {
+  console.warn(`[spettro] ${method} failed`, err)
+}
+
+export function setFailureReporter(reporter: (method: string, err: unknown) => void): void {
+  failureReporter = reporter
+}
+
+function reportFailure(method: string, err: unknown): void {
+  failureReporter(method, err)
+}

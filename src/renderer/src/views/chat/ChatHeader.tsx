@@ -3,6 +3,9 @@
 // a muted `project › branch` breadcrumb, and on the right the uncommitted-change
 // chip, the context-window ring and the terminal toggle. While the sidebar is
 // collapsed its reopen button leads the bar, where the sidebar's own was.
+// While the engine restarts underneath (a crash, an update, Restart Engine)
+// a "Reconnecting…" pill sits in the bar — the only sign of it besides Send
+// waiting; nothing on screen is unmounted.
 
 import { useEffect, useRef, useState } from 'react'
 import type { ACPUsage } from '@shared/acp'
@@ -64,6 +67,7 @@ export default function ChatHeader({ chat }: { chat: ChatDetail }): JSX.Element 
         </span>
       </div>
       <div className="chat-header-spacer" />
+      <ReconnectingPill />
       <div className="chat-header-chips">
         {git.files.length > 0 && <GitStatChip git={git} projectPath={chat.projectPath} />}
         {chat.usage && <ContextMeter usage={chat.usage} />}
@@ -79,6 +83,19 @@ export default function ChatHeader({ chat }: { chat: ChatDetail }): JSX.Element 
         </button>
       </div>
     </header>
+  )
+}
+
+/** "Reconnecting…" while the engine restarts under the window; nothing
+ *  otherwise. */
+export function ReconnectingPill(): JSX.Element | null {
+  const reconnecting = useApp()?.connection === 'reconnecting'
+  if (!reconnecting) return null
+  return (
+    <span className="reconnecting-pill" role="status" data-testid="reconnecting">
+      <span className="reconnecting-dot" aria-hidden />
+      Reconnecting…
+    </span>
   )
 }
 

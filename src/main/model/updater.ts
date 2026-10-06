@@ -38,7 +38,7 @@ import {
   type ComponentUpdate,
   type UpdateState
 } from '../../shared/update'
-import type { InstallerEvent } from './cliInstaller'
+import type { InstallerEvent, InstallPhase } from './cliInstaller'
 
 /** Where the desktop app's own releases live. */
 export const APP_REPO = 'aploide/spettro-desktop'
@@ -311,6 +311,17 @@ export interface UpdateManagerOptions {
   onChange: () => void
   /** Quits the app once an installer has been handed off. */
   quit: () => void
+  /** Resolves once no chat is working — Update When Finished waits on it
+   *  before the step that would stop them (the quit, the agent restart). */
+  waitForIdle?: () => Promise<void>
+}
+
+/** What a CLI install's phases read as on the Updates row. */
+const CLI_PHASE_TEXT: Record<InstallPhase, string> = {
+  checking: 'Checking for the latest version…',
+  downloading: 'Downloading…',
+  verifying: 'Verifying the download…',
+  installing: 'Installing…'
 }
 
 export class UpdateManager {
@@ -450,7 +461,7 @@ export class UpdateManager {
 
   /** Downloads this platform's installer and hands off to it. Resolves once
    *  the handoff is done; the app quits a moment later. */
-  async installApp(): Promise<void> {
+  async installApp(whenIdle = false): Promise<void> {
     if (this.busy(this.app)) return
     if (!canInstallApp(this.opts.isPackaged)) {
       this.setApp({
@@ -501,6 +512,12 @@ export class UpdateManager {
       return
     }
 
+    if (whenIdle && this.opts.waitForIdle) {
+      // Downloaded; the quit that installing means waits for the work.
+      this.setApp({ status: 'installing', progress: 1, message: 'Ready — updating when Spettro finishes working…' })
+      await this.opts.waitForIdle()
+      if (this.stopped) return
+    }
     this.setApp({ status: 'installing', progress: 1, message: 'Starting the installer…' })
     try {
       handOffToInstaller(target)
@@ -514,26 +531,35 @@ export class UpdateManager {
   }
 
   /** Re-runs the CLI install script and reconnects the agent afterwards. */
-  async installCLI(): Promise<void> {
+  async installCLI(whenIdle = false): Promise<void> {
     if (this.busy(this.cli)) return
-    this.setCLI({ status: 'installing', progress: null, message: 'Running the Spettro installer…' })
+    this.setCLI({ status: 'installing', progress: null, message: CLI_PHASE_TEXT.checking })
 
-    const finished = await new Promise<boolean>((resolve) => {
+    // The installer's raw lines are for a log nobody here reads; the row
+    // says which phase it is in.
+    const failure = await new Promise<string | null>((resolve) => {
       this.opts.installCLI((event) => {
-        if (event.type === 'output') {
-          this.setCLI({ message: event.line })
-        } else {
-          resolve(event.success)
+        if (event.type === 'phase') {
+          this.setCLI({ message: CLI_PHASE_TEXT[event.phase] })
+        } else if (event.type === 'finished') {
+          resolve(event.success ? null : cliFailureText(event.failure))
         }
       })
     })
 
-    if (!finished) {
-      this.setCLI({ status: 'failed', message: 'The installer did not complete.' })
+    if (failure !== null) {
+      this.setCLI({ status: 'failed', message: failure })
       return
     }
 
-    this.setCLI({ message: 'Restarting the agent…' })
+    if (whenIdle && this.opts.waitForIdle) {
+      // The new binary is on disk; restarting onto it waits for the work.
+      this.setCLI({ message: 'Installed — restarting when Spettro finishes working…' })
+      await this.opts.waitForIdle()
+      if (this.stopped) return
+    }
+
+    this.setCLI({ message: 'Restarting Spettro’s engine…' })
     try {
       await this.opts.onCLIInstalled()
     } catch (err) {
@@ -550,6 +576,20 @@ export class UpdateManager {
     })
     // Confirm against the release listing rather than trusting the tag we had.
     void this.check()
+  }
+}
+
+function cliFailureText(failure: Extract<InstallerEvent, { type: 'finished'; success: false }>['failure']): string {
+  switch (failure.kind) {
+    case 'cancelled':
+      return 'The update was cancelled.'
+    case 'timeout':
+      return 'The update took too long. Check your connection, then try again.'
+    case 'missing-tool':
+      return `Updating needs ${failure.tool}, which isn’t installed on this computer.`
+    case 'launch':
+    case 'failed':
+      return 'Couldn’t download the update. Check your connection, then try again.'
   }
 }
 

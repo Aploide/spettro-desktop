@@ -7,8 +7,8 @@
 // when nothing is selected. A screenshot shows every one of these looking
 // right while doing nothing.
 
-import { afterEach, beforeAll, describe, expect, it } from 'vitest'
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import type { MainEvent } from '@shared/ipc'
 import type { AppStateDTO, ChatSummary } from '@shared/model'
 import { EMPTY_EXTENSIONS } from '@shared/extensions'
@@ -36,11 +36,14 @@ function chat(id: string, title: string, minutesAgo: number): ChatSummary {
 
 const STATE: AppStateDTO = {
   phase: { kind: 'ready' },
+  connection: 'ok',
   cli: null,
   agentVersion: null,
   selectedSessionId: null,
   sessions: [chat('a', 'Newest chat', 1), chat('b', 'Older chat', 30)],
   banner: null,
+  bannerNonce: 0,
+  install: { stage: 'idle', failure: null },
   installLog: [],
   agentLog: [],
   subscription: { plan: 'unknown', email: null },
@@ -52,7 +55,12 @@ const STATE: AppStateDTO = {
   recentProjects: ['/work/acme'],
   missingProjects: [],
   homePath: '/home/me',
-  appearance: 'system'
+  appearance: 'system',
+  noModel: false,
+  providerSetupSkipped: false,
+  notifyWhenDone: true,
+  defaultConfigOptions: [],
+  busyTasks: 0
 }
 
 /** Node's own `localStorage` global (undefined without --localstorage-file)
@@ -97,8 +105,9 @@ afterEach(async () => {
   // The store and the layout store are module singletons that outlive a
   // render: put back what a test changed so the next one starts clean.
   act(() => listeners.forEach((l) => l({ type: 'app-state', state: STATE })))
-  const { setNewSessionPath } = await import('@renderer/state/shell')
+  const { closeSettings, setNewSessionPath } = await import('@renderer/state/shell')
   setNewSessionPath(null)
+  closeSettings()
   cleanup()
   calls.length = 0
   localStorage.clear()
@@ -187,13 +196,54 @@ describe('the shell', () => {
     expect(screen.queryByRole('menu')).toBeNull()
   })
 
-  it('asks twice before deleting', async () => {
+  it('asks before deleting, then deletes only once Undo has run out', async () => {
+    await renderApp()
+    vi.useFakeTimers()
+    try {
+      fireEvent.click(screen.getByRole('button', { name: 'More actions for Older chat' }))
+      fireEvent.click(screen.getByRole('menuitem', { name: 'Delete…' }))
+      const alert = screen.getByRole('alertdialog', { name: 'Delete this session?' })
+      expect(alert.textContent).toContain('“Older chat” will be removed')
+      expect(called('closeChat')).toEqual([])
+      fireEvent.click(within(alert).getByRole('button', { name: 'Delete' }))
+      await act(async () => undefined)
+      // Gone from the list at once, with Undo on offer — but not deleted yet.
+      expect(screen.queryByRole('button', { name: 'More actions for Older chat' })).toBeNull()
+      expect(screen.getByRole('button', { name: 'Undo' })).toBeTruthy()
+      expect(called('closeChat')).toEqual([])
+      act(() => void vi.advanceTimersByTime(8000))
+      expect(called('closeChat')).toEqual([['b']])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('puts a deleted session back with Undo, and never deletes it', async () => {
+    await renderApp()
+    vi.useFakeTimers()
+    try {
+      fireEvent.click(screen.getByRole('button', { name: 'More actions for Older chat' }))
+      fireEvent.click(screen.getByRole('menuitem', { name: 'Delete…' }))
+      fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Delete' }))
+      await act(async () => undefined)
+      fireEvent.click(screen.getByRole('button', { name: 'Undo' }))
+      expect(screen.getByRole('button', { name: 'More actions for Older chat' })).toBeTruthy()
+      act(() => void vi.advanceTimersByTime(10_000))
+      expect(called('closeChat')).toEqual([])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('keeps everything when Delete is cancelled (Escape)', async () => {
     await renderApp()
     fireEvent.click(screen.getByRole('button', { name: 'More actions for Older chat' }))
     fireEvent.click(screen.getByRole('menuitem', { name: 'Delete…' }))
+    press('Escape', { ctrlKey: false })
+    await act(async () => undefined)
+    expect(screen.queryByRole('alertdialog')).toBeNull()
+    expect(screen.getByRole('button', { name: 'More actions for Older chat' })).toBeTruthy()
     expect(called('closeChat')).toEqual([])
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Delete permanently' }))
-    expect(called('closeChat')).toEqual([['b']])
   })
 
   it('Ctrl+N starts a new session, but not from inside the terminal', async () => {

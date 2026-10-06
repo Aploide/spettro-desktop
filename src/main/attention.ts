@@ -8,6 +8,10 @@
 // <chat>" — that brings the window forward on that chat when clicked. A
 // notification is withdrawn once its prompt is answered, from here or from
 // a paired phone.
+//
+// With "Notify me when Spettro finishes" on (Settings › General), a turn that
+// ends while the window is in the background says so too — the long task you
+// switched away from is done, or it stopped on an error.
 
 import { app, Notification, type BrowserWindow } from 'electron'
 import type { ACPPermissionRequest, ACPQuestionRequest } from '../shared/acp'
@@ -45,6 +49,21 @@ export function attentionNotice(
     title: `Spettro has ${n > 1 ? `${n} questions` : 'a question'}${where}`,
     body: first?.question ?? ''
   }
+}
+
+/** The notification for a turn that ended out of sight, or null when the
+ *  ending isn't news (the user interrupted it themselves). */
+export function doneNotice(
+  chatTitle: string | null,
+  stopReason: string,
+  noticeText: string | null
+): Notice | null {
+  if (stopReason === 'cancelled') return null
+  const name = chatTitle && chatTitle.trim() !== '' ? `“${chatTitle.trim()}”` : 'Your session'
+  if (stopReason === 'error') {
+    return { title: `${name} stopped`, body: noticeText ?? 'Something went wrong.' }
+  }
+  return { title: `${name} is done`, body: noticeText ?? 'Spettro finished working.' }
 }
 
 /** Wires the badge and the notifications to the model's prompt queue. */
@@ -123,4 +142,32 @@ export function wireAttention(model: AppModel, getWindow: () => BrowserWindow | 
 
   model.on('permission-ask', (requestId: string, chatId: string | null) => notify(requestId, chatId))
   model.on('question-ask', (requestId: string, chatId: string | null) => notify(requestId, chatId))
+
+  // A turn's end arrives as a chat-state carrying its stop reason. Shown
+  // notifications are held until closed, or their click handler is lost.
+  const done = new Set<Notification>()
+  model.on(
+    'chat-state',
+    (summary: { id: string; title: string }, extra?: { stopReason?: string; notice?: { text: string } }) => {
+      if (!extra?.stopReason || !model.notifyWhenDone) return
+      const win = getWindow()
+      if (!win || win.isDestroyed() || win.isFocused()) return
+      if (model.sessionById(summary.id)?.isScratch) return
+      const notice = doneNotice(summary.title, extra.stopReason, extra.notice?.text ?? null)
+      if (!notice || !Notification.isSupported()) return
+      const notification = new Notification({ title: notice.title, body: notice.body })
+      notification.on('click', () => {
+        const target = getWindow()
+        if (target && !target.isDestroyed()) {
+          if (target.isMinimized()) target.restore()
+          target.show()
+          target.focus()
+        }
+        model.openChat(summary.id)
+      })
+      notification.on('close', () => done.delete(notification))
+      done.add(notification)
+      notification.show()
+    }
+  )
 }

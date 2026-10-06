@@ -76,6 +76,7 @@ export type IconName =
   | 'questionmark.bubble'
   | 'lock.shield'
   | 'hand.raised'
+  | 'keyboard'
 
 /** gearshape: eight teeth round a ring, computed once. */
 const GEAR_TEETH = Array.from({ length: 8 }, (_, i) => {
@@ -123,6 +124,12 @@ const STROKE_ICONS: Record<string, ReactNode> = {
     <>
       <circle cx="6.5" cy="6.5" r="4.5" />
       <path d="M9.8 9.8L14 14" />
+    </>
+  ),
+  keyboard: (
+    <>
+      <rect x="1.5" y="4" width="13" height="8.5" rx="1.5" />
+      <path d="M4 6.75h.01M6.5 6.75h.01M9 6.75h.01M11.5 6.75h.01M4 9.25h.01M11.5 9.25h.01M6 9.75h4" strokeWidth="1.6" />
     </>
   ),
   terminal: (

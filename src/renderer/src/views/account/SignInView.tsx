@@ -12,10 +12,18 @@
 // The four states are the TUI's, with the TUI's wording: starting, waiting,
 // complete, failed/expired. Note a *pending* login legitimately reports
 // `signedIn: false` with no plan — that is not the signed-out state.
+//
+// Nothing happens behind the user's back: the sheet first says a browser
+// window is about to open and waits for "Continue in Browser". While it waits
+// for the sign-in, the raw link sits behind "Having trouble?" for whoever's
+// browser didn't open. Escape (or Cancel) cancels the flow on the CLI too, and
+// once signed in there is nothing left to cancel.
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { LoginStatus } from '@shared/extensions'
-import { call, getState, useApp } from '@renderer/state/store'
+import { humanizeError } from '@shared/humanize'
+import { getState, quietCall, useApp } from '@renderer/state/store'
+import Disclosure from '@renderer/views/common/Disclosure'
 import AppIcon from '@renderer/views/shell/AppIcon'
 import Spinner from '@renderer/views/shell/Spinner'
 import '@renderer/design/form.css'
@@ -43,6 +51,7 @@ export default function SignInView({ onComplete, onClose, stacked = false }: Pro
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const finished = useRef(false)
 
+  // 'idle' until "Continue in Browser": the browser never opens unannounced.
   const state = login?.status ?? 'idle'
   const browserUrl = login?.browserUrl ?? null
   const pricingUrl = account?.pricingUrl ?? PRICING_FALLBACK
@@ -52,14 +61,14 @@ export default function SignInView({ onComplete, onClose, stacked = false }: Pro
     setDidCopy(false)
     setLogin({ loginId: null, status: 'starting', browserUrl: null, error: null })
     try {
-      const status = await call('accountLoginStart')
+      const status = await quietCall('accountLoginStart')
       setLogin(status)
       if (status.status === 'error') {
         setFailure(status.error ?? 'Sign-in could not be started.')
         return
       }
       // The app, not the CLI, owns browser launching.
-      if (status.browserUrl) void call('openExternal', status.browserUrl)
+      if (status.browserUrl) void quietCall('openExternal', status.browserUrl)
     } catch (err) {
       setLogin({ loginId: null, status: 'error', browserUrl: null, error: null })
       setFailure(message(err))
@@ -68,23 +77,22 @@ export default function SignInView({ onComplete, onClose, stacked = false }: Pro
 
   // A flow already outstanding when the sheet appears is resynced rather than
   // restarted — starting a second device flow would invalidate the URL the
-  // user may already have open in their browser.
+  // user may already have open in their browser. Otherwise the sheet waits
+  // for "Continue in Browser".
   useEffect(() => {
     const existing = getState().app?.extensions?.account.login ?? null
     if (existing !== null && (existing.status === 'pending' || existing.status === 'starting')) {
       setLogin(existing)
-      void call('accountLoginPoll')
+      void quietCall('accountLoginPoll')
         .then((status) => setLogin(status))
         .catch(() => {
           /* A failed resync is not a failed login; the pushes still land. */
         })
-    } else {
-      void start()
     }
     return () => {
       if (copyTimer.current !== null) clearTimeout(copyTimer.current)
     }
-  }, [start])
+  }, [])
 
   // Main advances the flow and pushes every state change, so reflecting
   // `extensions.account.login` is all the sheet has to do.
@@ -108,7 +116,7 @@ export default function SignInView({ onComplete, onClose, stacked = false }: Pro
   useEffect(() => {
     if (!isComplete || finished.current) return
     finished.current = true
-    void call('refreshExtensions')
+    void quietCall('refreshExtensions')
     const timer = setTimeout(() => {
       onComplete?.()
       onClose()
@@ -116,10 +124,24 @@ export default function SignInView({ onComplete, onClose, stacked = false }: Pro
     return () => clearTimeout(timer)
   }, [isComplete, onComplete, onClose])
 
-  const cancel = (): void => {
-    void call('accountLoginCancel')
+  const cancel = useCallback((): void => {
+    // Only a flow that was started has anything to cancel on the CLI.
+    if (state === 'starting' || state === 'pending') void quietCall('accountLoginCancel')
     onClose()
-  }
+  }, [state, onClose])
+
+  // Escape is this sheet's Cancel — and only this sheet's: the Settings
+  // window behind it must not close with it.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key !== 'Escape' || e.defaultPrevented) return
+      e.preventDefault()
+      e.stopPropagation()
+      if (!isComplete) cancel()
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [cancel, isComplete])
 
   const copy = (text: string): void => {
     void navigator.clipboard.writeText(text)
@@ -146,16 +168,26 @@ export default function SignInView({ onComplete, onClose, stacked = false }: Pro
                 <CheckSealIcon size={32} />
                 <span className="signin-muted">Signed in — loading your plan…</span>
               </div>
+            ) : state === 'idle' || state === 'cancelled' || state === 'unknown' ? (
+              <div className="signin-state">
+                <p className="signin-muted signin-detail">
+                  Spettro will open your web browser so you can sign in. Come back here when you&rsquo;re
+                  done.
+                </p>
+                <button className="btn btn--prominent btn--large" autoFocus onClick={() => void start()}>
+                  Continue in Browser
+                </button>
+              </div>
             ) : state === 'error' || state === 'expired' ? (
               <div className="signin-state">
                 <span className="signin-warning">
                   <WarnIcon size={28} />
                 </span>
                 <span className="signin-strong">
-                  {state === 'expired' ? 'That sign-in link expired.' : 'Sign-in failed.'}
+                  {state === 'expired' ? 'That sign-in link expired.' : 'Couldn’t sign in.'}
                 </span>
                 {(login?.error ?? failure) && (
-                  <span className="signin-muted signin-detail">{login?.error ?? failure}</span>
+                  <span className="signin-muted signin-detail">{message(login?.error ?? failure)}</span>
                 )}
                 <button className="btn btn--prominent" onClick={() => void start()}>
                   Try Again
@@ -168,10 +200,13 @@ export default function SignInView({ onComplete, onClose, stacked = false }: Pro
                   <span className="signin-strong">Waiting for you to sign in…</span>
                 </div>
                 <p className="signin-muted signin-detail">
-                  A browser window should have opened. If not, open this link:
+                  Finish signing in in your browser. This window updates on its own.
                 </p>
                 {browserUrl && (
-                  <>
+                  <Disclosure label="Having trouble?" openLabel="Having trouble?">
+                    <p className="signin-muted signin-detail">
+                      If no browser window opened, open this link yourself:
+                    </p>
                     <div className="signin-url">
                       <span className="signin-url-text mono">{browserUrl}</span>
                       <button className="btn btn--small" onClick={() => copy(browserUrl)}>
@@ -180,11 +215,11 @@ export default function SignInView({ onComplete, onClose, stacked = false }: Pro
                     </div>
                     <button
                       className="btn btn--small"
-                      onClick={() => void call('openExternal', browserUrl)}
+                      onClick={() => void quietCall('openExternal', browserUrl)}
                     >
                       Open in Browser
                     </button>
-                  </>
+                  </Disclosure>
                 )}
               </div>
             ) : (
@@ -196,12 +231,14 @@ export default function SignInView({ onComplete, onClose, stacked = false }: Pro
           </div>
 
           <footer className="signin-footer">
-            <button className="link" onClick={() => void call('openExternal', pricingUrl)}>
+            <button className="link" onClick={() => void quietCall('openExternal', pricingUrl)}>
               See plans
             </button>
-            <button className="btn" onClick={cancel}>
-              Cancel
-            </button>
+            {!isComplete && (
+              <button className="btn" onClick={cancel}>
+                Cancel
+              </button>
+            )}
           </footer>
         </div>
       </div>
@@ -209,10 +246,11 @@ export default function SignInView({ onComplete, onClose, stacked = false }: Pro
   )
 }
 
+/** A sign-in failure in words ("You appear to be offline. Check your
+ *  internet connection…"); an unknown one as its own first line. */
 function message(err: unknown): string {
-  const text = err instanceof Error ? err.message : String(err)
-  // Electron prefixes rejected invokes with its own routing noise.
-  return text.replace(/^Error invoking remote method '[^']+':\s*/, '')
+  const human = humanizeError(err)
+  return human.known ? `${human.title}. ${human.detail}` : human.detail
 }
 
 /** checkmark.circle.fill */

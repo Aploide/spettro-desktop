@@ -15,16 +15,20 @@ import type { ACPConfigOption } from '@shared/acp'
 
 const calls: [string, unknown[]][] = []
 
-vi.mock('@renderer/state/store', () => ({
-  // No approval or question is waiting.
-  useStore: <T,>(select: (s: { permissions: never[]; questions: never[] }) => T): T =>
-    select({ permissions: [], questions: [] }),
-  call: (method: string, ...args: unknown[]) => {
-    calls.push([method, args])
-    return Promise.resolve()
-  },
-  useApp: () => ({ phase: { kind: 'ready' } })
-}))
+vi.mock('@renderer/state/store', () => {
+  const mocked = {
+    // No approval or question is waiting.
+    useStore: <T,>(select: (s: { permissions: never[]; questions: never[] }) => T): T =>
+      select({ permissions: [], questions: [] }),
+    call: (method: string, ...args: unknown[]) => {
+      calls.push([method, args])
+      return Promise.resolve()
+    },
+    useApp: () => ({ phase: { kind: 'ready' } })
+  }
+  // quietCall is call without the failure toast; to a test they are one.
+  return { ...mocked, quietCall: mocked.call }
+})
 
 beforeEach(() => {
   calls.length = 0

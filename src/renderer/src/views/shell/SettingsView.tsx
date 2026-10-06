@@ -1,153 +1,185 @@
-// Port of Platforms/macOS/Views/SettingsView.swift (docs 29-settings.md): a
-// fixed 580x520 sheet with a segmented pane picker and, in each pane, a
-// grouped Form — a section caption above a rounded inset card, rows sharing
-// one label column with their values right-aligned, hairlines between rows,
-// and a caption underneath. Those metrics live in design/form.css; the Swift
-// gets them free from `.formStyle(.grouped)`, and reproducing them is what
-// stops the sheet reading as a handful of boxes floating in dead space.
+// Settings, as one window with a sidebar of panes — the shape of macOS System
+// Settings and the Claude app's settings — rather than the Swift port's
+// segmented strip, which ran out of room at six tabs. Each pane is a grouped
+// Form (design/form.css): a caption above a rounded inset card, rows sharing
+// one label column, a footer caption underneath.
 //
-// Deviations forced by the platform:
-// - "Choose Executable…" is a typed-path field: the IPC contract exposes a
-//   folder picker only, and `useExplicitCLIPath` validates and banners on a
-//   bad path exactly like the Swift override flow.
-// - Remote access is its own sheet (the sidebar's phone button), exactly as on
-//   macOS — it is deliberately not a pane here.
+//   General         appearance, default permission, "notify me when done"
+//   Account         the Spettro subscription
+//   Models & Providers   what can run a model, and the active one
+//   Permissions     what each level lets Spettro do, and the default
+//   Memory          facts about you / about this project
+//   Remote          pairing a phone (formerly its own sheet)
+//   Updates         one "up to date / Update Now" row; the parts under Details
+//   Advanced        where the engine lives, restarting it, the default
+//                   folder, resuming a session started in the terminal
+//   Keyboard Shortcuts, About
 //
-// Everything account/provider related is live: the panes read `extensions`
-// (the mirrored AccountStore + ProviderStore) and drive the `_spettro/*`
-// surface through the IPC methods.
+// The pane is part of the shell store (openSettings / closeSettings), so the
+// sidebar, Ctrl/Cmd+, the menu and a toast's action can all open it on the
+// right pane. Leaving a pane with unsaved memory edits asks first (closeGuard);
+// Enter no longer closes the window — it presses whatever has focus.
 
 import { useEffect, useState } from 'react'
+import type { ACPConfigOption } from '@shared/acp'
 import { EMPTY_EXTENSIONS, creditDetail, remainingFraction, shortHost } from '@shared/extensions'
-import type { Appearance } from '@shared/model'
-import { call, useApp } from '@renderer/state/store'
+import { diagnosticsText, humanizeError } from '@shared/humanize'
+import type { Appearance, CLISessionEntry } from '@shared/model'
+import { SHORTCUTS, shortcutText } from '@shared/shortcuts'
+import { call, quietCall, useApp, useStore } from '@renderer/state/store'
+import { openSettings, type SettingsPane } from '@renderer/state/shell'
+import { mayClose } from '@renderer/views/common/closeGuard'
+import { CopyButton } from '@renderer/views/common/Disclosure'
 import MemoryView from '@renderer/views/sheets/MemoryView'
+import RemoteAccessView from '@renderer/views/remote/RemoteAccessView'
 import ConnectProvidersView, {
-  UnsupportedCLINotice
+  UnsupportedCLINotice,
+  signOutWithConfirm
 } from '@renderer/views/providers/ConnectProvidersView'
 import ModelPickerView from '@renderer/views/providers/ModelPickerView'
 import SignInView from '@renderer/views/account/SignInView'
 import { badgePlan, WarningTriangleIcon } from '@renderer/views/providers/icons'
+import {
+  choicesOf,
+  permissionGloss,
+  permissionName,
+  PERMISSION_ID
+} from '@renderer/views/chat/SessionSettingsPopover'
+import { Icon, type IconName } from '@renderer/design/icons'
+import AppIcon from './AppIcon'
 import PlanBadge from './PlanBadge'
 import Spinner from './Spinner'
 import UpdatesPane from './UpdatesPane'
-import { defaultProjectPath } from './util'
+import { restartEngine } from './actions'
+import { basename, defaultProjectPath, isMac, relativeTime } from './util'
 import '@renderer/design/form.css'
 
-export type SettingsPane = 'general' | 'account' | 'agent' | 'providers' | 'memory' | 'updates'
+export type { SettingsPane }
 
-const PANES: { id: SettingsPane; label: string }[] = [
-  { id: 'general', label: 'General' },
-  { id: 'account', label: 'Account' },
-  { id: 'agent', label: 'Agent' },
-  { id: 'providers', label: 'Providers' },
-  { id: 'memory', label: 'Memory' },
-  { id: 'updates', label: 'Updates' }
+export const PANES: { id: SettingsPane; label: string; icon: IconName }[] = [
+  { id: 'general', label: 'General', icon: 'gearshape' },
+  { id: 'account', label: 'Account', icon: 'person.crop.circle' },
+  { id: 'models', label: 'Models & Providers', icon: 'key' },
+  { id: 'permissions', label: 'Permissions', icon: 'lock.shield' },
+  { id: 'memory', label: 'Memory', icon: 'brain' },
+  { id: 'remote', label: 'Remote', icon: 'iphone' },
+  { id: 'updates', label: 'Updates', icon: 'arrow.down.circle.fill' },
+  { id: 'advanced', label: 'Advanced', icon: 'wrench.and.screwdriver' },
+  { id: 'shortcuts', label: 'Keyboard Shortcuts', icon: 'keyboard' },
+  { id: 'about', label: 'About', icon: 'info.circle.fill' }
 ]
 
 const DASHBOARD_URL = 'https://spettro.app/dashboard'
 const PRICING_FALLBACK = 'https://spettro.app/pricing'
+const WEBSITE = 'https://spettro.app'
+const SOURCE = 'https://github.com/aploide/spettro-desktop'
 
 interface Props {
-  initialPane?: SettingsPane
+  pane: SettingsPane
+  /** Asks the close guard first (App owns it). */
   onClose: () => void
 }
 
-export default function SettingsView({ initialPane = 'general', onClose }: Props): JSX.Element {
+export default function SettingsView({ pane, onClose }: Props): JSX.Element {
   const app = useApp()
-  const [pane, setPane] = useState<SettingsPane>(initialPane)
   const [showSignIn, setShowSignIn] = useState(false)
   const [showConnect, setShowConnect] = useState(false)
   const [showModels, setShowModels] = useState(false)
-  const version = app?.agentVersion ?? app?.cli?.version ?? null
   const updateAvailable = Boolean(app?.update.app.available || app?.update.cli.available)
+  const current = PANES.find((p) => p.id === pane) ?? PANES[0]
 
   // Credits and plan are a snapshot from when the agent connected; opening
   // Settings is exactly when they need to be current (the Swift's
   // `.task { await account.refresh() }`).
   useEffect(() => {
-    void call('refreshExtensions')
+    void quietCall('refreshExtensions')
   }, [])
+
+  // A pane with unsaved edits (Memory) is asked before it is left.
+  const goTo = async (next: SettingsPane): Promise<void> => {
+    if (next === pane) return
+    if (await mayClose('settings')) openSettings(next)
+  }
 
   return (
     <>
       <div className="modal-backdrop" role="presentation">
-        <div
-          className="modal-panel modal-panel--settings"
-          role="dialog"
-          aria-modal="true"
-          aria-label="Settings"
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && !(e.target instanceof HTMLTextAreaElement)) onClose()
-          }}
-        >
-          <div className="settings-panes">
-            <div className="segmented" role="tablist">
+        <div className="modal-panel modal-panel--settings" role="dialog" aria-modal="true" aria-label="Settings">
+          <nav className="settings-nav" aria-label="Settings">
+            <div className="settings-nav-title">Settings</div>
+            <div role="tablist" aria-orientation="vertical" className="settings-nav-list">
               {PANES.map((p) => (
                 <button
                   key={p.id}
+                  type="button"
                   role="tab"
                   aria-selected={pane === p.id}
-                  className={pane === p.id ? 'active' : ''}
-                  onClick={() => setPane(p.id)}
+                  data-testid={`settings-pane-${p.id}`}
+                  className={'settings-nav-item' + (pane === p.id ? ' settings-nav-item--active' : '')}
+                  onClick={() => void goTo(p.id)}
+                  onKeyDown={(e) => {
+                    // ↑/↓ walk the list, the way a sidebar does.
+                    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return
+                    e.preventDefault()
+                    const at = PANES.findIndex((x) => x.id === pane)
+                    const next = PANES[(at + (e.key === 'ArrowDown' ? 1 : -1) + PANES.length) % PANES.length]
+                    void goTo(next.id).then(() =>
+                      document.querySelector<HTMLElement>(`[data-testid="settings-pane-${next.id}"]`)?.focus()
+                    )
+                  }}
                 >
-                  {p.label}
-                  {/* One dot on the tab is the whole "you have an update"
-                      affordance inside the sheet — the sidebar carries the
-                      version that is visible without opening Settings. */}
+                  <span className="settings-nav-icon" aria-hidden>
+                    <Icon name={p.icon} size={14} />
+                  </span>
+                  <span className="settings-nav-label">{p.label}</span>
+                  {/* One dot is the whole "you have an update" affordance in
+                      here — the sidebar row says it outside. */}
                   {p.id === 'updates' && updateAvailable && <span className="segmented-dot" />}
                 </button>
               ))}
             </div>
-          </div>
+          </nav>
 
-          <div className="divider" />
-
-          <div className="settings-body">
-            {pane === 'general' && <GeneralPane />}
-            {pane === 'account' && <AccountPane onSignIn={() => setShowSignIn(true)} />}
-            {pane === 'agent' && <AgentPane />}
-            {pane === 'providers' && (
-              <ProvidersPane
-                onManage={() => setShowConnect(true)}
-                onBrowseModels={() => setShowModels(true)}
-              />
-            )}
-            {pane === 'updates' && <UpdatesPane />}
-            {pane === 'memory' && (
-              // MemoryView is a standalone screen that presents its own
-              // backdrop; `.pane-embed` confines it to the pane, which is what
-              // `memoryTab` does in the Swift by embedding rather than
-              // presenting it.
-              <div className="pane-embed">
-                <MemoryView
-                  projectPath={app ? (defaultProjectPath(app) ?? null) : null}
-                  onClose={onClose}
-                />
-              </div>
-            )}
-          </div>
-
-          <div className="divider" />
-
-          <div className="modal-foot">
-            <span className="settings-version">{version ? `spettro ${version}` : ''}</span>
-            <button className="btn btn--prominent" onClick={onClose}>
-              Done
-            </button>
+          <div className="settings-main">
+            <header className="settings-head">
+              <h2 className="settings-head-title">{current.label}</h2>
+              <button type="button" className="btn btn--prominent" onClick={onClose}>
+                Done
+              </button>
+            </header>
+            <div className="settings-body" role="tabpanel" aria-label={current.label}>
+              {pane === 'general' && <GeneralPane />}
+              {pane === 'account' && <AccountPane onSignIn={() => setShowSignIn(true)} />}
+              {pane === 'models' && (
+                <ModelsPane onManage={() => setShowConnect(true)} onBrowseModels={() => setShowModels(true)} />
+              )}
+              {pane === 'permissions' && <PermissionsPane />}
+              {pane === 'memory' && (
+                <div className="settings-pane-fill">
+                  <MemoryView projectPath={app ? (defaultProjectPath(app) ?? null) : null} />
+                </div>
+              )}
+              {pane === 'remote' && (
+                <div className="pane-scroll">
+                  <RemoteAccessView embedded />
+                </div>
+              )}
+              {pane === 'updates' && <UpdatesPane />}
+              {pane === 'advanced' && <AdvancedPane />}
+              {pane === 'shortcuts' && <ShortcutsPane />}
+              {pane === 'about' && <AboutPane />}
+            </div>
           </div>
         </div>
       </div>
 
       {showSignIn && (
-        <SignInView
-          stacked
-          onClose={() => setShowSignIn(false)}
-          onComplete={() => void call('refreshExtensions')}
-        />
+        <SignInView stacked onClose={() => setShowSignIn(false)} onComplete={() => void quietCall('refreshExtensions')} />
       )}
       {showConnect && <ConnectProvidersView onClose={() => setShowConnect(false)} />}
-      {showModels && <ModelPickerView chatId={app?.selectedSessionId ?? null} onClose={() => setShowModels(false)} />}
+      {showModels && (
+        <ModelPickerView chatId={app?.selectedSessionId ?? null} onClose={() => setShowModels(false)} />
+      )}
     </>
   )
 }
@@ -160,18 +192,26 @@ const APPEARANCES: { id: Appearance; label: string }[] = [
   { id: 'dark', label: 'Dark' }
 ]
 
+/** The permission option Settings edits: the selected chat's, which is the
+ *  live one, else what new chats start with. */
+function usePermissionOption(): ACPConfigOption | null {
+  const app = useApp()
+  const selectedId = app?.selectedSessionId ?? null
+  const fromChat = useStore((s) =>
+    selectedId ? s.chats[selectedId]?.configOptions.find((o) => o.id === PERMISSION_ID) : undefined
+  )
+  return fromChat ?? app?.defaultConfigOptions.find((o) => o.id === PERMISSION_ID) ?? null
+}
+
 function GeneralPane(): JSX.Element {
   const app = useApp()
   const current = app?.appearance ?? 'system'
+  const permission = usePermissionOption()
   // A radio group is one tab stop; the arrows move the choice (and the
   // focus) along it, the way a native segmented control does.
   const onKeyDown = (e: React.KeyboardEvent<HTMLElement>): void => {
     const step =
-      e.key === 'ArrowRight' || e.key === 'ArrowDown'
-        ? 1
-        : e.key === 'ArrowLeft' || e.key === 'ArrowUp'
-          ? -1
-          : 0
+      e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1 : e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? -1 : 0
     if (step === 0) return
     e.preventDefault()
     const at = APPEARANCES.findIndex((a) => a.id === current)
@@ -188,12 +228,7 @@ function GeneralPane(): JSX.Element {
           <div className="form-row">
             <span className="form-label">Theme</span>
             <span className="form-value">
-              <span
-                className="segmented segmented--inline"
-                role="radiogroup"
-                aria-label="Theme"
-                onKeyDown={onKeyDown}
-              >
+              <span className="segmented segmented--inline" role="radiogroup" aria-label="Theme" onKeyDown={onKeyDown}>
                 {APPEARANCES.map((a) => (
                   <button
                     key={a.id}
@@ -211,11 +246,62 @@ function GeneralPane(): JSX.Element {
             </span>
           </div>
         </div>
+        <div className="form-footer">System follows your computer&rsquo;s light or dark setting.</div>
+      </section>
+
+      <section className="form-section">
+        <div className="form-section-title">Working</div>
+        <div className="form-card">
+          <div className="form-row">
+            <span className="form-label">Permission</span>
+            <span className="form-value">
+              {permission && permission.kind.type === 'select' ? (
+                <select
+                  className="form-select"
+                  aria-label="Default permission"
+                  value={permission.kind.currentValue ?? ''}
+                  onChange={(e) => void call('setDefaultOption', PERMISSION_ID, e.target.value)}
+                >
+                  {choicesOf(permission).map((c) => (
+                    <option key={c.value} value={c.value}>
+                      {permissionName(c)}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <span className="form-text">Available once Spettro is running</span>
+              )}
+            </span>
+          </div>
+          <div className="form-row form-row--entry">
+            <span className="form-label">Notify me when Spettro finishes</span>
+            <span className="form-value">
+              <Toggle
+                label="Notify me when Spettro finishes"
+                on={app?.notifyWhenDone ?? true}
+                onChange={(on) => void call('setNotifyWhenDone', on)}
+              />
+            </span>
+          </div>
+        </div>
         <div className="form-footer">
-          System follows your computer&rsquo;s light or dark setting.
+          Spettro keeps the permission level for every session. The notification only appears while
+          Spettro&rsquo;s window is in the background.
         </div>
       </section>
     </div>
+  )
+}
+
+/** An on/off switch: a real checkbox, drawn as a switch. */
+function Toggle({ label, on, onChange }: { label: string; on: boolean; onChange: (on: boolean) => void }): JSX.Element {
+  return (
+    <label className="form-toggle">
+      <input type="checkbox" role="switch" aria-label={label} checked={on} onChange={(e) => onChange(e.target.checked)} />
+      <span className="form-toggle-track" aria-hidden>
+        <span className="form-toggle-thumb" />
+      </span>
+    </label>
   )
 }
 
@@ -234,11 +320,11 @@ function AccountPane({ onSignIn }: { onSignIn: () => void }): JSX.Element {
       <div className="form-scroll">
         {ext.unsupported && <UnsupportedCLINotice />}
         <section className="form-section">
-          <div className="form-section-title">Spettro Subscription</div>
+          <div className="form-section-title">Spettro account</div>
           <div className="form-card">
             <div className="form-row form-row--stack">
               <span className="form-text">
-                Sign in to use Spettro&rsquo;s own models without configuring API keys.
+                Sign in to use Spettro&rsquo;s own models, with credits included — no API keys to set up.
               </span>
               <div className="form-inline">
                 <button className="btn btn--prominent" onClick={onSignIn}>
@@ -247,7 +333,7 @@ function AccountPane({ onSignIn }: { onSignIn: () => void }): JSX.Element {
                 <span className="form-spacer" />
                 <button
                   className="link"
-                  onClick={() => void call('openExternal', account.pricingUrl ?? PRICING_FALLBACK)}
+                  onClick={() => void quietCall('openExternal', account.pricingUrl ?? PRICING_FALLBACK)}
                 >
                   See plans
                 </button>
@@ -296,7 +382,7 @@ function AccountPane({ onSignIn }: { onSignIn: () => void }): JSX.Element {
                 <span className="form-note-icon">
                   <WarningTriangleIcon size={12} />
                 </span>
-                Showing the last known plan — the Spettro service couldn&rsquo;t be reached.
+                Showing your last known plan — Spettro couldn&rsquo;t reach its service.
               </span>
             </div>
           )}
@@ -306,12 +392,12 @@ function AccountPane({ onSignIn }: { onSignIn: () => void }): JSX.Element {
       <section className="form-section">
         <div className="form-card">
           <div className="form-row form-row--actions">
-            <button className="btn" onClick={() => void call('accountLogout')}>
-              Sign Out
+            <button className="btn" onClick={() => void signOutWithConfirm()}>
+              Sign Out…
             </button>
             {ext.busy && <Spinner size={14} />}
             <span className="form-spacer" />
-            <button className="link" onClick={() => void call('openExternal', DASHBOARD_URL)}>
+            <button className="link" onClick={() => void quietCall('openExternal', DASHBOARD_URL)}>
               Manage subscription
             </button>
           </div>
@@ -325,13 +411,7 @@ function AccountPane({ onSignIn }: { onSignIn: () => void }): JSX.Element {
  *  left as a share rather than a raw balance — the absolute number means
  *  nothing without the plan's limit, and the limit changes per tier. The exact
  *  figures stay available on hover. */
-function CreditMeter({
-  remaining,
-  detail
-}: {
-  remaining: number
-  detail: string | null
-}): JSX.Element {
+function CreditMeter({ remaining, detail }: { remaining: number; detail: string | null }): JSX.Element {
   // Never round a non-empty balance down to a flat 0%.
   const percent = remaining > 0 ? Math.max(1, Math.round(remaining * 100)) : 0
   const level = remaining < 0.1 ? 'critical' : remaining < 0.25 ? 'low' : 'ok'
@@ -344,156 +424,27 @@ function CreditMeter({
       aria-label={`${percent} percent of credits remaining`}
     >
       <span className="credit-track">
-        <span
-          className={`credit-fill${fill}`}
-          style={{ width: `${Math.min(100, Math.max(0, remaining * 100))}%` }}
-        />
+        <span className={`credit-fill${fill}`} style={{ width: `${Math.min(100, Math.max(0, remaining * 100))}%` }} />
       </span>
-      <span className={`credit-label${level === 'critical' ? ' credit-label--critical' : ''}`}>
-        {percent}% left
-      </span>
+      <span className={`credit-label${level === 'critical' ? ' credit-label--critical' : ''}`}>{percent}% left</span>
     </span>
   )
 }
 
-// ------------------------------------------------------------------ agent
+// ------------------------------------------------------- models & providers
 
-function AgentPane(): JSX.Element {
-  const app = useApp()
-  const [showPathEditor, setShowPathEditor] = useState(false)
-  const [pathDraft, setPathDraft] = useState('')
-
-  const cliPath = app?.cli ? `${app.cli.path}${app.cli.isDev ? ' (dev)' : ''}` : 'Not found'
-  const projectPath = app ? (defaultProjectPath(app) ?? null) : null
-
-  const useExplicitPath = (): void => {
-    const trimmed = pathDraft.trim()
-    if (trimmed === '') return
-    void call('useExplicitCLIPath', trimmed)
-    setShowPathEditor(false)
-    setPathDraft('')
-  }
-
-  /** The NSOpenPanel port: a native file picker rooted at ~/.local/bin. The
-   *  typed-path field stays as the fallback when the dialog is dismissed
-   *  without a choice on a system with no portal. */
-  const chooseExecutable = async (): Promise<void> => {
-    const path = await call('pickExecutable')
-    if (path) {
-      void call('useExplicitCLIPath', path)
-      setShowPathEditor(false)
-      setPathDraft('')
-    } else {
-      setShowPathEditor((s) => !s)
-    }
-  }
-
-  const changeProjectFolder = async (): Promise<void> => {
-    const path = await call('pickFolder')
-    if (path) await call('chooseProject', path)
-  }
-
-  return (
-    <div className="form-scroll">
-      <section className="form-section">
-        <div className="form-section-title">Spettro CLI</div>
-        <div className="form-card">
-          <div className="form-row">
-            <span className="form-label">Executable</span>
-            {/* Truncated from the head, so the binary's name stays visible. */}
-            <span
-              className="form-value path-value"
-              title={app?.cli?.path ?? 'No Spettro CLI was found.'}
-            >
-              {cliPath}
-            </span>
-          </div>
-          <div className="form-row">
-            <span className="form-label">Version</span>
-            <span className="form-value">{app?.agentVersion ?? 'unknown'}</span>
-          </div>
-          <div className="form-row form-row--actions">
-            <button className="btn" onClick={() => void chooseExecutable()}>
-              Choose Executable…
-            </button>
-            {/* Forced: stops the running agent and starts a new one. */}
-            <button className="btn" onClick={() => void call('retryBootstrap')}>
-              Reconnect
-            </button>
-          </div>
-          {showPathEditor && (
-            <div className="form-row form-row--stack">
-              <div className="path-input-row">
-                <input
-                  className="text-input"
-                  type="text"
-                  placeholder="/home/you/.local/bin/spettro"
-                  value={pathDraft}
-                  autoFocus
-                  onChange={(e) => setPathDraft(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.stopPropagation()
-                      useExplicitPath()
-                    }
-                  }}
-                />
-                <button className="btn" disabled={pathDraft.trim() === ''} onClick={useExplicitPath}>
-                  Use
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-        <div className="form-footer">The app drives this binary over the Agent Client Protocol.</div>
-      </section>
-
-      <section className="form-section">
-        <div className="form-section-title">Projects</div>
-        <div className="form-card">
-          <div className="form-row">
-            <span className="form-label">Default folder</span>
-            <span className="form-value path-value" title={projectPath ?? undefined}>
-              {projectPath ?? 'Home folder'}
-            </span>
-          </div>
-          <div className="form-row form-row--actions">
-            <button className="btn" onClick={() => void changeProjectFolder()}>
-              Change Project Folder…
-            </button>
-          </div>
-        </div>
-        <div className="form-footer">Where new chats open when you don&rsquo;t pick a folder.</div>
-      </section>
-    </div>
-  )
-}
-
-// -------------------------------------------------------------- providers
-
-function ProvidersPane({
-  onManage,
-  onBrowseModels
-}: {
-  onManage: () => void
-  onBrowseModels: () => void
-}): JSX.Element {
+function ModelsPane({ onManage, onBrowseModels }: { onManage: () => void; onBrowseModels: () => void }): JSX.Element {
   const app = useApp()
   const ext = app?.extensions ?? EMPTY_EXTENSIONS
   const { providers, models } = ext
 
   // One row per connected provider, local server, and the subscription.
   const entries: { name: string; detail: string }[] = [
-    ...providers.providers
-      .filter((p) => p.connected)
-      .map((p) => ({ name: p.name, detail: `${p.modelCount} models` })),
-    ...providers.local.map((l) => ({
-      name: l.name,
-      detail: `${shortHost(l.endpoint)} · ${l.modelCount} models`
-    })),
     ...(providers.subscription.connected
-      ? [{ name: 'Spettro Subscription', detail: `${providers.subscription.modelCount} models` }]
-      : [])
+      ? [{ name: 'Spettro account', detail: `${providers.subscription.modelCount} models` }]
+      : []),
+    ...providers.providers.filter((p) => p.connected).map((p) => ({ name: p.name, detail: `${p.modelCount} models` })),
+    ...providers.local.map((l) => ({ name: l.name, detail: `${shortHost(l.endpoint)} · ${l.modelCount} models` }))
   ]
 
   return (
@@ -509,7 +460,7 @@ function ProvidersPane({
                 <span className="form-note-icon">
                   <WarningTriangleIcon size={13} />
                 </span>
-                No provider is connected — Spettro can&rsquo;t answer a prompt until one is.
+                Nothing is connected yet — Spettro can&rsquo;t answer until a model is.
               </span>
             </div>
           ) : (
@@ -528,12 +479,15 @@ function ProvidersPane({
           <div className="form-row">
             <span className="form-label">Active model</span>
             <span className={`form-value${models.activeModel !== null ? ' form-value--primary' : ''}`}>
-              {models.activeModel ?? 'None selected'}
+              {models.models.find((m) => m.name === models.activeModel && m.provider === models.activeProvider)
+                ?.displayName ??
+                models.activeModel ??
+                'None selected'}
             </span>
           </div>
           <div className="form-row form-row--actions">
             <button className="btn btn--prominent" onClick={onManage}>
-              Manage Providers…
+              {entries.length === 0 ? 'Connect a Model…' : 'Manage Providers…'}
             </button>
             {models.models.length > 0 && (
               <button className="btn" onClick={onBrowseModels}>
@@ -543,9 +497,330 @@ function ProvidersPane({
           </div>
         </div>
         <div className="form-footer">
-          Keys are verified by the Spettro CLI and stored encrypted on this machine — the app never
-          reads one back.
+          API keys are checked before they&rsquo;re saved and stored encrypted on this computer — Spettro
+          never shows one again.
         </div>
+      </section>
+    </div>
+  )
+}
+
+// ------------------------------------------------------------ permissions
+
+function PermissionsPane(): JSX.Element {
+  const permission = usePermissionOption()
+  const choices = permission ? choicesOf(permission) : []
+  const value = permission?.kind.type === 'select' ? permission.kind.currentValue : null
+
+  return (
+    <div className="form-scroll">
+      <section className="form-section">
+        <div className="form-section-title">What Spettro may do without asking</div>
+        <div className="form-card" role="radiogroup" aria-label="Permission">
+          {choices.length === 0 ? (
+            <div className="form-row">
+              <span className="form-text">These appear once Spettro is running.</span>
+            </div>
+          ) : (
+            choices.map((c) => (
+              <label key={c.value} className="form-row form-row--choice">
+                <input
+                  type="radio"
+                  name="permission"
+                  checked={value === c.value}
+                  onChange={() => void call('setDefaultOption', PERMISSION_ID, c.value)}
+                />
+                <span className="form-choice-texts">
+                  <span className="form-choice-name">{permissionName(c)}</span>
+                  <span className="form-choice-detail">
+                    {[permissionGloss(c), c.description].filter(Boolean).join(' — ')}
+                  </span>
+                </span>
+              </label>
+            ))
+          )}
+        </div>
+        <div className="form-footer">
+          Applies to every session. Ultra&rsquo;s multi-agent workflows need Restricted or Don&rsquo;t
+          ask — under Ask first they wait for you.
+        </div>
+      </section>
+    </div>
+  )
+}
+
+// --------------------------------------------------------------- advanced
+
+function AdvancedPane(): JSX.Element {
+  const app = useApp()
+  const [showPathEditor, setShowPathEditor] = useState(false)
+  const [pathDraft, setPathDraft] = useState('')
+  const projectPath = app ? (defaultProjectPath(app) ?? null) : null
+  const running = app?.phase.kind === 'ready' || app?.phase.kind === 'needsProvider'
+  const reconnecting = app?.connection === 'reconnecting'
+
+  const useExplicitPath = (path: string): void => {
+    const trimmed = path.trim()
+    if (trimmed === '') return
+    void call('useExplicitCLIPath', trimmed)
+    setShowPathEditor(false)
+    setPathDraft('')
+  }
+
+  /** The NSOpenPanel port: a native file picker rooted at ~/.local/bin. The
+   *  typed-path field stays as the fallback when the dialog is dismissed
+   *  without a choice on a system with no portal. */
+  const chooseExecutable = async (): Promise<void> => {
+    const path = await call('pickExecutable')
+    if (path) useExplicitPath(path)
+    else setShowPathEditor(true)
+  }
+
+  // Remembers the folder for new sessions; it does not start one.
+  const changeProjectFolder = async (): Promise<void> => {
+    const path = await call('pickFolder')
+    if (path) await call('rememberProject', path)
+  }
+
+  return (
+    <div className="form-scroll">
+      <section className="form-section">
+        <div className="form-section-title">Spettro engine</div>
+        <div className="form-card">
+          <div className="form-row">
+            <span className="form-label">Status</span>
+            <span className="form-value">
+              {reconnecting ? (
+                <span className="form-status">
+                  <Spinner size={11} /> Restarting…
+                </span>
+              ) : running ? (
+                <span className="form-status form-status--ok">
+                  <Icon name="checkmark.circle.fill" size={12} /> Running
+                  {app?.agentVersion ? ` · ${app.agentVersion}` : ''}
+                </span>
+              ) : (
+                <span className="form-status">Not running</span>
+              )}
+            </span>
+          </div>
+          <div className="form-row">
+            <span className="form-label">Location</span>
+            {/* Truncated from the head, so the binary's name stays visible. */}
+            <span className="form-value path-value" title={app?.cli?.path ?? 'Spettro’s engine wasn’t found.'}>
+              {app?.cli ? `${app.cli.path}${app.cli.isDev ? ' (development build)' : ''}` : 'Not found'}
+            </span>
+          </div>
+          <div className="form-row form-row--actions">
+            <button className="btn" onClick={() => void restartEngine()} disabled={reconnecting}>
+              Restart Engine
+            </button>
+            <button className="btn" onClick={() => void chooseExecutable()}>
+              Use a Different Copy…
+            </button>
+          </div>
+          {showPathEditor && (
+            <div className="form-row form-row--stack">
+              <div className="path-input-row">
+                <input
+                  className="text-input"
+                  type="text"
+                  placeholder={isMac() ? '/usr/local/bin/spettro' : '/home/you/.local/bin/spettro'}
+                  aria-label="Path to the spettro engine"
+                  value={pathDraft}
+                  autoFocus
+                  onChange={(e) => setPathDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.stopPropagation()
+                      useExplicitPath(pathDraft)
+                    }
+                  }}
+                />
+                <button className="btn" disabled={pathDraft.trim() === ''} onClick={() => useExplicitPath(pathDraft)}>
+                  Use
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+        <div className="form-footer">
+          Restarting stops anything Spettro is working on. Your sessions and their history stay.
+        </div>
+      </section>
+
+      <section className="form-section">
+        <div className="form-section-title">New sessions</div>
+        <div className="form-card">
+          <div className="form-row">
+            <span className="form-label">Default folder</span>
+            <span className="form-value path-value" title={projectPath ?? undefined}>
+              {projectPath ?? 'Home folder'}
+            </span>
+          </div>
+          <div className="form-row form-row--actions">
+            <button className="btn" onClick={() => void changeProjectFolder()}>
+              Change Folder…
+            </button>
+          </div>
+        </div>
+        <div className="form-footer">Where a new session works when you don&rsquo;t pick a folder.</div>
+      </section>
+
+      <TerminalSessions projectPath={projectPath} />
+    </div>
+  )
+}
+
+/** "Resume a terminal session…": conversations the CLI has for this folder
+ *  that no session here knows — started with `spettro` in a terminal. */
+function TerminalSessions({ projectPath }: { projectPath: string | null }): JSX.Element {
+  const [entries, setEntries] = useState<CLISessionEntry[] | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [opening, setOpening] = useState<string | null>(null)
+  const load = (): void => {
+    if (!projectPath) return
+    setError(null)
+    setEntries(null)
+    void quietCall('listCLISessions', projectPath)
+      .then(setEntries)
+      .catch((err) => {
+        setEntries([])
+        setError(humanizeError(err).detail)
+      })
+  }
+  const [asked, setAsked] = useState(false)
+  const now = Date.now()
+
+  return (
+    <section className="form-section">
+      <div className="form-section-title">Sessions started in a terminal</div>
+      <div className="form-card">
+        {!asked ? (
+          <div className="form-row form-row--actions">
+            <span className="form-text">
+              Continue a conversation you started with <code>spettro</code> in{' '}
+              {projectPath ? basename(projectPath) : 'a folder'}.
+            </span>
+            <span className="form-spacer" />
+            <button
+              className="btn"
+              disabled={!projectPath}
+              onClick={() => {
+                setAsked(true)
+                load()
+              }}
+            >
+              Resume a Terminal Session…
+            </button>
+          </div>
+        ) : entries === null ? (
+          <div className="form-row">
+            <span className="form-status">
+              <Spinner size={11} /> Looking…
+            </span>
+          </div>
+        ) : entries.length === 0 ? (
+          <div className="form-row">
+            <span className="form-text">{error ?? 'No terminal sessions in this folder.'}</span>
+          </div>
+        ) : (
+          entries.map((entry) => (
+            <div className="form-row form-row--entry" key={entry.sessionId}>
+              <span className="form-label">{entry.title ?? 'Untitled session'}</span>
+              <span className="form-value">
+                {entry.updatedAt ? relativeTime(entry.updatedAt, now) : ''}
+                <button
+                  className="btn btn--small"
+                  disabled={opening !== null}
+                  onClick={() => {
+                    if (!projectPath) return
+                    setOpening(entry.sessionId)
+                    void call('importCLISession', entry.sessionId, projectPath).finally(() => setOpening(null))
+                  }}
+                >
+                  {opening === entry.sessionId ? 'Opening…' : 'Open'}
+                </button>
+              </span>
+            </div>
+          ))
+        )}
+      </div>
+    </section>
+  )
+}
+
+// -------------------------------------------------------------- shortcuts
+
+function ShortcutsPane(): JSX.Element {
+  const mac = isMac()
+  const groups = [...new Set(SHORTCUTS.map((s) => s.group))]
+  return (
+    <div className="form-scroll">
+      {groups.map((group) => (
+        <section className="form-section" key={group}>
+          <div className="form-section-title">{group}</div>
+          <div className="form-card">
+            {SHORTCUTS.filter((s) => s.group === group).map((s) => (
+              <div className="form-row form-row--entry" key={`${s.label}:${s.key}`}>
+                <span className="form-label">{s.label}</span>
+                <span className="form-value">
+                  <kbd className="form-kbd">{shortcutText(s, mac)}</kbd>
+                </span>
+              </div>
+            ))}
+          </div>
+        </section>
+      ))}
+    </div>
+  )
+}
+
+// ------------------------------------------------------------------ about
+
+function AboutPane(): JSX.Element {
+  const app = useApp()
+  const appVersion = app?.update.app.current ?? null
+  const engine = app?.agentVersion ?? app?.cli?.version ?? null
+  return (
+    <div className="form-scroll">
+      <div className="about-hero">
+        <AppIcon size={72} />
+        <div className="about-name">Spettro</div>
+        <div className="about-version">Version {appVersion ?? 'unknown'}</div>
+      </div>
+      <section className="form-section">
+        <div className="form-card">
+          <div className="form-row">
+            <span className="form-label">App</span>
+            <span className="form-value">{appVersion ?? 'unknown'}</span>
+          </div>
+          <div className="form-row">
+            <span className="form-label">Engine</span>
+            <span className="form-value">{engine ?? 'not running'}</span>
+          </div>
+          <div className="form-row form-row--actions">
+            <button className="link" onClick={() => void quietCall('openExternal', WEBSITE)}>
+              spettro.app
+            </button>
+            <button className="link" onClick={() => void quietCall('openExternal', SOURCE)}>
+              Source code
+            </button>
+            <span className="form-spacer" />
+            <CopyButton
+              label="Copy Diagnostics"
+              text={() =>
+                diagnosticsText({
+                  appVersion,
+                  engineVersion: engine,
+                  platform: `${window.spettro?.platform ?? 'unknown'}`,
+                  log: app?.agentLog ?? []
+                })
+              }
+            />
+          </div>
+        </div>
+        <div className="form-footer">Spettro is free software, licensed under the GPL 3.0.</div>
       </section>
     </div>
   )

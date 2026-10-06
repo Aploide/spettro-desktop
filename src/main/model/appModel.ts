@@ -41,6 +41,7 @@ import type {
   CLIInfo,
   CLISessionEntry,
   ImageAttachmentDTO,
+  InstallState,
   Phase,
   RemoteHostState,
   SubscriptionState,
@@ -61,10 +62,11 @@ import type {
 import { EMPTY_WORKFLOW_LIST } from '../../shared/extensions'
 import type { UpdateState } from '../../shared/update'
 import { ExtensionMethod } from '../../shared/extensions'
+import { humanSentence } from '../../shared/humanize'
 import { AcpAgent, AcpConnection, AcpError } from '../acp'
 import type { WorkflowTarget } from '../acp/extensions'
 import { ChatSession, type ConfigValue } from './chatSession'
-import { CLIInstaller } from './cliInstaller'
+import { CLIInstaller, type InstallFailure } from './cliInstaller'
 import { locateCLI } from './cliLocator'
 import { ExtensionStores } from './extensionStores'
 import { Prefs } from './prefs'
@@ -108,6 +110,9 @@ export class AppModel extends EventEmitter {
   sessions: ChatSession[] = []
   selectedSessionId: string | null = null
   banner: string | null = null
+  /** Bumped per banner, so the same text twice is shown twice. */
+  private bannerNonce = 0
+  install: InstallState = { stage: 'idle', failure: null }
   installLog: string[] = []
   /** Last ≤50 stderr lines from the CLI process. */
   agentLog: string[] = []
@@ -135,6 +140,13 @@ export class AppModel extends EventEmitter {
   private liveConnectionToken = 0
   private handshakeTimedOut = false
   private lastAgentRestart: number | null = null
+  /** 'reconnecting' while the engine restarts under a shell already on
+   *  screen — see AppStateDTO.connection. */
+  private connectionState: 'ok' | 'reconnecting' = 'ok'
+  /** Set once the sidebar-and-chat shell (or the provider step) has been
+   *  shown. From then on a restart keeps it on screen instead of falling
+   *  back to the loading screen, which would unmount every draft. */
+  private shellShown = false
 
   private sessionsByACPID = new Map<string, ChatSession>()
   /** In-flight ACP attaches, keyed by chat id — see ensureLiveSession. */
@@ -171,10 +183,6 @@ export class AppModel extends EventEmitter {
   /** App + CLI release checks. Owned here because updating the CLI means
    *  restarting the agent, which only this class can do. */
   readonly updates: UpdateManager
-  /** Set once the user chooses to continue without finishing setup, so the
-   *  gate doesn't pull them back on the next refresh. */
-  private providerSetupSkipped = false
-
   constructor(opts: {
     userDataDir: string
     appVersion: string
@@ -201,7 +209,8 @@ export class AppModel extends EventEmitter {
       // Whatever was running is the old binary — restart onto the new one.
       onCLIInstalled: () => this.reconnect(),
       onChange: () => this.emitAppState(),
-      quit: opts.quit ?? ((): void => undefined)
+      quit: opts.quit ?? ((): void => undefined),
+      waitForIdle: () => this.waitForIdle()
     })
     this.prefs = new Prefs(opts.userDataDir)
     this.store = new SessionStore(opts.userDataDir)
@@ -232,15 +241,16 @@ export class AppModel extends EventEmitter {
 
   private setPhase(phase: Phase): void {
     this.phase = phase
+    if (phase.kind === 'ready' || phase.kind === 'needsProvider') this.shellShown = true
     this.emitAppState()
   }
 
-  private emitHostState(shuttingDown = false): void {
+  private emitHostState(shuttingDown = false, message?: string): void {
     const state: { agentReady: boolean; shuttingDown: boolean; message?: string } = {
       agentReady: this.agentReady(),
       shuttingDown
     }
-    if (this.banner) state.message = this.banner
+    if (message) state.message = message
     this.emit('host-state', state)
   }
 
@@ -259,12 +269,15 @@ export class AppModel extends EventEmitter {
   getState(): AppStateDTO {
     return {
       phase: this.phase,
+      connection: this.connectionState,
       cli: this.cli,
       agentVersion: this.agentVersion,
       selectedSessionId: this.selectedSessionId,
       // Scratch runs are the studio's business, not the sidebar's.
       sessions: this.sessions.filter((s) => !s.isScratch).map((s) => s.summary()),
       banner: this.banner,
+      bannerNonce: this.bannerNonce,
+      install: this.install,
       installLog: [...this.installLog],
       agentLog: [...this.agentLog],
       subscription: this.subscription,
@@ -276,8 +289,56 @@ export class AppModel extends EventEmitter {
       recentProjects: this.prefs.recentProjects,
       missingProjects: this.missingProjects(),
       homePath: homedir(),
-      appearance: this.prefs.appearance
+      appearance: this.prefs.appearance,
+      noModel: this.extensions.needsProviderSetup && !this.extensions.isSignedIn,
+      providerSetupSkipped: this.prefs.providerSetupSkipped,
+      notifyWhenDone: this.prefs.notifyWhenDone,
+      defaultConfigOptions: this.prefs.lastConfigOptions,
+      busyTasks: this.busyCount()
     }
+  }
+
+  /** Chats with a turn running (studio test runs included): what quitting,
+   *  updating or restarting the engine would stop. */
+  busyCount(): number {
+    return this.sessions.filter((s) => s.isBusy).length
+  }
+
+  /** Resolves once no chat is working — Update When Finished, Quit When
+   *  Finished. */
+  waitForIdle(): Promise<void> {
+    return new Promise((resolve) => {
+      const check = (): void => {
+        if (this.busyCount() === 0 || this.shuttingDown) resolve()
+        else setTimeout(check, 500)
+      }
+      check()
+    })
+  }
+
+  get notifyWhenDone(): boolean {
+    return this.prefs.notifyWhenDone
+  }
+
+  setNotifyWhenDone(on: boolean): void {
+    this.prefs.notifyWhenDone = on === true
+    this.emitAppState()
+  }
+
+  /** A one-off message from outside the model (the quit guard). */
+  notify(text: string): void {
+    this.showBanner(text)
+  }
+
+  /** A message for the user, shown once (see AppStateDTO.bannerNonce). It is
+   *  cleared as soon as it has been sent, so later snapshots — and paired
+   *  phones, which get it once in their host state — never repeat a stale
+   *  one. */
+  private showBanner(text: string): void {
+    this.banner = text
+    this.bannerNonce += 1
+    this.emitAppState()
+    this.banner = null
   }
 
   /** Recent and session folders that no longer exist. Sessions count too: a
@@ -319,7 +380,10 @@ export class AppModel extends EventEmitter {
    *  the process is running and answering, the local user is just parked on
    *  the setup screen (remoteAgentReady in AppModel+RemoteHost.swift). */
   agentReady(): boolean {
-    return this.phase.kind === 'ready' || this.phase.kind === 'needsProvider'
+    return (
+      (this.phase.kind === 'ready' || this.phase.kind === 'needsProvider') &&
+      this.connectionState === 'ok'
+    )
   }
 
   /** The folder new chats open in by default: the selected chat's own folder,
@@ -358,7 +422,7 @@ export class AppModel extends EventEmitter {
     // up) must not drop the UI back onto the loading screen.
     if (this.agent || this.phase.kind === 'connecting') return
     this.setPhase({ kind: 'locating' })
-    const found = locateCLI(this.prefs.explicitCLIPath || null)
+    const found = await locateCLI(this.prefs.explicitCLIPath || null)
     if (found) {
       this.cli = { path: found.path, version: found.version, isDev: found.isDev }
       // Land on the home screen (no chat selected) but start the agent
@@ -429,14 +493,22 @@ export class AppModel extends EventEmitter {
     // Never cache a stale locator result: if the CLI path changed (or the
     // binary moved) since `cli` was set, a reconnect must re-resolve, or
     // we'd happily "connect" to the wrong binary.
-    const found = locateCLI(this.prefs.explicitCLIPath || null)
+    const found = await locateCLI(this.prefs.explicitCLIPath || null)
     if (!found) {
       this.cli = null
+      this.connectionState = 'ok'
       this.setPhase({ kind: 'needsSetup' })
       return
     }
     this.cli = { path: found.path, version: found.version, isDev: found.isDev }
-    this.setPhase({ kind: 'connecting' })
+    // With the shell already up, the restart happens underneath it: only the
+    // header's "Reconnecting…" and a waiting Send say so.
+    if (this.shellShown && this.phase.kind !== 'failed') {
+      this.connectionState = 'reconnecting'
+      this.emitAppState()
+    } else {
+      this.setPhase({ kind: 'connecting' })
+    }
 
     this.connectionToken += 1
     const token = this.connectionToken
@@ -474,6 +546,7 @@ export class AppModel extends EventEmitter {
       // subscription backend.
       await this.extensions.refreshProviders()
       if (token !== this.connectionToken) return
+      this.connectionState = 'ok'
       this.setPhase(this.isProviderSetupNeeded ? { kind: 'needsProvider' } : { kind: 'ready' })
       void this.extensions.refreshAccount()
       this.emitHostState()
@@ -486,6 +559,7 @@ export class AppModel extends EventEmitter {
       // session lock and keep answering nothing.
       connection.stop()
       if (token !== this.connectionToken) return
+      this.connectionState = 'ok'
       this.setPhase({ kind: 'failed', message: errMessage(err) })
     } finally {
       if (this.pendingConnection === connection) this.pendingConnection = null
@@ -519,9 +593,20 @@ export class AppModel extends EventEmitter {
    *  a CLI path change want, since connect() refuses to displace a live agent. */
   async reconnect(): Promise<void> {
     this.teardownAgent()
-    this.setPhase({ kind: 'locating' })
+    this.enterReconnecting()
     const selected = this.selectedSessionId ? this.sessionById(this.selectedSessionId) : null
     await this.connect(selected?.projectPath ?? this.defaultProjectPath)
+  }
+
+  /** The "engine is restarting" state: under a shell already on screen it
+   *  is a flag the header shows; before that, the loading screen. */
+  private enterReconnecting(): void {
+    if (this.shellShown && this.phase.kind !== 'failed') {
+      this.connectionState = 'reconnecting'
+      this.emitAppState()
+    } else {
+      this.setPhase({ kind: 'locating' })
+    }
   }
 
   /** Stops the current agent and drops every reference to it, without going
@@ -582,15 +667,17 @@ export class AppModel extends EventEmitter {
     // failure rather than crash-looping.
     const now = Date.now()
     if (this.lastAgentRestart !== null && now - this.lastAgentRestart < CRASH_LOOP_WINDOW_MS) {
-      let message = `The Spettro agent keeps stopping (exit ${code}).`
-      const tail = this.agentLog.slice(-6).join('\n')
-      if (tail !== '') message += `\n\nAgent output:\n${tail}`
-      this.setPhase({ kind: 'failed', message })
+      // The failure screen shows the agent's own output behind "Show
+      // details"; the message only says what happened.
+      this.connectionState = 'ok'
+      this.setPhase({ kind: 'failed', message: `The Spettro agent keeps stopping (exit ${code}).` })
       return
     }
     this.lastAgentRestart = now
-    this.banner = `The Spettro agent stopped (exit ${code}) — restarting…`
-    this.setPhase({ kind: 'locating' })
+    const notice = 'Spettro’s engine stopped unexpectedly. Restarting it…'
+    this.emitHostState(false, notice)
+    this.showBanner(notice)
+    this.enterReconnecting()
     // Every session kept its acpSessionId and transcript, so each is
     // transparently resumed the next time it is opened or sent to.
     void this.connect()
@@ -713,7 +800,7 @@ export class AppModel extends EventEmitter {
           session.setConfigOptions(await agent.setConfigOption(acpId, live.id, want))
         }
       } catch (err) {
-        session.appendNotice(`Couldn't restore ${live.name}: ${errMessage(err)}`, false)
+        session.appendNotice(`Couldn't restore ${live.name}. ${humanSentence(err)}`, false)
       }
     }
     this.rememberConfig(session.configOptions)
@@ -731,6 +818,7 @@ export class AppModel extends EventEmitter {
 
   installCLI(): void {
     this.phase = { kind: 'installing' }
+    this.install = { stage: 'checking', failure: null }
     this.installLog = ['Downloading and running the Spettro installer…']
     this.emitAppState()
     this.installer.install((event) => {
@@ -739,17 +827,40 @@ export class AppModel extends EventEmitter {
         this.emitAppState()
         return
       }
-      const found = event.success ? locateCLI(null) : null
-      if (event.success && found) {
-        this.cli = { path: found.path, version: found.version, isDev: found.isDev }
-        this.installLog.push(`Installed at ${found.path}`)
-        this.setPhase({ kind: 'locating' })
-        void this.connect()
-      } else {
-        this.installLog.push('Installation did not complete.')
-        this.setPhase({ kind: 'needsSetup' })
+      if (event.type === 'phase') {
+        this.install = { stage: event.phase, failure: null }
+        this.emitAppState()
+        return
       }
+      if (event.success) {
+        void this.finishInstall()
+        return
+      }
+      this.installLog.push('Installation did not complete.')
+      this.install = installFailureState(event.failure)
+      this.setPhase({ kind: 'needsSetup' })
     })
+  }
+
+  /** The script exited cleanly: find what it installed and start it. */
+  private async finishInstall(): Promise<void> {
+    const found = await locateCLI(null)
+    if (!found) {
+      this.installLog.push('The installer finished, but Spettro wasn’t found where it installs to.')
+      this.install = { stage: 'failed', failure: { kind: 'failed' } }
+      this.setPhase({ kind: 'needsSetup' })
+      return
+    }
+    this.cli = { path: found.path, version: found.version, isDev: found.isDev }
+    this.installLog.push(`Installed at ${found.path}`)
+    this.install = { stage: 'done', failure: null }
+    this.setPhase({ kind: 'locating' })
+    void this.connect()
+  }
+
+  /** Setup's Cancel: the install stops and setup is back where it began. */
+  cancelInstall(): void {
+    this.installer.cancel()
   }
 
   // -------------------------------------------------------------------------
@@ -762,22 +873,21 @@ export class AppModel extends EventEmitter {
   }
 
   /** Downloads this platform's installer and hands the app over to it. */
-  installAppUpdate(): Promise<void> {
-    return this.updates.installApp()
+  installAppUpdate(whenIdle = false): Promise<void> {
+    return this.updates.installApp(whenIdle === true)
   }
 
   /** Re-runs the CLI install script, then restarts the agent on the new
    *  binary. Chats keep their transcripts; their ACP sessions are re-attached
    *  by the reconnect, exactly as they are after a crash-restart. */
-  installCLIUpdate(): Promise<void> {
-    return this.updates.installCLI()
+  installCLIUpdate(whenIdle = false): Promise<void> {
+    return this.updates.installCLI(whenIdle === true)
   }
 
   async useExplicitPath(path: string): Promise<void> {
-    const found = locateCLI(path)
+    const found = await locateCLI(path)
     if (!found) {
-      this.banner = 'No executable Spettro CLI at that path.'
-      this.emitAppState()
+      this.showBanner('That file isn’t the Spettro app. Choose the file named “spettro”.')
       return
     }
     this.prefs.explicitCLIPath = path
@@ -1077,7 +1187,7 @@ export class AppModel extends EventEmitter {
       // those before it ever tries to steer), or a steer that failed. Ending
       // the stream, filing a turn or withdrawing prompts here would all hit
       // the running turn instead, so only a failure is worth a line.
-      if (failure !== null) session.appendNotice(failure, true)
+      if (failure !== null) session.appendNotice(humanSentence(failure), true, false, failure)
     } else if (!(steered && result?.stopReason === 'end_turn')) {
       this.finishTurn(session, result, failure, Date.now() - startedAt)
     }
@@ -1115,9 +1225,11 @@ export class AppModel extends EventEmitter {
       failure !== null ? 'error' : (result?.stopReason ?? 'end_turn')
     // Mirrors whatever inline notice the local transcript gets, so a remote
     // screen ends the turn in the same visible state.
+    // A failure is said in words (shared/humanize.ts), with the error as it
+    // arrived kept behind the notice's "Show details".
     const notice: TurnNotice | null =
-      failure !== null ? { text: failure, isError: true } : stopNotice(stopReason)
-    if (notice) session.appendNotice(notice.text, notice.isError, failure !== null)
+      failure !== null ? { text: humanSentence(failure), isError: true } : stopNotice(stopReason)
+    if (notice) session.appendNotice(notice.text, notice.isError, failure !== null, failure ?? undefined)
     if (failure !== null) {
       // The turn is gone; whatever it was asking can't be answered usefully.
       const acpId = session.acpSessionId
@@ -1176,7 +1288,7 @@ export class AppModel extends EventEmitter {
     const agent = this.agent
     if (!agent) {
       if (!silent) {
-        session.appendNotice("The agent isn't running yet — try again in a moment.", true, true)
+        session.appendNotice("Spettro's engine isn't running yet. Try again in a moment.", true, true)
       }
       return null
     }
@@ -1214,7 +1326,12 @@ export class AppModel extends EventEmitter {
       // A background warm must not spray notices into an empty chat; the
       // prompt path reports the same failure when the user actually sends.
       if (!silent) {
-        session.appendNotice(`Couldn't start a session: ${errMessage(err)}`, true, true)
+        session.appendNotice(
+          `Couldn't start this session. ${humanSentence(err)}`,
+          true,
+          true,
+          errMessage(err)
+        )
       }
       return null
     }
@@ -1464,7 +1581,9 @@ export class AppModel extends EventEmitter {
       this.rememberConfig(options)
       this.persist()
     } catch (err) {
-      session.appendNotice(`Couldn't change ${configId}: ${errMessage(err)}`, true)
+      // Named as the user knows it ("Model"), not by its wire id.
+      const label = session.configOptions.find((o) => o.id === configId)?.name ?? configId
+      session.appendNotice(`Couldn't change ${label}. ${humanSentence(err)}`, true, false, errMessage(err))
       // Two very different failures arrive here, and they want opposite
       // treatment.
       //
@@ -1493,6 +1612,27 @@ export class AppModel extends EventEmitter {
       }
       this.persist()
     }
+  }
+
+  /** Settings' defaults (the permission level). The CLI keeps these for
+   *  every session, so changing one through a live session changes it
+   *  everywhere — the selected chat's if it is live, else any live one. The
+   *  seed new chats start with is updated either way, and a chat attached
+   *  later pushes it like any shown value. */
+  async setDefaultOption(configId: string, value: ConfigValue): Promise<void> {
+    const seed = this.prefs.lastConfigOptions
+    const option = seed.find((o) => o.id === configId)
+    if (option?.kind.type === 'select' && typeof value === 'string') option.kind.currentValue = value
+    else if (option?.kind.type === 'boolean' && typeof value === 'boolean') option.kind.currentValue = value
+    if (option) this.prefs.lastConfigOptions = seed
+
+    const selected = this.selectedSessionId ? this.sessionById(this.selectedSessionId) : null
+    const target =
+      (selected && this.liveACPSessionId(selected) ? selected : null) ??
+      this.sessions.find((s) => !s.isScratch && this.liveACPSessionId(s) !== null) ??
+      null
+    if (target) await this.setConfigValue(target.id, configId, value)
+    else this.emitAppState()
   }
 
   // -------------------------------------------------------------------------
@@ -1642,7 +1782,7 @@ export class AppModel extends EventEmitter {
    *  "we don't know", and an unknown answer must never cost someone access to
    *  the rest of the app. */
   private get isProviderSetupNeeded(): boolean {
-    if (this.providerSetupSkipped) return false
+    if (this.prefs.providerSetupSkipped) return false
     if (!this.extensions.needsProviderSetup) return false
     // Being signed in is itself proof there's a way to run a model, even when
     // the plan details haven't loaded yet.
@@ -1685,7 +1825,9 @@ export class AppModel extends EventEmitter {
    *  make — being unable to reach settings, sessions, or the sidebar is not a
    *  reasonable price for an unfinished setup step. */
   skipProviderSetup(): void {
-    this.providerSetupSkipped = true
+    // Remembered: the setup screen doesn't come back on the next launch. The
+    // composer's "Connect a model" bar keeps the way back in view.
+    this.prefs.providerSetupSkipped = true
     if (this.phase.kind === 'needsProvider') {
       this.setPhase({ kind: 'ready' })
       this.emitHostState()
@@ -1832,6 +1974,7 @@ export class AppModel extends EventEmitter {
     if (this.shuttingDown) return
     this.shuttingDown = true
     this.emitHostState(true)
+    this.installer.cancel()
     this.teardownAgent()
     this.extensions.dispose()
     this.subscriptionStore.stop()
@@ -1902,5 +2045,22 @@ function permissionSentence(request: ACPPermissionRequest): string {
       return 'Open a web page'
     default:
       return 'Allow this action'
+  }
+}
+
+/** What setup shows for an install that ended without a CLI. A cancelled
+ *  one is no failure: setup just goes back to its first screen. */
+function installFailureState(failure: InstallFailure): InstallState {
+  switch (failure.kind) {
+    case 'cancelled':
+      return { stage: 'idle', failure: null }
+    case 'missing-tool':
+      return { stage: 'failed', failure: { kind: 'missing-tool', tool: failure.tool } }
+    case 'timeout':
+      return { stage: 'failed', failure: { kind: 'timeout' } }
+    case 'launch':
+      return { stage: 'failed', failure: { kind: 'launch' } }
+    case 'failed':
+      return { stage: 'failed', failure: { kind: 'failed' } }
   }
 }

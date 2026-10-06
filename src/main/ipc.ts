@@ -42,11 +42,14 @@ export function registerIpc(
     // -- Lifecycle ----------------------------------------------------------
     retryBootstrap: async () => model.retryBootstrap(),
     installCLI: async () => model.installCLI(),
+    cancelInstall: async () => model.cancelInstall(),
     useExplicitCLIPath: async (path) => model.useExplicitPath(path),
     chooseProject: async (path) => model.chooseProject(path),
     rememberProject: async (path) => model.rememberProject(path),
     removeRecentProject: async (path) => model.removeRecentProject(path),
     setAppearance: async (mode) => model.setAppearance(mode),
+    setNotifyWhenDone: async (on) => model.setNotifyWhenDone(on),
+    setDefaultOption: (configId, value) => model.setDefaultOption(configId, value),
     pickFolder: async () => {
       const win = getWindow()
       const options: Electron.OpenDialogOptions = {
@@ -128,6 +131,7 @@ export function registerIpc(
       terminals.dispose(termId)
     },
     terminalList: async (projectPath) => terminals.list(projectPath),
+    terminalHasProcess: async (termId) => terminals.hasProcess(termId),
 
     // -- Remote host --------------------------------------------------------
     remoteSetEnabled: async (enabled) => {
@@ -184,8 +188,8 @@ export function registerIpc(
     // Results land in AppStateDTO.update (the manager pushes app-state as it
     // downloads and installs), so these resolve with nothing.
     checkForUpdates: () => model.checkForUpdates(),
-    installAppUpdate: () => model.installAppUpdate(),
-    installCLIUpdate: () => model.installCLIUpdate(),
+    installAppUpdate: (whenIdle) => model.installAppUpdate(whenIdle === true),
+    installCLIUpdate: (whenIdle) => model.installCLIUpdate(whenIdle === true),
 
     // -- Misc ---------------------------------------------------------------
     openExternal: async (url) => {

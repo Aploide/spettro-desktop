@@ -1537,3 +1537,83 @@
 .model-button--unset:hover {
   color: var(--accent);
 }
+
+/* -------------------------------------------------------- no model yet */
+
+/* Above the composer while nothing can run a prompt: said before the first
+   message fails, with the one button that fixes it. */
+.no-model-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-sm);
+  padding: 8px 8px 8px var(--sp-md);
+  font-size: var(--fs-md);
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--warning) 12%, var(--surface-raised));
+  border: 1px solid color-mix(in srgb, var(--warning) 35%, transparent);
+  border-radius: var(--rad-md);
+}
+
+.no-model-bar svg {
+  flex: none;
+  color: var(--warning);
+}
+
+.no-model-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.no-model-action {
+  appearance: none;
+  flex: none;
+  font: inherit;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--accent-contrast);
+  background: var(--accent);
+  border: none;
+  border-radius: 999px;
+  padding: 4px 12px;
+  cursor: default;
+}
+
+.no-model-action:hover {
+  filter: brightness(1.08);
+}
+
+/* ------------------------------------------------------- reconnecting */
+
+.reconnecting-pill {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: var(--sp-sm);
+  padding: 3px 10px;
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+  background: var(--hover-fill);
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+}
+
+.reconnecting-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--warning);
+  animation: reconnecting-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes reconnecting-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reconnecting-dot {
+    animation: none;
+  }
+}

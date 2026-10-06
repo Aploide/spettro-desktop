@@ -27,6 +27,7 @@ import { ToolGroup } from './ToolGroup'
 import { ScriptCallRow } from './OrchestrationBits'
 import { WorkflowCard } from './WorkflowCard'
 import { CopyButton, useTranscriptActions } from './TranscriptActions'
+import Disclosure from '@renderer/views/common/Disclosure'
 import './transcript.css'
 
 /**
@@ -261,7 +262,15 @@ function NoticeView({ message, isError }: { message: ChatMessage; isError: boole
       <span className="tr-error-icon">
         <Icon name="exclamationmark.triangle.fill" size={14} />
       </span>
-      <span className="tr-error-text">{message.text}</span>
+      <span className="tr-error-body">
+        <span className="tr-error-text">{message.text}</span>
+        {/* The error as it arrived, for the curious and for bug reports. */}
+        {message.detail && (
+          <Disclosure className="tr-error-details">
+            <span className="tr-error-raw">{message.detail}</span>
+          </Disclosure>
+        )}
+      </span>
       {canRetry && (
         <button type="button" className="tr-error-retry" onClick={retry}>
           <Icon name="arrow.clockwise" size={12} />

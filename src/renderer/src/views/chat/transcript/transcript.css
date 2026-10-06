@@ -1169,3 +1169,35 @@
     animation: none;
   }
 }
+
+/* An error notice's sentence, with the error as it arrived folded under it. */
+.tr-error-body {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.tr-error-details .disclosure-toggle {
+  font-size: var(--fs-xs);
+}
+
+.tr-error-raw {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+/* With the details open the card is several lines tall: the icon and Try
+   again stay with the sentence instead of floating to the middle. */
+.tr-error:has(.disclosure--open) {
+  align-items: flex-start;
+}
+
+.tr-error:has(.disclosure--open) .tr-error-icon {
+  margin-top: 2px;
+}

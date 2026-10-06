@@ -13,7 +13,14 @@ import { basename, relativeTime } from './util'
 /** Most matches worth showing; past this, typing more is faster than reading. */
 const LIMIT = 12
 
-export default function QuickSwitcher({ onClose }: { onClose: () => void }): JSX.Element {
+export default function QuickSwitcher({
+  onClose,
+  hidden
+}: {
+  onClose: () => void
+  /** Chats on their way out (deleted, Undo still offered): not offered. */
+  hidden?: ReadonlySet<string>
+}): JSX.Element {
   const app = useApp()
   const [query, setQuery] = useState('')
   const [index, setIndex] = useState(0)
@@ -23,9 +30,10 @@ export default function QuickSwitcher({ onClose }: { onClose: () => void }): JSX
   // Same order as the sidebar, archived last: what you see there is what
   // comes up here.
   const results = useMemo((): ChatSummary[] => {
-    const { groups, archived } = groupSessions(app?.sessions ?? [], query)
+    const sessions = (app?.sessions ?? []).filter((s) => !hidden?.has(s.id))
+    const { groups, archived } = groupSessions(sessions, query)
     return [...groups.flatMap((g) => g.sessions), ...archived].slice(0, LIMIT)
-  }, [app?.sessions, query])
+  }, [app?.sessions, query, hidden])
 
   useEffect(() => {
     inputRef.current?.focus()

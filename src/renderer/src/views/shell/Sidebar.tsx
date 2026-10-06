@@ -7,6 +7,10 @@
 // row shows on hover and focus — and both open the same menu, so nothing
 // depends on discovering the secondary click. The sidebar is resizable from
 // its right edge and collapsible (Ctrl/Cmd+B); both live in state/shell.ts.
+//
+// Delete… asks, then hides the row with eight seconds to Undo (actions.ts);
+// a row on its way out is simply not drawn. The update row asks before it
+// stops running work.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ChatSummary } from '@shared/model'
@@ -15,13 +19,15 @@ import { call, useApp, useStore } from '@renderer/state/store'
 import { chatsNeedingYou } from '@renderer/views/chat/prompts'
 import {
   SIDEBAR_DEFAULT_WIDTH,
+  openSettings,
   setSidebarWidth,
   startNewSession,
   toggleSidebar,
   useShell
 } from '@renderer/state/shell'
+import { usePendingDeletes } from '@renderer/state/pendingDeletes'
 import { Icon } from '@renderer/design/icons'
-import type { SettingsPane } from './SettingsView'
+import { deleteChat, updateEverything } from './actions'
 import PlanBadge from './PlanBadge'
 import Spinner from './Spinner'
 import ContextMenu, { type ContextMenuEntry } from './ContextMenu'
@@ -31,9 +37,6 @@ import { basename, isMac, relativeTime, shortcutLabel, withShortcut } from './ut
 import { ArchiveIcon, ChevronRightIcon, ClearIcon, DownloadIcon, GearIcon, MagnifyIcon, PinIcon, PlusIcon } from './icons'
 
 interface Props {
-  /** The pane argument lets the update prompt open Settings on Updates. */
-  onOpenSettings: (pane?: SettingsPane) => void
-  onOpenRemote: () => void
   /** Opens the workflow studio on the selected chat's project. Disabled with
    *  no chat selected: a workflow belongs to a repo, and without a chat there
    *  is no repo to belong to. */
@@ -46,8 +49,9 @@ interface MenuState {
   session: ChatSummary
 }
 
-export default function Sidebar({ onOpenSettings, onOpenRemote, onOpenWorkflows }: Props): JSX.Element {
+export default function Sidebar({ onOpenWorkflows }: Props): JSX.Element {
   const app = useApp()
+  const deleting = usePendingDeletes()
   const width = useShell((s) => s.sidebarWidth)
   const [searchText, setSearchText] = useState('')
   const [menu, setMenu] = useState<MenuState | null>(null)
@@ -60,7 +64,11 @@ export default function Sidebar({ onOpenSettings, onOpenRemote, onOpenWorkflows 
   const permissions = useStore((s) => s.permissions)
   const questions = useStore((s) => s.questions)
   const needsYou = useMemo(() => chatsNeedingYou(permissions, questions), [permissions, questions])
-  const sessions = app?.sessions
+  const allSessions = app?.sessions
+  const sessions = useMemo(
+    () => allSessions?.filter((s) => !deleting.has(s.id)),
+    [allSessions, deleting]
+  )
   const selectedId = app?.selectedSessionId ?? null
   const isSearching = searchText.trim().length > 0
 
@@ -93,9 +101,8 @@ export default function Sidebar({ onOpenSettings, onOpenRemote, onOpenWorkflows 
     'separator',
     {
       label: 'Delete…',
-      confirmLabel: 'Delete permanently',
       destructive: true,
-      action: () => void call('closeChat', session.id)
+      action: () => void deleteChat(session)
     }
   ]
 
@@ -110,7 +117,7 @@ export default function Sidebar({ onOpenSettings, onOpenRemote, onOpenWorkflows 
       // The companion app is iPhone-only, so the promise only makes sense on
       // the Mac it pairs with; elsewhere it is plain remote access.
       label: `${isMac() ? 'Control from your iPhone…' : 'Remote access…'}${remoteOn ? ' (on)' : ''}`,
-      action: onOpenRemote
+      action: () => openSettings('remote')
     }
   ]
 
@@ -191,16 +198,16 @@ export default function Sidebar({ onOpenSettings, onOpenRemote, onOpenWorkflows 
         )}
       </nav>
 
-      {app?.update && <UpdatePrompt update={app.update} onOpen={() => onOpenSettings('updates')} />}
+      {app?.update && <UpdatePrompt update={app.update} onOpen={() => openSettings('updates')} />}
 
       <div className="sidebar-footer">
-        <AccountRow onOpen={() => onOpenSettings('account')} />
+        <AccountRow onOpen={() => openSettings('account')} />
         <button
           type="button"
           className="sidebar-icon-btn"
           title={withShortcut('Settings', ',')}
           aria-label="Settings"
-          onClick={() => onOpenSettings()}
+          onClick={() => openSettings('general')}
         >
           <GearIcon size={15} />
         </button>
@@ -328,21 +335,16 @@ function UpdatePrompt({
   const target = update.app.available ? 'app' : update.cli.available ? 'cli' : null
   if (!target && !busy) return null
 
+  // One product to the user: "Spettro" is updated, whichever half moved.
   const label = busy
     ? (appBusy ? update.app.message : update.cli.message) || 'Updating…'
-    : target === 'app'
-      ? `Spettro ${update.app.latest} is available`
-      : `Spettro CLI ${update.cli.latest} is available`
+    : 'Update available'
 
   const install = (): void => {
-    if (target === 'app') {
-      // A build that can't replace itself has no in-app path — send the user
-      // to the pane, which offers the download instead.
-      if (update.canInstallApp) void call('installAppUpdate')
-      else onOpen()
-    } else if (target === 'cli') {
-      void call('installCLIUpdate')
-    }
+    // A build that can't replace itself has no in-app path — send the user
+    // to the pane, which offers the download instead.
+    if (target === 'app' && !update.canInstallApp && !update.cli.available) onOpen()
+    else void updateEverything(update)
   }
 
   return (

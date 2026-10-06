@@ -16,16 +16,20 @@ const calls: [string, unknown[]][] = []
 let hold: { release: () => void } | null = null
 let holding = false
 
-vi.mock('@renderer/state/store', () => ({
-  call: (method: string, ...args: unknown[]) => {
-    calls.push([method, args])
-    if (!holding) return Promise.resolve()
-    return new Promise<void>((resolve) => {
-      hold = { release: resolve }
-    })
-  },
-  useApp: () => null
-}))
+vi.mock('@renderer/state/store', () => {
+  const mocked = {
+    call: (method: string, ...args: unknown[]) => {
+      calls.push([method, args])
+      if (!holding) return Promise.resolve()
+      return new Promise<void>((resolve) => {
+        hold = { release: resolve }
+      })
+    },
+    useApp: () => null
+  }
+  // quietCall is call without the failure toast; to a test they are one.
+  return { ...mocked, quietCall: mocked.call }
+})
 
 beforeAll(() => {
   // jsdom has no canvas; the slider keeps the meteor's timing without one.

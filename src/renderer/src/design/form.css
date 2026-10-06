@@ -70,8 +70,9 @@
 
 /* Frames taken verbatim from the Swift views. */
 .modal-panel--settings {
-  width: 580px;
-  height: 520px;
+  width: 780px;
+  height: 580px;
+  flex-direction: row;
 }
 .modal-panel--providers {
   width: 640px;
@@ -414,16 +415,126 @@
   color: var(--diff-removed);
 }
 
-/* -------------------------------------------------------- settings sheet */
+/* -------------------------------------------------------- settings window */
 
-.settings-panes {
+/* A sidebar of panes on the left (System Settings' shape), the pane on the
+   right under its own title and the Done button. */
+.settings-nav {
+  flex: none;
+  width: 208px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-md);
+  padding: var(--sp-lg) var(--sp-sm);
+  background: var(--sidebar-bg);
+  border-right: 1px solid var(--hairline);
+  overflow-y: auto;
+}
+
+.settings-nav-title {
+  padding: 2px var(--sp-sm) 0;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.settings-nav-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.settings-nav-item {
+  appearance: none;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 6px var(--sp-sm);
+  font: inherit;
+  font-size: var(--fs-md);
+  text-align: left;
+  color: var(--text-primary);
+  background: none;
+  border: none;
+  border-radius: var(--rad-xs);
+  cursor: default;
+}
+
+.settings-nav-item:hover {
+  background: var(--hover-fill);
+}
+
+.settings-nav-item--active,
+.settings-nav-item--active:hover {
+  background: var(--selected-fill);
+  font-weight: 500;
+}
+
+.settings-nav-item:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 60%, transparent);
+  outline-offset: -2px;
+}
+
+.settings-nav-icon {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  color: var(--text-secondary);
+  background: var(--hover-fill);
+}
+
+.settings-nav-item--active .settings-nav-icon {
+  color: var(--accent-contrast);
+  background: var(--accent);
+  /* Filled glyphs cut their inner mark out in --canvas; on the accent tile
+     the mark has to read as accent, or it vanishes into the white disc. */
+  --canvas: var(--accent);
+}
+
+.settings-nav-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.settings-head {
   flex: none;
   display: flex;
-  justify-content: center;
-  padding: var(--sp-lg) var(--sp-lg) var(--sp-md);
+  align-items: center;
+  gap: var(--sp-md);
+  padding: var(--sp-md) var(--sp-lg) var(--sp-md) var(--sp-xl);
+  border-bottom: 1px solid var(--hairline);
+}
+
+.settings-head-title {
+  flex: 1;
+  margin: 0;
+  font-size: var(--fs-lg);
+  font-weight: 600;
 }
 
 .settings-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.settings-pane-fill {
   flex: 1;
   min-height: 0;
   display: flex;
@@ -592,4 +703,178 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   user-select: text;
+}
+
+/* ------------------------------------------------------- settings rows */
+
+.form-scroll .form-select {
+  font: inherit;
+  font-size: var(--fs-md);
+  color: var(--text-primary);
+  background: var(--surface-raised);
+  border: 1px solid var(--hairline);
+  border-radius: var(--rad-xs);
+  padding: 3px 6px;
+}
+
+/* An on/off switch: a real checkbox under a drawn track. */
+.form-toggle {
+  position: relative;
+  display: inline-flex;
+}
+
+.form-toggle input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  margin: 0;
+}
+
+.form-toggle-track {
+  width: 34px;
+  height: 20px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text-secondary) 35%, transparent);
+  transition: background 0.15s ease-out;
+  display: inline-flex;
+  align-items: center;
+  padding: 2px;
+}
+
+.form-toggle-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  background: var(--paper);
+  box-shadow: var(--shadow-sm);
+  transition: transform 0.15s ease-out;
+}
+
+.form-toggle input:checked + .form-toggle-track {
+  background: var(--accent);
+}
+
+.form-toggle input:checked + .form-toggle-track .form-toggle-thumb {
+  transform: translateX(14px);
+}
+
+.form-toggle input:focus-visible + .form-toggle-track {
+  outline: 2px solid color-mix(in srgb, var(--accent) 60%, transparent);
+  outline-offset: 2px;
+}
+
+.form-scroll .form-row--choice {
+  align-items: flex-start;
+  gap: var(--sp-md);
+  cursor: default;
+}
+
+.form-row--choice input {
+  margin-top: 3px;
+  accent-color: var(--accent);
+}
+
+.form-choice-texts {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.form-choice-name {
+  font-size: var(--fs-md);
+  font-weight: 500;
+}
+
+.form-choice-detail {
+  font-size: var(--fs-sm);
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+
+.form-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-secondary);
+}
+
+.form-status--ok svg {
+  color: var(--success);
+}
+
+.form-kbd {
+  font-family: var(--font-sans);
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+  padding: 1px 7px;
+  border-radius: 5px;
+  border: 1px solid var(--hairline);
+  background: var(--surface-sunken);
+  white-space: nowrap;
+}
+
+.about-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: var(--sp-xl) 0 var(--sp-lg);
+}
+
+.about-name {
+  font-size: var(--fs-xl);
+  font-weight: 600;
+}
+
+.about-version {
+  font-size: var(--fs-md);
+  color: var(--text-secondary);
+  user-select: text;
+}
+
+/* Settings › Updates: the one row. */
+.form-scroll .update-summary {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-md);
+  min-width: 0;
+}
+
+.update-summary-icon {
+  flex: none;
+  display: inline-flex;
+  color: var(--text-secondary);
+}
+
+.update-summary-icon--ok {
+  color: var(--success);
+}
+
+.update-summary-icon--new {
+  color: var(--accent);
+}
+
+.update-summary-texts {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.update-summary-title {
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+
+.update-summary-sub {
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+}
+
+.form-scroll .update-notes--md {
+  white-space: normal;
+}
+
+.updates-details .form-section-title {
+  margin-top: var(--sp-sm);
 }

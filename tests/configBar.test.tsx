@@ -15,13 +15,17 @@ import type { ACPConfigOption } from '@shared/acp'
 
 const calls: [string, unknown[]][] = []
 
-vi.mock('@renderer/state/store', () => ({
-  call: (method: string, ...args: unknown[]) => {
-    calls.push([method, args])
-    return Promise.resolve()
-  },
-  useApp: () => null
-}))
+vi.mock('@renderer/state/store', () => {
+  const mocked = {
+    call: (method: string, ...args: unknown[]) => {
+      calls.push([method, args])
+      return Promise.resolve()
+    },
+    useApp: () => null
+  }
+  // quietCall is call without the failure toast; to a test they are one.
+  return { ...mocked, quietCall: mocked.call }
+})
 
 beforeEach(() => {
   calls.length = 0

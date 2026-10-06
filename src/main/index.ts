@@ -1,12 +1,14 @@
 // Main-process entry: window creation, model construction, IPC registration,
 // and event-push wiring (the port of SpettroApp.swift's app wiring).
 
-import { app, BrowserWindow, nativeTheme, shell } from 'electron'
+import { app, BrowserWindow, dialog, nativeTheme, shell } from 'electron'
 import { existsSync } from 'fs'
 import { join } from 'path'
+import { busyGuard } from '../shared/busyGuard'
 import { EVENT_CHANNEL, type MainEvent } from '../shared/ipc'
 import { wireAttention } from './attention'
 import { registerIpc, type IpcHandle } from './ipc'
+import { installAppMenu } from './menu'
 import { AppModel } from './model/appModel'
 import { buildRemoteBridge } from './model/remoteBridge'
 import { RemoteHost } from './remote/host'
@@ -18,6 +20,11 @@ let terminals: TerminalManager | null = null
 let remoteHost: RemoteHost | null = null
 let ipcHandle: IpcHandle | null = null
 let didShutdown = false
+/** Set once quitting has been decided (nothing running, Quit Now, the work
+ *  finished, or an update handing over) — from then on nothing asks. */
+let quitApproved = false
+/** The quit question is on screen; a second Ctrl+Q doesn't stack another. */
+let askingQuit = false
 
 /** The app icon, for the window and the Linux taskbar (Windows takes it from
  *  the packaged exe). Bundled as an extra resource; falls back to the repo
@@ -54,6 +61,15 @@ function createWindow(): void {
 
   mainWindow.on('ready-to-show', () => mainWindow?.show())
 
+  // Closing the window is quitting (window-all-closed quits), and by the
+  // time before-quit runs the window — and the work in it — is gone. So the
+  // question is asked here, before anything closes.
+  mainWindow.on('close', (event) => {
+    if (quitApproved || !shouldAskBeforeQuit()) return
+    event.preventDefault()
+    void askBeforeQuit()
+  })
+
   mainWindow.webContents.setWindowOpenHandler((details) => {
     shell.openExternal(details.url)
     return { action: 'deny' }
@@ -82,7 +98,11 @@ app.whenReady().then(() => {
     // A dev run has no installer to replace, and quitting is how the update
     // hands the machine over to the one it downloaded.
     isPackaged: app.isPackaged,
-    quit: () => app.quit(),
+    // The update already asked (or waited) before getting this far.
+    quit: () => {
+      quitApproved = true
+      app.quit()
+    },
     applyAppearance: (mode) => {
       nativeTheme.themeSource = mode
     }
@@ -98,6 +118,7 @@ app.whenReady().then(() => {
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.setBackgroundColor(windowBackground())
   })
   createWindow()
+  installAppMenu((command) => pushToWindow({ type: 'menu', command }))
 
   terminals = new TerminalManager(pushToWindow)
   remoteHost = new RemoteHost(buildRemoteBridge(model), {
@@ -142,7 +163,63 @@ function shutdownAll(): void {
   ipcHandle?.shutdown()
 }
 
-app.on('before-quit', shutdownAll)
+/** True when quitting now would stop something the user started. */
+function shouldAskBeforeQuit(): boolean {
+  return busyGuard('quit', model?.busyCount() ?? 0, terminals?.runningCount() ?? 0) !== null
+}
+
+/** "Spettro is working on 2 tasks — Quit When Finished / Quit Now / Cancel".
+ *  Waiting keeps the window open with a note, and quits on its own once the
+ *  last turn ends. */
+async function askBeforeQuit(): Promise<void> {
+  const guard = busyGuard('quit', model?.busyCount() ?? 0, terminals?.runningCount() ?? 0)
+  if (!guard) {
+    quitApproved = true
+    app.quit()
+    return
+  }
+  if (askingQuit) return
+  askingQuit = true
+  const buttons = [...(guard.whenFinishedLabel ? [guard.whenFinishedLabel] : []), guard.nowLabel, 'Cancel']
+  const win = getMainWindow()
+  const options: Electron.MessageBoxOptions = {
+    type: 'warning',
+    message: guard.title,
+    detail: guard.message,
+    buttons,
+    defaultId: 0,
+    cancelId: buttons.length - 1,
+    noLink: true
+  }
+  try {
+    const { response } = win && !win.isDestroyed()
+      ? await dialog.showMessageBox(win, options)
+      : await dialog.showMessageBox(options)
+    const choice = buttons[response]
+    if (choice === guard.nowLabel) {
+      quitApproved = true
+      app.quit()
+    } else if (choice === guard.whenFinishedLabel && model) {
+      model.notify('Spettro will quit when it finishes working.')
+      await model.waitForIdle()
+      quitApproved = true
+      app.quit()
+    }
+  } finally {
+    askingQuit = false
+  }
+}
+
+app.on('before-quit', (event) => {
+  // Ctrl+Q / the menu's Quit: ask first, the same as closing the window.
+  if (!quitApproved && shouldAskBeforeQuit()) {
+    event.preventDefault()
+    void askBeforeQuit()
+    return
+  }
+  quitApproved = true
+  shutdownAll()
+})
 
 app.on('window-all-closed', () => {
   app.quit()

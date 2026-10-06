@@ -75,10 +75,27 @@ SCENES=(
   app:permission-orphan
   app:question
   app:question-multi
-  app:settings
+  app:settings-general
+  app:settings-account
+  app:settings-models
+  app:settings-permissions
+  app:settings-memory
+  app:settings-remote
+  app:settings-updates
+  app:settings-advanced
+  app:settings-shortcuts
+  app:settings-about
   app:onboarding
+  app:installing
+  app:install-failed
   app:gate
+  app:gate-keys
   app:failure
+  app:reconnecting
+  app:confirm-delete
+  app:deleted-undo
+  app:no-model
+  app:error-toast
 )
 
 THEMES="${SHOT_THEMES:-dark,light}"

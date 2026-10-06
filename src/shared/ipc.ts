@@ -19,6 +19,7 @@ import type {
   GitStat,
   TranscriptItem
 } from './model'
+import type { MenuCommand } from './shortcuts'
 import type {
   ConnectResult,
   LocalProbeResult,
@@ -77,6 +78,10 @@ export type MainEvent =
   | { type: 'terminal-data'; termId: string; data: string }
   /** A pty exited. */
   | { type: 'terminal-exit'; termId: string; exitCode: number }
+  /** An application-menu item was chosen (shared/shortcuts.ts). The menu
+   *  only shows the shortcuts; the keys themselves are the renderer's, so
+   *  a shell in the terminal keeps its Ctrl+N. */
+  | { type: 'menu'; command: MenuCommand }
 
 // ---------------------------------------------------------------------------
 // Renderer → main calls (all routed over one invoke channel)
@@ -92,6 +97,8 @@ export interface RendererApi {
   // Lifecycle
   retryBootstrap(): Promise<void>
   installCLI(): Promise<void>
+  /** Stops an install in flight; setup goes back to its first screen. */
+  cancelInstall(): Promise<void>
   useExplicitCLIPath(path: string): Promise<void>
   chooseProject(path: string): Promise<void>
   /** Sets the folder the next new session works in (and adds it to the
@@ -106,6 +113,12 @@ export interface RendererApi {
   /** System / Light / Dark. Persisted, and applied to the whole window
    *  (and the terminal) live; the new value comes back in app-state. */
   setAppearance(mode: Appearance): Promise<void>
+  /** Settings › General: a notification when a turn ends in the background. */
+  setNotifyWhenDone(on: boolean): Promise<void>
+  /** Settings' defaults (the permission level): applied to the selected
+   *  chat's live session when there is one — the CLI keeps these settings
+   *  for every session — and to what new chats start with either way. */
+  setDefaultOption(configId: string, value: string | boolean): Promise<void>
 
   // Sessions
   newChat(projectPath?: string): Promise<string>
@@ -158,6 +171,9 @@ export interface RendererApi {
   terminalResize(termId: string, cols: number, rows: number): Promise<void>
   terminalDispose(termId: string): Promise<void>
   terminalList(projectPath: string): Promise<string[]>
+  /** True while something other than the shell itself runs in the tab
+   *  (closing it would kill that). */
+  terminalHasProcess(termId: string): Promise<boolean>
 
   // Remote host
   remoteSetEnabled(enabled: boolean): Promise<void>
@@ -211,10 +227,12 @@ export interface RendererApi {
   /** Re-checks both components now, ignoring the cached result. */
   checkForUpdates(): Promise<void>
   /** Downloads the release installer for this platform and hands off to it —
-   *  the app quits once the installer is running. */
-  installAppUpdate(): Promise<void>
-  /** Re-runs the official CLI install script, then reconnects the agent. */
-  installCLIUpdate(): Promise<void>
+   *  the app quits once the installer is running. `whenIdle` holds the
+   *  hand-off until no chat is working (Update When Finished). */
+  installAppUpdate(whenIdle?: boolean): Promise<void>
+  /** Re-runs the official CLI install script, then reconnects the agent —
+   *  after the running turns finish, with `whenIdle`. */
+  installCLIUpdate(whenIdle?: boolean): Promise<void>
 
   // Misc
   openExternal(url: string): Promise<void>

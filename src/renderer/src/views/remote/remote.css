@@ -363,3 +363,28 @@
   flex-shrink: 0;
   margin-top: 1px;
 }
+
+/* Inside Settings › Remote: the pane supplies the title and the frame. */
+.remote--embedded {
+  padding: var(--sp-lg) var(--sp-xl) var(--sp-xl);
+}
+
+.remote__pairing-actions {
+  display: flex;
+  gap: var(--sp-sm);
+}
+
+/* "Can't scan?": the pairing link itself, to copy. */
+.remote__manual {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-md);
+  max-width: 360px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+
+.remote__manual-text {
+  flex: 1;
+}

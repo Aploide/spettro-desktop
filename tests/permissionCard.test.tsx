@@ -21,13 +21,17 @@ const store: { permissions: ACPPermissionRequest[]; questions: ACPQuestionReques
   questions: []
 }
 
-vi.mock('@renderer/state/store', () => ({
-  call: (method: string, ...args: unknown[]) => {
-    calls.push([method, args])
-    return Promise.resolve()
-  },
-  useStore: <T,>(select: (s: typeof store) => T): T => select(store)
-}))
+vi.mock('@renderer/state/store', () => {
+  const mocked = {
+    call: (method: string, ...args: unknown[]) => {
+      calls.push([method, args])
+      return Promise.resolve()
+    },
+    useStore: <T,>(select: (s: typeof store) => T): T => select(store)
+  }
+  // quietCall is call without the failure toast; to a test they are one.
+  return { ...mocked, quietCall: mocked.call }
+})
 
 function bash(o: Partial<ACPPermissionRequest> = {}): ACPPermissionRequest {
   return {

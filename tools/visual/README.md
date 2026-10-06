@@ -86,9 +86,14 @@ Pick the screen with `?mode=`:
 | `question` | the inline question card: context, a Recommended option with a preview, Other… |
 | `question-multi` | three questions, on the second (multi-select) with picks made and Other… open |
 | `settings` | Settings, opened the way a user does (Ctrl+,) |
-| `onboarding`, `installing`, `install-failed` | first run without a CLI |
-| `gate` | the CLI is up but no model is connected |
-| `failure`, `reconnecting` | the agent died / is starting |
+| `settings-<pane>` | one per pane — `general`, `account`, `models`, `permissions`, `memory`, `remote`, `updates` (the engine has an update waiting), `advanced`, `shortcuts`, `about` — chosen in Settings' sidebar |
+| `onboarding`, `installing`, `install-failed` | setup, step 1 of 2: Install Spettro (Advanced folded), the determinate bar with Cancel, and "Couldn't download Spettro" with Try Again |
+| `gate`, `gate-keys` | setup, step 2 of 2: Sign in to Spettro first, the quieter alternatives under it; and "Use my own API key" with one provider opened (its "Get a key" link) |
+| `failure` | the engine died: the sentence, Try Again, and the log behind "Show details" |
+| `reconnecting` | the engine restarting under a chat: the header's "Reconnecting…", the half-written message still in the field, Send waiting |
+| `confirm-delete`, `deleted-undo` | Delete… from a row's menu: the alert, and after it the row gone with Undo on offer |
+| `no-model` | nothing connected (setup skipped): the "Connect a model to start" bar over the composer |
+| `error-toast` | a failed action said in words, with its one next step |
 
 The window layout (sidebar width and collapse, terminal drawer) lives in
 localStorage, which persists across scenes in the capture's profile, so
@@ -100,6 +105,9 @@ the textarea's value setter React listens behind, then keys — and wait for
 the focus first: the composer's menus open only while it is focused, and an
 offscreen window never is, so the capture turns DevTools focus emulation on
 for `app` scenes once the page has loaded.
+
+Unsent drafts live in localStorage too (per chat), so the prelude clears
+them as well.
 
 `shoot.sh` shoots the main ones as `app:<mode>` scenes. They are taken at the
 real window's size (1280×840, `SHOT_APP_HEIGHT` to change) rather than as a
@@ -122,6 +130,11 @@ npx electron-vite dev --outDir out/live --entry out/live/main/index.js \
     --remoteDebuggingPort 9333 -- --user-data-dir=/tmp/live-profile
 node tools/visual/cdp-shot.cjs 9333 /tmp/shot.png ["<JS to run first, e.g. a click>"]
 ```
+
+To see first-run setup from a dev run, hide every installed CLI: run with a
+throwaway `HOME`, drop `~/.local/bin` from `PATH`, and set
+`SPETTRO_IGNORE_DEV_CLI=1` (otherwise the locator finds the `spettro`
+checkout beside this repo).
 
 Pass `--entry` whenever you pass `--outDir`: without it Electron starts
 `package.json`'s `main` (`out/main/index.js`) — whatever was built there last —

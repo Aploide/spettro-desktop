@@ -15,8 +15,11 @@
 //                 permission-bash | permission-diff | permission-compact |
 //                 permission-orphan | permission-denied | question |
 //                 question-multi | settings |
-//                 onboarding | installing | install-failed | gate | failure |
-//                 reconnecting
+//                 settings-<general|account|models|permissions|memory|remote|
+//                   updates|advanced|shortcuts|about> |
+//                 onboarding | installing | install-failed | gate | gate-keys |
+//                 failure | reconnecting | confirm-delete | deleted-undo |
+//                 no-model | error-toast
 
 import './appPrelude'
 import { createRoot } from 'react-dom/client'
@@ -27,6 +30,8 @@ import { EMPTY_EXTENSIONS, type ExtensionsState, type ModelEntry } from '@shared
 import type {
   AppStateDTO,
   ChatDetail,
+  InstallState,
+  RemoteHostState,
   ChatMessage,
   SteeringState,
   ChatSummary,
@@ -35,7 +40,8 @@ import type {
   ToolCallItem,
   TranscriptItem
 } from '@shared/model'
-import { EMPTY_UPDATE_STATE } from '@shared/update'
+import { EMPTY_COMPONENT_UPDATE, EMPTY_UPDATE_STATE, type UpdateState } from '@shared/update'
+import { showToast } from '@renderer/views/common/Toast'
 
 const MODE = new URLSearchParams(location.search).get('mode') ?? 'welcome'
 
@@ -66,7 +72,7 @@ function tool(partial: Partial<ToolCallItem> & { title: string }): TranscriptIte
 function say(
   role: 'user' | 'assistant' | 'reasoning' | 'notice',
   text: string,
-  o?: { streaming?: boolean; error?: boolean; thoughtFor?: number; steering?: SteeringState }
+  o?: { streaming?: boolean; error?: boolean; detail?: string; thoughtFor?: number; steering?: SteeringState }
 ): TranscriptItem {
   seq += 1
   const timestamp = NOW - 20 * MIN + seq * 1000
@@ -84,6 +90,7 @@ function say(
     message.endedAt = timestamp + o.thoughtFor * 1000
   }
   if (o?.steering) message.steering = o.steering
+  if (o?.detail) message.detail = o.detail
   // The harness's errors are all a turn failing, the kind Try again answers.
   if (o?.error) message.endsTurn = true
   return { kind: 'message', message }
@@ -255,10 +262,12 @@ function transcript(mode: string): TranscriptItem[] {
         }),
         say('notice', 'Interrupted'),
         say('user', 'Keep going — fix the failing test too.'),
+        // As main files it: the sentence (shared/humanize.ts), with the
+        // provider's own words behind "Show details".
         say(
           'notice',
-          "Anthropic is overloaded right now (529), so the reply stopped. Nothing was lost — try again in a moment.",
-          { error: true }
+          'The model provider is overloaded. It’s turning requests away right now. Nothing was lost — try again in a moment.',
+          { error: true, detail: 'anthropic: POST /v1/messages: 529 {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}' }
         )
       )
       return items
@@ -511,7 +520,8 @@ function sessionsFor(mode: string): ChatSummary[] {
 }
 
 const SESSIONS = sessionsFor(MODE)
-const NO_SELECTION = MODE === 'welcome' || MODE === 'welcome-empty' || MODE === 'welcome-folders'
+const NO_SELECTION =
+  MODE === 'welcome' || MODE === 'welcome-empty' || MODE === 'welcome-folders' || MODE === 'no-model'
 
 // --------------------------------------------------------------- extensions
 
@@ -591,17 +601,72 @@ function phaseFor(mode: string): Phase {
     case 'installing':
       return { kind: 'installing' }
     case 'gate':
+    case 'gate-keys':
       return { kind: 'needsProvider' }
     case 'failure':
       return {
         kind: 'failed',
         message: 'The Spettro agent exited unexpectedly (exit code 1).'
       }
-    case 'reconnecting':
-      return { kind: 'connecting' }
     default:
+      // Reconnecting keeps the shell: the phase stays ready and
+      // `connection` says the engine is restarting underneath.
       return { kind: 'ready' }
   }
+}
+
+function installFor(mode: string): InstallState {
+  if (mode === 'installing') return { stage: 'downloading', failure: null }
+  if (mode === 'install-failed') return { stage: 'failed', failure: { kind: 'failed' } }
+  return { stage: 'idle', failure: null }
+}
+
+/** Settings › Updates: the engine has a release waiting, the app doesn't. */
+const UPDATES: UpdateState = {
+  app: { ...EMPTY_COMPONENT_UPDATE, current: '0.1.7', latest: '0.1.7', checkedAt: NOW - 20 * MIN },
+  cli: {
+    ...EMPTY_COMPONENT_UPDATE,
+    current: '2.9.0',
+    latest: '2.9.1',
+    available: true,
+    releaseUrl: 'https://github.com/aploide/spettro/releases/tag/v2.9.1',
+    releaseNotes:
+      '## What’s new\n\n- **Faster startup** on large repositories.\n- Workflows resume after a crash.\n- Fixed `/compact` losing the last message.',
+    checkedAt: NOW - 20 * MIN
+  },
+  canInstallApp: false
+}
+
+/** Settings › Remote: sharing on, one phone paired and connected. */
+const REMOTE: RemoteHostState = {
+  enabled: true,
+  port: 47321,
+  hostId: 'host-1',
+  hostName: 'carlo-desktop',
+  pairingOpen: false,
+  pairingURL: null,
+  pairingQR: null,
+  pairingExpiresAt: null,
+  pairingExpired: false,
+  devices: [
+    {
+      deviceId: 'd1',
+      name: 'Carlo’s iPhone',
+      platform: 'iOS 19',
+      pairedAt: NOW - 3 * 24 * 60 * MIN,
+      lastSeenAt: NOW - 2 * MIN,
+      revoked: false
+    },
+    {
+      deviceId: 'd2',
+      name: 'iPad',
+      platform: 'iPadOS 19',
+      pairedAt: NOW - 30 * 24 * 60 * MIN,
+      lastSeenAt: NOW - 26 * 60 * MIN,
+      revoked: false
+    }
+  ],
+  connectedDeviceIds: ['d1']
 }
 
 const INSTALL_LOG = [
@@ -614,11 +679,14 @@ const INSTALL_LOG = [
 
 const app: AppStateDTO = {
   phase: phaseFor(MODE),
+  connection: MODE === 'reconnecting' ? 'reconnecting' : 'ok',
   cli: { path: '/home/carlo/.local/bin/spettro', version: '2.9.0', isDev: false },
   agentVersion: '2.9.0',
   selectedSessionId: NO_SELECTION ? null : 'c1',
   sessions: SESSIONS,
   banner: null,
+  bannerNonce: 0,
+  install: installFor(MODE),
   installLog:
     MODE === 'installing'
       ? INSTALL_LOG
@@ -635,9 +703,9 @@ const app: AppStateDTO = {
         ]
       : [],
   subscription: { plan: 'pro', email: 'carlo@example.com' },
-  extensions: MODE === 'gate' ? GATE_EXTENSIONS : EXTENSIONS,
-  update: EMPTY_UPDATE_STATE,
-  remote: null,
+  extensions: MODE === 'gate' || MODE === 'gate-keys' || MODE === 'no-model' ? GATE_EXTENSIONS : EXTENSIONS,
+  update: MODE === 'settings-updates' ? UPDATES : { ...EMPTY_UPDATE_STATE, app: { ...EMPTY_COMPONENT_UPDATE, current: '0.1.7' } },
+  remote: MODE.startsWith('settings') ? REMOTE : null,
   // A first run starts in the home folder, which is exactly the case the
   // new-session view warns about.
   lastProjectPath: MODE === 'welcome-empty' ? null : PROJECT,
@@ -648,7 +716,12 @@ const app: AppStateDTO = {
       : [PROJECT, GATEWAY, DOTFILES, '/home/carlo/code/old-prototype'],
   missingProjects: MODE === 'welcome-empty' ? [] : ['/home/carlo/code/old-prototype'],
   homePath: HOME,
-  appearance: 'system'
+  appearance: 'system',
+  noModel: MODE === 'no-model',
+  providerSetupSkipped: MODE === 'no-model',
+  notifyWhenDone: true,
+  defaultConfigOptions: OPTIONS,
+  busyTasks: BUSY ? 1 : 0
 }
 
 // ----------------------------------------------------------- sheets' input
@@ -886,6 +959,61 @@ function pushEvents(): void {
     document.querySelector<HTMLElement>(selector)?.click()
   }
   if (MODE === 'settings') setTimeout(() => press(','), 60)
+  // One scene per pane: Settings opened the way a user does, then the pane
+  // chosen in its sidebar.
+  if (MODE.startsWith('settings-')) {
+    setTimeout(() => press(','), 60)
+    setTimeout(() => click(`[data-testid="settings-pane-${MODE.slice('settings-'.length)}"]`), 140)
+  }
+  // Delete… from a row's menu: the alert asking first.
+  if (MODE === 'confirm-delete' || MODE === 'deleted-undo') {
+    setTimeout(() => {
+      const row = document.querySelector('[data-testid="sidebar-row-c3"]')
+      const r = row?.getBoundingClientRect()
+      if (!row || !r) return
+      row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: r.right - 24, clientY: r.bottom - 4 }))
+    }, 60)
+    setTimeout(() => {
+      const item = [...document.querySelectorAll<HTMLElement>('.ctx-item')].find((el) => el.textContent === 'Delete…')
+      item?.click()
+    }, 140)
+    if (MODE === 'deleted-undo') setTimeout(() => click('[data-testid="confirm-ok"]'), 260)
+  }
+  // A failed action, said in words: the toast the call wrapper raises.
+  if (MODE === 'error-toast') {
+    setTimeout(
+      () =>
+        showToast({
+          tone: 'error',
+          title: 'Your API key was rejected',
+          detail: 'Check the key in Settings › Models & Providers, or connect another provider.',
+          action: { label: 'Open Models & Providers', run: () => undefined }
+        }),
+      60
+    )
+  }
+  // Setup's "Use my own API key": the provider list with its key links.
+  if (MODE === 'gate-keys') {
+    setTimeout(() => {
+      const alt = [...document.querySelectorAll<HTMLElement>('.setup-alt')][0]
+      alt?.click()
+    }, 60)
+    setTimeout(() => {
+      const connect = [...document.querySelectorAll<HTMLElement>('.prov-row .btn')].find((b) => b.textContent === 'Connect')
+      connect?.click()
+    }, 140)
+  }
+  // The engine restarting under a chat with a half-written message: the
+  // header pill, the field still holding the text, Send waiting.
+  if (MODE === 'reconnecting') {
+    setTimeout(() => {
+      const el = document.querySelector<HTMLTextAreaElement>('[data-testid="composer-input"]')
+      if (!el) return
+      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set
+      setter?.call(el, 'Also add a test for the disabled state')
+      el.dispatchEvent(new Event('input', { bubbles: true }))
+    }, 60)
+  }
   // Denied once the card has armed: the request leaves the queue the way
   // main would take it off, and the "what instead?" field is what's left.
   if (MODE === 'permission-denied') {
@@ -918,7 +1046,10 @@ function pushEvents(): void {
     }, 60)
   }
   if (MODE === 'chat-error') {
-    setTimeout(() => click('button[aria-label^="Bash npm test"]'), 60)
+    setTimeout(() => {
+      click('button[aria-label^="Bash npm test"]')
+      click('.tr-error-details .disclosure-toggle')
+    }, 60)
   }
   // The composer, driven the way a user drives it: typed into (through the
   // value setter React listens behind), keys pressed, buttons clicked.

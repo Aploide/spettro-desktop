@@ -229,7 +229,10 @@ describe('JSON-RPC errors', () => {
     }
     model.send(session.id, 'hi', [])
     await settle()
-    expect(notices(session)).toEqual(['rate limit exceeded, retry in 20s'])
+    // Said in words, with the reason as it came kept behind "Show details".
+    expect(notices(session)).toEqual(['You’ve hit the provider’s rate limit. Wait a minute, then try again.'])
+    const notice = session.items.at(-1)
+    expect(notice?.kind === 'message' && notice.message.detail).toBe('rate limit exceeded, retry in 20s')
     expect(session.isBusy).toBe(false)
   })
 })
@@ -524,7 +527,7 @@ describe('sending', () => {
     model.send(session.id, 'also keep the old API', [])
     await settle()
     // A failed steer says so, but the turn's own prompt stays answerable.
-    expect(notices(session)).toEqual(['steering queue closed'])
+    expect(notices(session)).toEqual(['Steering queue closed.'])
     expect(shownPermissions()).toHaveLength(1)
     expect(fake.sent.some((m) => m.id === 20 && m.method === undefined)).toBe(false)
     expect(session.isBusy).toBe(true)

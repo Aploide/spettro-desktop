@@ -13,15 +13,19 @@ import WorkflowStudio from '@renderer/views/workflows/WorkflowStudio'
 const calls: [string, unknown[]][] = []
 let answers: Record<string, unknown | ((...args: unknown[]) => unknown)> = {}
 
-vi.mock('@renderer/state/store', () => ({
-  call: (method: string, ...args: unknown[]) => {
-    calls.push([method, args])
-    const answer = answers[method]
-    if (typeof answer === 'function') return Promise.resolve(answer(...args))
-    return Promise.resolve(answer ?? null)
-  },
-  useChat: () => null
-}))
+vi.mock('@renderer/state/store', () => {
+  const mocked = {
+    call: (method: string, ...args: unknown[]) => {
+      calls.push([method, args])
+      const answer = answers[method]
+      if (typeof answer === 'function') return Promise.resolve(answer(...args))
+      return Promise.resolve(answer ?? null)
+    },
+    useChat: () => null
+  }
+  // quietCall is call without the failure toast; to a test they are one.
+  return { ...mocked, quietCall: mocked.call }
+})
 
 const SCRIPT = "export const meta = { name: 'review', description: 'd', phases: [] }\n"
 

@@ -137,7 +137,9 @@ describe('the slider', () => {
   it('rests Off short of Low, and the chip names what is off', () => {
     const { container } = render(<ThinkingSlider chat={chat(options({ thinking: 'off', ultra: false }))} />)
     // Not on the Low tick (0%): the label and the thumb agree.
-    expect(container.querySelector<HTMLElement>('.thinking-thumb')?.style.left).toBe('-14px')
+    const carrier = container.querySelector<HTMLElement>('.thinking-carrier')
+    expect(carrier?.style.getPropertyValue('--f')).toBe('0')
+    expect(carrier?.style.getPropertyValue('--off')).toBe('-14px')
     expect(container.querySelector('.thinking-label--current')).toBeNull()
     cleanup()
     render(<ThinkingChip chat={chat(options({ thinking: 'off', ultra: false }))} />)
@@ -440,8 +442,14 @@ describe('arriving at Ultra, frame by frame', () => {
   // of these reads the slider the way a frame would draw it.
   const meteor = (): Element | null => document.querySelector('.thinking-meteor')
   const root = (): Element => document.querySelector('.thinking-slider') as Element
-  const thumbLeft = (): string =>
-    (document.querySelector('.thinking-thumb') as HTMLElement).style.left
+  // Where the thumb's carrier puts it, as a share of the rail (or Off's
+  // offset short of Low).
+  const thumbLeft = (): string => {
+    const carrier = document.querySelector('.thinking-carrier') as HTMLElement
+    const off = carrier.style.getPropertyValue('--off')
+    if (off !== '0px') return off
+    return `${Math.round(Number(carrier.style.getPropertyValue('--f')) * 100)}%`
+  }
   const fillAt = (): string =>
     (document.querySelector('.thinking-fill') as HTMLElement).style.getPropertyValue('--f')
   const lit = (): boolean => root().classList.contains('thinking-slider--ultra')
@@ -472,6 +480,34 @@ describe('arriving at Ultra, frame by frame', () => {
   const release = (): void => {
     fireEvent.pointerUp(slider(), { pointerId: 1 })
   }
+
+  it('follows a drag at once, measuring the rail once per press, and slides only for a press', () => {
+    // Stops at 0, 60, 120, 180, 240, 300.
+    render(<ThinkingSlider chat={chat(options({ thinking: 'low', ultra: false }))} />)
+    const tracking = (): boolean => root().classList.contains('thinking-slider--tracking')
+    const railReads = (): number =>
+      (HTMLElement.prototype.getBoundingClientRect as unknown as { mock: { contexts: HTMLElement[] } }).mock.contexts.filter(
+        (el) => el.classList.contains('thinking-rail')
+      ).length
+    const before = railReads()
+    press(120)
+    // A press glides to its stop, as a click always did.
+    expect(tracking()).toBe(false)
+    expect(thumbLeft()).toBe('40%')
+    // Moves inside the stop under the pointer draw nothing new.
+    move(125)
+    move(130)
+    expect(tracking()).toBe(false)
+    // Into another stop: the thumb is there now, no slide behind the hand.
+    move(180)
+    expect(tracking()).toBe(true)
+    expect(thumbLeft()).toBe('60%')
+    move(240)
+    expect(thumbLeft()).toBe('80%')
+    expect(railReads() - before).toBe(1)
+    release()
+    expect(tracking()).toBe(false)
+  })
 
   it('a press on the bar’s Ultra end lights nothing and moves nothing until it lets go', async () => {
     holding = true
@@ -820,6 +856,55 @@ describe('lit Ultra’s smoulder', () => {
     reduce = true
     act(() => listeners.forEach((fn) => fn()))
     expect(embers()).toBeNull()
+  })
+
+  it('asks for a frame only when one is due: 30 a second on a 120 Hz display', () => {
+    const noop = (): void => {}
+    const gradient = { addColorStop: noop }
+    let paints = 0
+    const ctx = new Proxy(
+      {},
+      {
+        get: (_, key) => {
+          if (key === 'clearRect') return () => paints++
+          return key === 'createLinearGradient' || key === 'createRadialGradient' ? () => gradient : noop
+        },
+        set: () => true
+      }
+    )
+    const getContext = HTMLCanvasElement.prototype.getContext
+    HTMLCanvasElement.prototype.getContext = (() => ctx) as never
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    let queued: FrameRequestCallback[] = []
+    let requests = 0
+    const raf = vi.spyOn(window, 'requestAnimationFrame').mockImplementation((cb) => {
+      requests++
+      queued.push(cb)
+      return requests
+    })
+    const caf = vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(noop)
+    try {
+      render(<ThinkingSlider chat={lit()} />)
+      requests = 0
+      paints = 0
+      // One second of a 120 Hz display.
+      const frame = 1000 / 120
+      for (let t = 0; t < 1000; t += frame) {
+        vi.advanceTimersByTime(frame)
+        const due = queued
+        queued = []
+        due.forEach((cb) => cb(performance.now() + t))
+      }
+      expect(requests).toBeLessThanOrEqual(32)
+      expect(requests).toBeGreaterThanOrEqual(25)
+      // Every frame asked for draws (the last may still be waiting).
+      expect(requests - paints).toBeLessThanOrEqual(1)
+    } finally {
+      raf.mockRestore()
+      caf.mockRestore()
+      vi.useRealTimers()
+      HTMLCanvasElement.prototype.getContext = getContext
+    }
   })
 
   it('stops asking for frames once it is gone', () => {

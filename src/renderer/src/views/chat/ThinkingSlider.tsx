@@ -61,6 +61,9 @@ const SETTLE_MS = 1200
 interface Press {
   at: number
   rest: number
+  /** The pointer has crossed into another stop since the press: from then
+   *  the thumb is wherever the pointer is, with no slide behind it. */
+  moved: boolean
 }
 
 interface SliderProps {
@@ -108,6 +111,9 @@ export default function ThinkingSlider({
   const commit = useCommit(chat.id, base)
   const bodyRef = useRef<HTMLDivElement>(null)
   const railRef = useRef<HTMLDivElement>(null)
+  // The rail's box for the press in progress: measured once, on the press,
+  // rather than on every move.
+  const railRect = useRef<DOMRect | null>(null)
 
   const state: ThinkingState | null = base && pending ? previewState(base, pending) : base
   const lit = !!state && state.ultraOn && !state.paused
@@ -209,30 +215,34 @@ export default function ThinkingSlider({
   }
 
   const indexAt = (clientX: number): number | null => {
-    const rect = railRef.current?.getBoundingClientRect()
+    const rect = railRect.current ?? railRef.current?.getBoundingClientRect()
     if (!rect || rect.width <= 0) return null
     const f = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width))
     return Math.round(f * last)
   }
 
   // Over an Ultra that isn't on, the thumb stays where it last stood.
-  const pressAt = (i: number, rest: number): Press => ({
+  const pressAt = (i: number, rest: number, moved: boolean): Press => ({
     at: i,
-    rest: i === ultraIndex && state.index !== ultraIndex ? rest : i
+    rest: i === ultraIndex && state.index !== ultraIndex ? rest : i,
+    moved
   })
   const onPointerDown = (e: PointerEvent<HTMLDivElement>): void => {
     if (disabled || e.button !== 0) return
     e.preventDefault()
     bodyRef.current?.focus()
     e.currentTarget.setPointerCapture?.(e.pointerId)
-    setDrag(pressAt(indexAt(e.clientX) ?? state.index, state.index))
+    railRect.current = railRef.current?.getBoundingClientRect() ?? null
+    setDrag(pressAt(indexAt(e.clientX) ?? state.index, state.index, false))
   }
+  // A render only when the pointer crosses into another stop.
   const onPointerMove = (e: PointerEvent<HTMLDivElement>): void => {
     if (drag === null) return
     const i = indexAt(e.clientX)
-    if (i !== null && i !== drag.at) setDrag(pressAt(i, drag.rest))
+    if (i !== null && i !== drag.at) setDrag(pressAt(i, drag.rest, true))
   }
   const onPointerUp = (): void => {
+    railRect.current = null
     if (drag === null) return
     setDrag(null)
     select(drag.at)
@@ -285,6 +295,7 @@ export default function ThinkingSlider({
     (shown < 0 ? ' thinking-slider--off' : '') +
     (disabled ? ' thinking-slider--disabled' : '') +
     (drag !== null ? ' thinking-slider--dragging' : '') +
+    (drag?.moved ? ' thinking-slider--tracking' : '') +
     (flight && !landed ? ' thinking-slider--flying' : '') +
     (flight ? ' thinking-slider--meteor' : '') +
     (frozen ? ' thinking-slider--frozen' : '') +
@@ -316,7 +327,10 @@ export default function ThinkingSlider({
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
-        onPointerCancel={() => setDrag(null)}
+        onPointerCancel={() => {
+          railRect.current = null
+          setDrag(null)
+        }}
         onKeyDown={onKeyDown}
       >
         {/* The rail is the stops' line, Low to Ultra; the bar is drawn round
@@ -358,9 +372,14 @@ export default function ThinkingSlider({
             )}
           </div>
           {/* Off is not a stop: its hollow thumb waits short of Low, so the
-              slider never looks as if it were on Low while saying Off. */}
-          <span className="thinking-thumb" style={{ left: at < 0 ? OFF_THUMB : `${frac(at) * 100}%` }}>
-            {showPaused && <PauseGlyph />}
+              slider never looks as if it were on Low while saying Off. The
+              carrier slides the thumb along the rail by a transform, so a
+              move is the compositor's alone (thinkingSlider.css). */}
+          <span
+            className="thinking-carrier"
+            style={{ '--f': frac(at), '--off': at < 0 ? OFF_THUMB : '0px' } as CSSProperties}
+          >
+            <span className="thinking-thumb">{showPaused && <PauseGlyph />}</span>
           </span>
         </div>
       </div>
@@ -736,7 +755,7 @@ function MeteorCanvas({
 }
 
 /** How often the smoulder is redrawn: its embers move about a pixel a
- *  frame at this rate, and it costs half of what every frame would. */
+ *  frame at this rate, and it costs a quarter of what every frame would. */
 const SMOULDER_FRAME_MS = 1000 / 30
 
 /**
@@ -772,17 +791,25 @@ function EmberCanvas({ time }: { time?: number }): JSX.Element {
       paint(time)
       return
     }
+    // A frame is asked for only when one is due: a request every display
+    // frame that drew one in four kept the page producing frames at the
+    // display's full rate for as long as the popover stood open.
     let frame = 0
-    let last = -Infinity
+    let timer: ReturnType<typeof setTimeout> | undefined
     const start = performance.now()
     const tick = (now: number): void => {
-      frame = requestAnimationFrame(tick)
-      if (now - last < SMOULDER_FRAME_MS - 2) return
-      last = now
       paint((now - start) / 1000)
+      // Short of the interval by a few ms, so the frame after it is the
+      // one that draws: 30 a second on a 60 or 120 Hz display.
+      timer = setTimeout(() => {
+        frame = requestAnimationFrame(tick)
+      }, SMOULDER_FRAME_MS - 4)
     }
     frame = requestAnimationFrame(tick)
-    return () => cancelAnimationFrame(frame)
+    return () => {
+      cancelAnimationFrame(frame)
+      clearTimeout(timer)
+    }
   }, [time])
 
   return <canvas ref={ref} className="thinking-embers" aria-hidden />

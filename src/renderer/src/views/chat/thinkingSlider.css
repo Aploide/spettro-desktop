@@ -31,6 +31,13 @@
   --thinking-move: 0ms linear;
 }
 
+/* Dragged across the stops, the thumb is under the pointer: a slide that
+   restarted at every stop crossed left it a stop behind the hand. A press
+   or a key still slides. */
+.thinking-slider--tracking {
+  --thinking-move: 0ms linear;
+}
+
 .thinking-head {
   display: flex;
   align-items: baseline;
@@ -127,33 +134,41 @@
 
 /* From the bar's left end to the thumb's centre. Square-ended: the thumb
    covers its end, and in flight the meteor's streak carries straight on
-   from it. */
+   from it. It is the whole bar, slid left until its end is there: a
+   transform the compositor moves, where a width re-laid and repainted the
+   bar every frame of a slide. (In a transform 100% is the fill's own width,
+   the bar's, so --thinking-span means what it means in the bar.) */
 .thinking-fill {
   position: absolute;
   top: 0;
   bottom: 0;
   left: 0;
-  width: calc(var(--thinking-cap) + var(--thinking-span) * var(--f));
+  width: 100%;
+  transform: translateX(calc(-100% + var(--thinking-cap) + var(--thinking-span) * var(--f)));
   background: var(--accent);
-  transition: width var(--thinking-move);
+  transition: transform var(--thinking-move);
 }
 
 /* Off fills nothing, not even Low's end cap. */
 .thinking-slider--off .thinking-fill {
-  width: 0;
+  transform: translateX(-100%);
 }
 
 /* Lit, the whole fill is Ultra's fire, heating from ember at Low to
    white-hot at the Ultra stop — its own palette in either accent (a lilac or
    ink bar running into orange would read as two controls). Its width is the
    whole rail there, so the ramp's flame lands on Max, over the segment
-   behind it (--fire-start is Max's share of the rail, set on the rail). */
+   behind it (--fire-start is Max's share of the rail, set on the rail).
+   The ramp is laid on the part of the fill that shows: from the bar's left
+   end (the fill's own left end is off to the left, by the share it is
+   slid) to its right end. */
 .thinking-slider--ultra .thinking-fill {
   background: linear-gradient(
     90deg,
-    var(--ultra-ember) 0%,
+    var(--ultra-ember)
+      calc(100% - var(--thinking-cap) - var(--thinking-span) * var(--f)),
     var(--ultra-flame)
-      calc(var(--thinking-cap) + (100% - var(--thinking-cap)) * var(--fire-start, 0.8)),
+      calc(100% - var(--thinking-span) * var(--f) * (1 - var(--fire-start, 0.8))),
     var(--ultra-spark) 100%
   );
 }
@@ -216,9 +231,25 @@
 
 /* ----------------------------------------------------------------- thumb */
 
+/* What carries the thumb along the rail: as wide as the rail and slid by a
+   transform (in which 100% is the rail), so a move is the compositor's work
+   alone, never a layout. It hangs off to the left with the thumb on its
+   right end — hung to the right it would be scrollable overflow, and the
+   popover would grow a scrollbar. */
+.thinking-carrier {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 0;
+  transform: translateX(calc((var(--f) - 1) * 100% + var(--off, 0px)));
+  transition: transform var(--thinking-move);
+}
+
 /* A knob a little taller than the bar, riding on it. */
 .thinking-thumb {
   position: absolute;
+  left: 100%;
   top: 0;
   width: 22px;
   height: 22px;
@@ -235,7 +266,6 @@
     0 2px 6px color-mix(in srgb, var(--scrim) 64%, transparent);
   color: var(--text-secondary);
   transition:
-    left var(--thinking-move),
     opacity 260ms ease-out,
     box-shadow 300ms ease-out;
 }
@@ -267,19 +297,97 @@
     var(--ultra-spark) 58%,
     var(--ultra-flame) 100%
   );
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--ultra-flame) 70%, transparent);
+}
+
+/* The breath: the glow at rest (::before) and the glow drawn in (::after),
+   cross-fading. An animated box-shadow was restyled, repainted and
+   re-rastered every frame; two fixed glows' opacities are the compositor's
+   alone. The keyframes are the old ease-in-out, sampled; it moves in steps
+   of about 30 a second, the smoulder's own rate — a breath this slow shows
+   no step, and the compositor has a frame to draw a quarter as often. */
+.thinking-slider--ultra .thinking-thumb::before,
+.thinking-slider--ultra .thinking-thumb::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  pointer-events: none;
+  /* steps(11) is per keyframe interval: 88 steps a breath. */
+  animation: thinking-ultra-breathe 2.8s steps(11) infinite alternate;
+}
+
+.thinking-slider--ultra .thinking-thumb::before {
   box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--ultra-flame) 70%, transparent),
     0 0 10px 2px color-mix(in srgb, var(--ultra-flame) 50%, transparent),
     0 0 4px color-mix(in srgb, var(--ultra-spark) 80%, transparent);
-  animation: thinking-ultra-breathe 2.8s ease-in-out infinite alternate;
+}
+
+.thinking-slider--ultra .thinking-thumb::after {
+  box-shadow:
+    0 0 14px 4px color-mix(in srgb, var(--ultra-flame) 38%, transparent),
+    0 0 5px color-mix(in srgb, var(--ultra-spark) 90%, transparent);
+  opacity: 0;
+  animation-name: thinking-ultra-breathe-in;
 }
 
 @keyframes thinking-ultra-breathe {
-  to {
-    box-shadow:
-      0 0 0 1px color-mix(in srgb, var(--ultra-flame) 80%, transparent),
-      0 0 14px 4px color-mix(in srgb, var(--ultra-flame) 38%, transparent),
-      0 0 5px color-mix(in srgb, var(--ultra-spark) 90%, transparent);
+  0% {
+    opacity: 1;
+  }
+  12.5% {
+    opacity: 0.969;
+  }
+  25% {
+    opacity: 0.871;
+  }
+  37.5% {
+    opacity: 0.707;
+  }
+  50% {
+    opacity: 0.5;
+  }
+  62.5% {
+    opacity: 0.293;
+  }
+  75% {
+    opacity: 0.129;
+  }
+  87.5% {
+    opacity: 0.031;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes thinking-ultra-breathe-in {
+  0% {
+    opacity: 0;
+  }
+  12.5% {
+    opacity: 0.031;
+  }
+  25% {
+    opacity: 0.129;
+  }
+  37.5% {
+    opacity: 0.293;
+  }
+  50% {
+    opacity: 0.5;
+  }
+  62.5% {
+    opacity: 0.707;
+  }
+  75% {
+    opacity: 0.871;
+  }
+  87.5% {
+    opacity: 0.969;
+  }
+  100% {
+    opacity: 1;
   }
 }
 
@@ -300,9 +408,7 @@
 
 .thinking-slider--flying .thinking-thumb {
   opacity: 0;
-  transition:
-    left var(--thinking-move),
-    opacity 0s;
+  transition: opacity 0s;
 }
 
 /* Paused Ultra: saved, not running. Muted, with a pause mark. */
@@ -322,7 +428,8 @@
 
 /* A harness frame is one frozen instant: nothing may still be moving. */
 .thinking-slider--frozen *,
-.thinking-slider--frozen *::before {
+.thinking-slider--frozen *::before,
+.thinking-slider--frozen *::after {
   transition: none !important;
   animation: none !important;
 }
@@ -332,6 +439,11 @@
   animation: thinking-glow-in 500ms ease-out;
 }
 
+/* The glow itself is the ::before's; it comes up with the thumb. */
+.thinking-slider--glow-in .thinking-thumb::before {
+  animation: thinking-glow-fade 500ms ease-out;
+}
+
 @keyframes thinking-glow-in {
   from {
     box-shadow: 0 0 0 0 transparent;
@@ -339,15 +451,25 @@
   }
 }
 
+@keyframes thinking-glow-fade {
+  from {
+    opacity: 0;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .thinking-slider {
     --thinking-move: 0ms linear;
   }
-  .thinking-slider--ultra .thinking-thumb {
+  .thinking-slider--ultra .thinking-thumb::before,
+  .thinking-slider--ultra .thinking-thumb::after {
     animation: none;
   }
   .thinking-slider--glow-in .thinking-thumb {
     animation: thinking-glow-in 500ms ease-out;
+  }
+  .thinking-slider--glow-in .thinking-thumb::before {
+    animation: thinking-glow-fade 500ms ease-out;
   }
   /* The slider never mounts the smoulder here; should one ever be drawn,
      the bar's fire stands still. */

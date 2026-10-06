@@ -489,6 +489,10 @@
 
 .composer-outer {
   position: relative;
+  /* Above the transcript's floating "Latest message" pill (z-index 3), so
+     the menus that open upward from the composer (commands, @-files) are
+     never drawn under it. */
+  z-index: 4;
   flex: none;
   padding: var(--sp-xs) var(--sp-lg) var(--sp-md);
 }

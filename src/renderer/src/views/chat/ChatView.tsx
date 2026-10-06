@@ -118,14 +118,52 @@ export default function ChatView({ chatId }: { chatId: string }): JSX.Element {
   const itemCount = chat?.items.length ?? 0
   const lastItem = chat?.items[itemCount - 1]
   const lastItemText = lastItem?.kind === 'message' ? lastItem.message.text.length : itemCount
+  // The user's own message: whatever they were reading, they want to see
+  // what they just sent and the answer to it, as in every chat app.
+  const lastUserId = lastItem?.kind === 'message' && lastItem.message.role === 'user' ? lastItem.message.id : null
+  const seenUserId = useRef(lastUserId)
   useEffect(() => {
+    if (lastUserId !== null && lastUserId !== seenUserId.current) {
+      manualPauseRef.current = false
+      scrollTowardLatestRef.current = false
+      pinnedRef.current = true
+      setShowJumpToLatest(false)
+    }
+    seenUserId.current = lastUserId
     if (pinnedRef.current) scrollToBottom()
-  }, [itemCount, lastItemText, scrollToBottom])
+  }, [itemCount, lastItemText, lastUserId, scrollToBottom])
 
+  // The column also grows without an item changing (a reply's markdown laid
+  // out, a list parsed from a command's reply, an image decoded) and shrinks
+  // when the composer grows under it; a pinned reader stays at the tail.
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el || typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(() => {
+      if (pinnedRef.current) scrollToBottom()
+    })
+    observer.observe(el)
+    if (el.firstElementChild) observer.observe(el.firstElementChild)
+    return () => observer.disconnect()
+  }, [chatId, loaded, scrollToBottom])
+
+  // Where the last scroll event left the column: a scroll that didn't move
+  // it up was ours (or the content growing under it), never the reader's.
+  const lastScrollTopRef = useRef(0)
   const onScroll = useCallback(() => {
     const el = scrollRef.current
     if (!el) return
+    const movedUp = el.scrollTop < lastScrollTopRef.current - 1
+    lastScrollTopRef.current = el.scrollTop
     const isAtLatest = el.scrollHeight - el.scrollTop - el.clientHeight < PIN_THRESHOLD
+    // Pinned and not scrolled up: the scroll event arrived after more of the
+    // reply had landed, so the tail moved past where we put the column.
+    // Follow it rather than reading the gap as the reader leaving.
+    if (pinnedRef.current && !manualPauseRef.current && !movedUp) {
+      if (!isAtLatest) scrollToBottom()
+      setShowJumpToLatest(false)
+      return
+    }
     if (manualPauseRef.current && !(scrollTowardLatestRef.current && isAtLatest)) {
       pinnedRef.current = false
       setShowJumpToLatest(true)
@@ -137,7 +175,7 @@ export default function ChatView({ chatId }: { chatId: string }): JSX.Element {
     }
     pinnedRef.current = isAtLatest
     setShowJumpToLatest(!isAtLatest)
-  }, [])
+  }, [scrollToBottom])
 
   // A deliberate upward gesture opts out of follow mode immediately, even
   // when the reader is still within the tail threshold. New streamed tokens

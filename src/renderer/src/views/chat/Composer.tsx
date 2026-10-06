@@ -143,6 +143,17 @@ export default function Composer({ chat, promptSeed, onSubmit }: ComposerProps):
   const paletteVisible =
     matching.length > 0 && focused && !mentionVisible && paletteDismissed !== draft
 
+  // A dismissal holds for that one "@" and that one "/" text only. Once the
+  // caret leaves it, or the text moves on (a send clears it), the next "@"
+  // or "/" opens its menu again — even one typed at the same spot later.
+  const mentionStart = mention?.start ?? null
+  useEffect(() => {
+    if (mentionDismissed !== null && mentionStart !== mentionDismissed) setMentionDismissed(null)
+  }, [mentionStart, mentionDismissed])
+  useEffect(() => {
+    if (paletteDismissed !== null && draft !== paletteDismissed) setPaletteDismissed(null)
+  }, [draft, paletteDismissed])
+
   const hasContent = draft.trim().length > 0 || attachments.length > 0
   // Non-empty text OR at least one image, app connected. Busy is fine: the
   // message then guides the running turn. There is deliberately no check on
@@ -264,14 +275,18 @@ export default function Composer({ chat, promptSeed, onSubmit }: ComposerProps):
   }
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>): void => {
+    // Enter that confirms an input method's composition (Japanese, Chinese,
+    // Korean) belongs to the IME, not to Send.
+    if (e.nativeEvent.isComposing) return
     const menu = mentionVisible ? ranked.length : paletteVisible ? matching.length : 0
     if (mentionVisible || paletteVisible) {
       const move = (delta: number): void => {
-        if (menu === 0) return
         if (mentionVisible) setMentionIndex((i) => (i + delta + menu) % menu)
         else setCommandIndex((i) => (i + delta + menu) % menu)
       }
-      if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+      // A menu with nothing in it ("@team", no such file) only says so: the
+      // keys stay the field's, or Enter would do nothing until Esc.
+      if (menu > 0 && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
         e.preventDefault()
         move(e.key === 'ArrowUp' ? -1 : 1)
         return
@@ -284,10 +299,9 @@ export default function Composer({ chat, promptSeed, onSubmit }: ComposerProps):
         else setPaletteDismissed(draft)
         return
       }
-      if (mentionVisible && (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey))) {
+      if (menu > 0 && mentionVisible && (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey))) {
         e.preventDefault()
-        const path = ranked[Math.min(mentionIndex, ranked.length - 1)]
-        if (path) pickMention(path)
+        pickMention(ranked[Math.min(mentionIndex, ranked.length - 1)])
         return
       }
       if (paletteVisible && e.key === 'Tab' && !e.shiftKey) {

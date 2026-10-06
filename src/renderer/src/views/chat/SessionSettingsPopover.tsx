@@ -17,8 +17,8 @@
 // every session — the CLI pushes a change to the others at once — so the
 // popover says so rather than letting it look per-chat.
 
-import { useCallback, useRef, useState } from 'react'
-import type { JSX } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import type { JSX, RefObject } from 'react'
 import type { ACPConfigChoice, ACPConfigOption } from '@shared/acp'
 import type { ChatDetail } from '@shared/model'
 import { call, useApp } from '@renderer/state/store'
@@ -109,7 +109,31 @@ function currentChoice(option: ACPConfigOption | undefined): ACPConfigChoice | u
 export default function SessionSettingsButton({ chat }: { chat: ChatDetail }): JSX.Element | null {
   const [open, setOpen] = useState(false)
   const anchorRef = useRef<HTMLButtonElement>(null)
-  const close = useCallback(() => setOpen(false), [])
+  const panelRef = useRef<HTMLDivElement>(null)
+  const close = useCallback(() => {
+    // Hand the focus back to the button, or Escape strands a keyboard user
+    // on <body> as the popover unmounts.
+    const active = document.activeElement
+    if (active && active !== document.body && panelRef.current?.contains(active)) {
+      anchorRef.current?.focus()
+    }
+    setOpen(false)
+  }, [])
+  // The popover is portalled to the end of <body>, so Tab from the button
+  // never reaches it: opening moves the focus in, onto the current
+  // permission (or the first control). After the popover's off-screen
+  // measuring paint, like the model menu's search field.
+  useEffect(() => {
+    if (!open) return
+    const id = setTimeout(() => {
+      const panel = panelRef.current
+      const target =
+        panel?.querySelector<HTMLElement>('[role="radio"][aria-checked="true"]') ??
+        panel?.querySelector<HTMLElement>('button, input, [tabindex="0"]')
+      target?.focus()
+    }, 0)
+    return () => clearTimeout(id)
+  }, [open])
   const options = settingsOptions(chat.configOptions)
   if (options.length === 0) return null
 
@@ -140,14 +164,20 @@ export default function SessionSettingsButton({ chat }: { chat: ChatDetail }): J
         placement="up"
         className="session-settings"
       >
-        <SessionSettingsPanel chat={chat} />
+        <SessionSettingsPanel chat={chat} panelRef={panelRef} />
       </Popover>
     </div>
   )
 }
 
 /** The popover's body; the harness lays it out inline. */
-export function SessionSettingsPanel({ chat }: { chat: ChatDetail }): JSX.Element {
+export function SessionSettingsPanel({
+  chat,
+  panelRef
+}: {
+  chat: ChatDetail
+  panelRef?: RefObject<HTMLDivElement>
+}): JSX.Element {
   const app = useApp()
   const options = settingsOptions(chat.configOptions)
   const reasons = modelReasons(chat.configOptions, app?.extensions?.models.models ?? [])
@@ -157,7 +187,7 @@ export function SessionSettingsPanel({ chat }: { chat: ChatDetail }): JSX.Elemen
   }
 
   return (
-    <div className="session-settings-panel" role="dialog" aria-label="Session settings">
+    <div className="session-settings-panel" role="dialog" aria-label="Session settings" ref={panelRef}>
       <div className="session-settings-head">
         <span className="session-settings-title">Settings</span>
         <span className="session-settings-caption">Applies to all sessions</span>

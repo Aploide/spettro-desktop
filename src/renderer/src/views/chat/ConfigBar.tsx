@@ -184,13 +184,11 @@ function currentChoice(kind: SelectKind): ACPConfigChoice | undefined {
 function CategoryIcon({ category }: { category: string }): JSX.Element {
   switch (category) {
     case 'mode':
-      // slider.horizontal.3
+      // A dot in the mode's colour. Not the sliders glyph it used to be:
+      // that is the settings button's, right beside this chip.
       return (
         <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden>
-          <path d="M1.5 4h13M1.5 8h13M1.5 12h13" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
-          <circle cx="10.5" cy="4" r="1.8" fill="var(--surface-raised)" stroke="currentColor" strokeWidth="1.3" />
-          <circle cx="5" cy="8" r="1.8" fill="var(--surface-raised)" stroke="currentColor" strokeWidth="1.3" />
-          <circle cx="11.5" cy="12" r="1.8" fill="var(--surface-raised)" stroke="currentColor" strokeWidth="1.3" />
+          <circle cx="8" cy="8" r="3.2" fill="currentColor" />
         </svg>
       )
     case 'model':

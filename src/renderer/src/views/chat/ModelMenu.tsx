@@ -12,7 +12,8 @@
 // catalog doesn't know still shows, just without them.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { JSX, KeyboardEvent } from 'react'
+import { createPortal } from 'react-dom'
+import type { JSX, KeyboardEvent, RefObject } from 'react'
 import type { ACPConfigChoice, ACPConfigOption } from '@shared/acp'
 import type { ModelEntry } from '@shared/extensions'
 import type { ChatDetail } from '@shared/model'
@@ -122,7 +123,16 @@ export default function ModelMenu({ chat }: { chat: ChatDetail }): JSX.Element |
   const [open, setOpen] = useState(false)
   const [manage, setManage] = useState(false)
   const anchorRef = useRef<HTMLButtonElement>(null)
-  const close = useCallback(() => setOpen(false), [])
+  const panelRef = useRef<HTMLDivElement>(null)
+  const close = useCallback(() => {
+    // The search field had the focus; Escape must hand it back to the
+    // button rather than strand it on <body> as the popover unmounts.
+    const active = document.activeElement
+    if (active && active !== document.body && panelRef.current?.contains(active)) {
+      anchorRef.current?.focus()
+    }
+    setOpen(false)
+  }, [])
   const current = currentModelName(option)
   if (!option || option.kind.type !== 'select') return null
   const name = current ?? 'Choose a model'
@@ -144,6 +154,7 @@ export default function ModelMenu({ chat }: { chat: ChatDetail }): JSX.Element |
       </button>
       <Popover anchorRef={anchorRef} open={open} onClose={close} placement="up" align="end" className="model-menu">
         <ModelMenuPanel
+          panelRef={panelRef}
           option={option}
           catalog={app?.extensions?.models.models ?? []}
           onPick={(value) => {
@@ -154,23 +165,39 @@ export default function ModelMenu({ chat }: { chat: ChatDetail }): JSX.Element |
             }
           }}
           onManage={() => {
-            setOpen(false)
+            close()
             setManage(true)
           }}
         />
       </Popover>
-      {manage && <ModelPickerView chatId={chat.id} onClose={() => setManage(false)} />}
+      {/* Into <body>, like the popover: a window-wide sheet should not hang
+          off the composer's DOM, where any stacking context or containing
+          block an ancestor grows would box it in. Closing hands the focus
+          back to the button that opened it. */}
+      {manage &&
+        createPortal(
+          <ModelPickerView
+            chatId={chat.id}
+            onClose={() => {
+              setManage(false)
+              anchorRef.current?.focus()
+            }}
+          />,
+          document.body
+        )}
     </div>
   )
 }
 
 /** The menu's body: search, sections, and the way to the full list. */
 export function ModelMenuPanel({
+  panelRef,
   option,
   catalog,
   onPick,
   onManage
 }: {
+  panelRef?: RefObject<HTMLDivElement>
   option: ACPConfigOption
   catalog: ModelEntry[]
   onPick: (value: string) => void
@@ -211,7 +238,7 @@ export function ModelMenuPanel({
 
   let index = -1
   return (
-    <div className="model-menu-panel" role="dialog" aria-label="Choose a model">
+    <div className="model-menu-panel" role="dialog" aria-label="Choose a model" ref={panelRef}>
       <div className="model-menu-search">
         <Icon name="magnifyingglass" size={13} />
         <input

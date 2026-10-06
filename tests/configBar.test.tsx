@@ -8,7 +8,7 @@
 // that something is *absent*.
 
 import { describe, expect, it, vi, beforeEach } from 'vitest'
-import { render, screen, cleanup, fireEvent } from '@testing-library/react'
+import { act, render, screen, cleanup, fireEvent } from '@testing-library/react'
 import ConfigBar, { nextMode } from '@renderer/views/chat/ConfigBar'
 import type { ChatDetail } from '@shared/model'
 import type { ACPConfigOption } from '@shared/acp'
@@ -174,6 +174,18 @@ describe('the settings popover', () => {
       (n) => n.textContent ?? ''
     )
   }
+
+  it('takes the focus as it opens, onto the current choice, and gives it back on Escape', async () => {
+    open([permission('restricted'), size('large')])
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0))
+    })
+    const current = screen.getByRole('radio', { checked: true, name: /Restricted/ })
+    expect(document.activeElement).toBe(current)
+    fireEvent.keyDown(current, { key: 'Escape' })
+    expect(screen.queryByRole('dialog', { name: 'Session settings' })).toBeNull()
+    expect(document.activeElement).toBe(screen.getByTestId('session-settings'))
+  })
 
   it('labels workflow size tiers in agents, read from the tier’s own description', () => {
     open([size('large')])

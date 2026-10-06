@@ -936,9 +936,14 @@
   text-decoration-color: color-mix(in srgb, var(--text-tertiary) 70%, transparent);
 }
 
-/* The task under way shimmers, the way "Thinking…" does in the transcript. */
+/* The task under way shimmers, the way "Thinking…" does in the transcript —
+   only while the agent is actually working: a turn that was stopped leaves
+   its task "in progress", and a shimmer then would say something runs. */
 .todo-item--in_progress .todo-text {
   font-weight: 500;
+}
+
+.todo-list--busy .todo-item--in_progress .todo-text {
   background-image: linear-gradient(
     90deg,
     var(--text-primary) 0%,
@@ -964,7 +969,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .todo-item--in_progress .todo-text {
+  .todo-list--busy .todo-item--in_progress .todo-text {
     animation: none;
     background: none;
     color: var(--text-primary);

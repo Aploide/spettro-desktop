@@ -63,7 +63,10 @@ export default function TodoList({
     entries.find((e) => e.status === 'pending' && !e.blocked)
 
   return (
-    <div className={'todo-list' + (open ? ' todo-list--open' : '')} data-testid="todo-list">
+    <div
+      className={'todo-list' + (open ? ' todo-list--open' : '') + (busy ? ' todo-list--busy' : '')}
+      data-testid="todo-list"
+    >
       <button
         type="button"
         className="todo-head"

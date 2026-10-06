@@ -264,6 +264,31 @@ describe('@-mentions', () => {
     fireEvent.keyDown(input(), { key: 'Escape' })
     expect(interrupted).toBe(true)
   })
+  it('sends with Enter when "@" matches no file, rather than swallowing the key', async () => {
+    render(<Composer chat={chat()} />)
+    await openMenu('ping @team')
+    expect(screen.getByTestId('mention-menu').textContent).toContain('No file matches')
+    fireEvent.keyDown(input(), { key: 'Enter' })
+    expect(sent()).toEqual([['c1', 'ping @team', [], []]])
+  })
+
+  it('opens again for the next "@" after an Esc, even typed at the same spot', async () => {
+    render(<Composer chat={chat()} />)
+    await openMenu('@sav')
+    fireEvent.keyDown(input(), { key: 'Escape' })
+    expect(screen.queryByTestId('mention-menu')).toBeNull()
+    type('hello')
+    fireEvent.keyDown(input(), { key: 'Enter' })
+    await openMenu('@sav')
+    expect(screen.getByTestId('mention-menu')).toBeTruthy()
+  })
+
+  it('leaves Enter to an input method composing a word', () => {
+    render(<Composer chat={chat()} />)
+    type('こんにちは')
+    fireEvent.keyDown(input(), { key: 'Enter', isComposing: true })
+    expect(sent()).toEqual([])
+  })
 })
 
 describe('the slash commands', () => {
@@ -308,6 +333,17 @@ describe('the model menu', () => {
     fireEvent.click(button)
     fireEvent.click(screen.getByRole('option', { name: /GPT-5/ }))
     expect(calls).toContainEqual(['setSelectOption', ['c1', 'model', 'openai:gpt-5']])
+  })
+
+  it('hands the focus back to the button when Escape closes it', async () => {
+    render(<Composer chat={chat()} />)
+    const button = screen.getByTestId('model-button')
+    fireEvent.click(button)
+    const search = screen.getByLabelText('Search models')
+    search.focus()
+    fireEvent.keyDown(search, { key: 'Escape' })
+    expect(screen.queryByLabelText('Search models')).toBeNull()
+    expect(document.activeElement).toBe(button)
   })
 
   it('asks for a model when none is set (a fresh config reports ":")', () => {

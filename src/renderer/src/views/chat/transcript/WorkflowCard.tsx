@@ -444,7 +444,7 @@ function phaseState(phase: WorkflowPhase): PhaseState {
  * most wants to see among work that is already over. Survivors stay in
  * dispatch order — reordering them would make the list churn as it fills.
  */
-function capMembers(
+export function capMembers(
   members: MemberCall[],
   cap: number
 ): { shown: MemberCall[]; hidden: number } {
@@ -454,7 +454,9 @@ function capMembers(
     if (member.status === 'running' || member.status === 'pending') keep.add(member)
   }
   let budget = Math.max(cap - keep.size, 0)
-  for (const status of ['failed', 'done'] as const) {
+  // A member cut off by the run ending is as unfinished as a failure, and
+  // just as worth a row.
+  for (const status of ['failed', 'stopped', 'done'] as const) {
     for (const member of members) {
       if (budget === 0) break
       if (member.status !== status || keep.has(member)) continue
@@ -560,6 +562,7 @@ function summaryText(run: WorkflowRun): string {
   if (counts.total === 0) return run.status === 'failed' ? 'failed' : 'no agents'
   const parts = [`${counts.total} ${counts.total === 1 ? 'agent' : 'agents'}`]
   if (counts.failed > 0) parts.push(`${counts.failed} failed`)
+  if (counts.stopped > 0) parts.push(`${counts.stopped} stopped`)
   if (counts.cached > 0) parts.push(`${counts.cached} replayed`)
   return parts.join(' · ')
 }

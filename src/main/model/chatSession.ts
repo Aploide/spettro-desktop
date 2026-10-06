@@ -47,6 +47,7 @@ const STEERING_DELIVERED = '✔ steering delivered'
 const LOCAL_COMMANDS = new Set([
   'help',
   'mode',
+  'next',
   'models',
   'model',
   'permission',
@@ -61,18 +62,28 @@ const LOCAL_COMMANDS = new Set([
   'hooks',
   'diff',
   'ultra',
+  'ultracode',
   'workflows',
+  'workflow',
   'workflow-size',
   'skills',
-  'clear'
+  'clear',
+  'init',
+  'approve'
 ])
 
-/** Whether `text` is one of those commands (`/workflows run …` is a turn). */
+/** Whether `text` is one of those commands. The CLI matches the name in any
+ *  case; `/workflows run …` (or `start`, or the singular) and `/plan <task>`
+ *  are turns, bare `/plan` only switches the mode. */
 export function isLocalCommand(text: string): boolean {
-  const match = /^\/(\S+)(.*)$/s.exec(text.trim())
-  if (!match) return false
-  if (match[1] === 'workflows' && /^\s*run\b/.test(match[2])) return false
-  return LOCAL_COMMANDS.has(match[1])
+  const fields = text.trim().split(/\s+/)
+  const name = /^\/(\S+)$/.exec(fields[0] ?? '')?.[1]?.toLowerCase()
+  if (name === undefined) return false
+  if (name === 'plan') return fields.length === 1
+  if ((name === 'workflows' || name === 'workflow') && /^(?:run|start)$/i.test(fields[1] ?? '')) {
+    return false
+  }
+  return LOCAL_COMMANDS.has(name)
 }
 
 /** The longest title a first prompt is made into (derivedTitle): about what
@@ -345,6 +356,9 @@ export class ChatSession {
   // -------------------------------------------------------------------------
 
   setBusy(value: boolean): void {
+    // A slash command's reply ends with its turn: anything the agent says
+    // after that (a background run finishing) is its own, in markdown.
+    if (!value) this.commandTurn = false
     if (this.isBusy === value) return
     this.isBusy = value
     this.emitMeta({ isBusy: value })
@@ -713,6 +727,15 @@ export class ChatSession {
     return this.turnTool(toolCallId)?.tool ?? null
   }
 
+  /** Whether any message here went to the model — not just the CLI's own
+   *  slash commands, which leave the agent nothing to remember. */
+  hasModelTurns(): boolean {
+    return this.items.some(
+      (item) =>
+        item.kind === 'message' && item.message.role === 'user' && !isLocalCommand(item.message.text)
+    )
+  }
+
   /** Marks a card the user turned down in its approval (ToolCallItem.denied). */
   markDenied(toolCallId: string): void {
     const item = this.turnTool(toolCallId)
@@ -735,6 +758,9 @@ export class ChatSession {
   }
 
   private beginTurn(): void {
+    // Set again by appendUserMessage when the turn is a slash command; a
+    // turn started any other way (a steer running as its own) is the model's.
+    this.commandTurn = false
     this.turnStart = this.items.length
     this.turnIds.clear()
     this.turnSeq = 0

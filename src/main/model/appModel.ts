@@ -1327,7 +1327,11 @@ export class AppModel extends EventEmitter {
         return storedId
       } catch {
         if (agent !== this.agent) return null
-        session.appendNotice("Couldn't restore this chat's earlier context — starting fresh.", false)
+        // A chat that only ever ran the CLI's own slash commands (/help…)
+        // has no session the CLI saved, and no context to lose either.
+        if (session.hasModelTurns()) {
+          session.appendNotice("Couldn't restore this chat's earlier context — starting fresh.", false)
+        }
       }
     }
     try {

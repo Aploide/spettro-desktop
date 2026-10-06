@@ -644,6 +644,28 @@ describe('reopening saved chats', () => {
     ])
   })
 
+  it('say the context is gone only for a chat that had some', async () => {
+    // The CLI saves no session for a chat that only ran its own slash
+    // commands, so resuming one fails — with nothing lost to report.
+    const commandsOnly = stored('a', 'old-a')
+    const first = commandsOnly.items[0]
+    if (first.kind === 'message') first.message.text = '/help'
+    liveModel([commandsOnly, stored('b', 'old-b')])
+    fake.handlers['session/resume'] = () => {
+      throw new Reply(rpcError('session not found'))
+    }
+    const notices = (id: string): string[] =>
+      (model.sessionById(id)?.items ?? []).flatMap((i) =>
+        i.kind === 'message' && i.message.role === 'notice' ? [i.message.text] : []
+      )
+    model.openChat('a')
+    await settle()
+    expect(notices('a')).toEqual([])
+    model.openChat('b')
+    await settle()
+    expect(notices('b')).toEqual(["Couldn't restore this chat's earlier context — starting fresh."])
+  })
+
   it('makes a send during the resume wait for it, never starting a new session', async () => {
     liveModel([stored('a', 'old-a')])
     const resume = deferred<JSONValue>()

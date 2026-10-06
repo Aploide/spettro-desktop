@@ -16,6 +16,8 @@ import {
   parseCompactTokens,
   parseRenderedWorkflow,
   runTitle,
+  type MemberCall,
+  type OrchStatus,
   type TranscriptRow,
   type WorkflowRun
 } from '@renderer/views/chat/transcript/orchestration'
@@ -935,5 +937,21 @@ describe('runs without an id', () => {
       ['FIRST'],
       ['SECOND']
     ])
+  })
+})
+
+describe('a long phase trimmed to its row cap', () => {
+  it('keeps members cut off by the run ending ahead of ones that finished', async () => {
+    const { capMembers } = await import('@renderer/views/chat/transcript/WorkflowCard')
+    const call = (instance: string, status: OrchStatus): MemberCall =>
+      ({ instance, status }) as MemberCall
+    const members = [
+      ...['a', 'b', 'c', 'd'].map((i) => call(i, 'done')),
+      call('cut', 'stopped'),
+      call('bad', 'failed')
+    ]
+    const { shown, hidden } = capMembers(members, 3)
+    expect(shown.map((m) => m.instance)).toEqual(['a', 'cut', 'bad'])
+    expect(hidden).toBe(3)
   })
 })

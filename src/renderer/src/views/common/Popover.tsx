@@ -74,11 +74,24 @@ export default function Popover({
       const spaceBelow = vh - a.bottom - MARGIN - GAP
       // Keep the preferred side unless the other one has meaningfully more
       // room — a menu that flips on every open is worse than a short one.
+      // Up holds while the panel fits there; one that doesn't (the settings
+      // panel over the new-session composer, mid-window) opens downward when
+      // it fits there, else on whichever side shows more of it.
       const up =
-        placement === 'up' ? spaceAbove > 120 || spaceAbove >= spaceBelow : spaceBelow < 160 && spaceAbove > spaceBelow
+        placement === 'up'
+          ? panelH <= spaceAbove || (panelH > spaceBelow && spaceAbove >= spaceBelow)
+          : spaceBelow < 160 && spaceAbove > spaceBelow
 
-      const maxHeight = Math.max(120, Math.min(panelH, up ? spaceAbove : spaceBelow))
-      const top = up ? Math.max(MARGIN, a.top - GAP - Math.min(panelH, maxHeight)) : a.bottom + GAP
+      let maxHeight = Math.max(120, Math.min(panelH, up ? spaceAbove : spaceBelow))
+      let top = up ? Math.max(MARGIN, a.top - GAP - Math.min(panelH, maxHeight)) : a.bottom + GAP
+      if (panelH > maxHeight && panelH <= vh - 2 * MARGIN) {
+        // Too tall for either side but not for the window (the settings
+        // panel over the new-session composer, mid-window): slide it along
+        // so all of it shows, over the anchor if need be, rather than a
+        // clipped panel that hides its last section behind a scroll.
+        maxHeight = panelH
+        top = up ? MARGIN : vh - MARGIN - panelH
+      }
 
       let left = align === 'end' ? a.right - panelW : a.left
       left = Math.min(Math.max(MARGIN, left), Math.max(MARGIN, vw - panelW - MARGIN))

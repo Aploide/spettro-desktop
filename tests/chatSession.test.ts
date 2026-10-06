@@ -10,7 +10,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { ChatSession } from '@main/model/chatSession'
+import { ChatSession, isLocalCommand } from '@main/model/chatSession'
 import { AppModel } from '@main/model/appModel'
 import type { ACPToolCallEvent } from '@shared/acp'
 import type { StoredSession } from '@shared/model'
@@ -312,6 +312,35 @@ describe('a slash command’s reply', () => {
       i.kind === 'message' && i.message.role === 'assistant' ? [i.message.plain === true] : []
     )
     expect(replies).toEqual([true, false, false])
+  })
+})
+
+describe('isLocalCommand', () => {
+  it('knows the commands the CLI answers itself, in any case', () => {
+    for (const text of ['/help', '/HELP', ' /next plan', '/plan', '/workflow', '/workflows show audit', '/ultracode', '/init']) {
+      expect(isLocalCommand(text), text).toBe(true)
+    }
+  })
+
+  it('leaves the ones that run a turn, and plain prompts, to markdown', () => {
+    for (const text of ['/plan add a login page', '/workflow run audit', '/workflows start audit', '/goal ship it', '/compact', 'help me', '/']) {
+      expect(isLocalCommand(text), text).toBe(false)
+    }
+  })
+
+  it('ends with its turn: a later reply outside any turn is markdown', () => {
+    const s = new ChatSession('/w/acme')
+    s.appendUserMessage('/help')
+    s.setBusy(true)
+    s.appendAssistant('commands:')
+    s.endStreaming()
+    s.setBusy(false)
+    s.appendReasoning('The run is done.')
+    s.appendAssistant('The **background** run finished.')
+    const plain = s.items.flatMap((i) =>
+      i.kind === 'message' && i.message.role === 'assistant' ? [i.message.plain === true] : []
+    )
+    expect(plain).toEqual([true, false])
   })
 })
 

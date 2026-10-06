@@ -124,6 +124,18 @@
   margin: var(--sp-xs) 0;
 }
 
+/* A row out of sight costs no style, layout or paint until it comes near:
+   a long chat is hundreds of them, and every one was laid out again for each
+   streamed chunk, and kept its animations running scrolled away. Until a row
+   has been drawn once its height is a guess; after that it is remembered.
+   The clip margin lets a row's hover fills and focus rings, which reach a
+   few pixels past it, still be drawn. */
+.chat-transcript-inner > :not(.chat-run-ticker, .chat-bottom-anchor, .chat-welcome) {
+  content-visibility: auto;
+  contain-intrinsic-block-size: auto 96px;
+  overflow-clip-margin: 16px;
+}
+
 .chat-bottom-anchor {
   height: 1px;
   flex: none;
@@ -545,7 +557,7 @@
     0 0 0 3px color-mix(in srgb, var(--accent) 10%, transparent);
 }
 
-/* 1 to 12 lines of 22px; the component sets the height from the content
+/* 1 to 12 lines of 22px: the composer's grows with its content (below),
    and max-height stops it, after which the field scrolls. */
 .composer-input {
   width: 100%;
@@ -562,6 +574,12 @@
   max-height: calc(12 * 22px + 20px);
   overflow-y: auto;
   user-select: text;
+}
+
+/* Sized by its content in layout itself: measuring the field from script
+   forced a layout of the whole page on every key. */
+.composer-input--grow {
+  field-sizing: content;
 }
 
 .composer-input::placeholder {
@@ -974,7 +992,8 @@
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
-  animation: todo-shimmer 2.4s linear infinite;
+  /* 30 steps a second, like the transcript's shimmer (transcript.css). */
+  animation: todo-shimmer 2.4s steps(72) infinite;
 }
 
 @keyframes todo-shimmer {

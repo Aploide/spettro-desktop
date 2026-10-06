@@ -63,9 +63,13 @@ export function ActivationText({
     <>
       {pieces.map((piece, i) =>
         piece.active ? (
-          <span className={muted ? 'glow glow--muted' : 'glow'} key={i}>
-            {piece.text}
-          </span>
+          muted ? (
+            <span className="glow glow--muted" key={i}>
+              {piece.text}
+            </span>
+          ) : (
+            <LitPhrase text={piece.text} key={i} />
+          )
         ) : (
           // Plain prose needs no element of its own: the glow paints on its own
           // glyphs and never outside them, so there is nothing here to defend
@@ -76,6 +80,35 @@ export function ActivationText({
       )}
     </>
   )
+}
+
+/**
+ * A lit phrase, which stands still while it is out of sight. A sent
+ * message's glow scrolled off the top of a long chat kept restyling and
+ * repainting its text every frame for as long as the chat was open.
+ */
+function LitPhrase({ text }: { text: string }): JSX.Element {
+  const ref = useRef<HTMLSpanElement>(null)
+  useEffect(() => watchSight(ref.current), [])
+  return (
+    <span className="glow" ref={ref}>
+      {text}
+    </span>
+  )
+}
+
+/** One observer for every lit phrase: marks the ones out of sight
+ *  (`data-unseen`, which activation.css pauses). */
+let sight: IntersectionObserver | null = null
+
+function watchSight(el: HTMLElement | null): (() => void) | undefined {
+  if (!el || typeof IntersectionObserver !== 'function') return undefined
+  sight ??= new IntersectionObserver((entries) => {
+    for (const entry of entries) entry.target.toggleAttribute('data-unseen', !entry.isIntersecting)
+  })
+  const observer = sight
+  observer.observe(el)
+  return () => observer.unobserve(el)
 }
 
 interface Props {

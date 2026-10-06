@@ -101,7 +101,15 @@ textarea.glow-input::selection {
   /* Weight does the work the pill used to: a lit phrase is heavier than the
      prose around it even where the hue happens to sit close to it. */
   font-weight: 600;
-  animation: glow-drift 7s linear infinite;
+  /* In steps of 30 a second: the band moves about a pixel a step, too little
+     to see as one, and the text is repainted a quarter as often as on every
+     frame of a 120 Hz display. */
+  animation: glow-drift 7s steps(210) infinite;
+}
+
+/* Out of sight (ActivationGlow.tsx watches): it stands still. */
+.glow[data-unseen] {
+  animation-play-state: paused;
 }
 
 /* Unhurried on purpose. This sits under the cursor while someone is typing,

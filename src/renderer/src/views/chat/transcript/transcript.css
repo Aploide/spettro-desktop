@@ -269,7 +269,10 @@
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
-  animation: tr-shimmer 2s linear infinite;
+  /* 30 steps a second: a moving background under clipped text is repainted
+     on the main thread for every step, and every frame at 120 Hz cost more
+     than the rest of a running turn's page. */
+  animation: tr-shimmer 2s steps(60) infinite;
 }
 
 @keyframes tr-shimmer {

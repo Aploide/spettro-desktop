@@ -23,7 +23,7 @@
 // reconnecting the field stays open; only Send waits. With no model
 // connected at all, a bar above the card says so and leads to Settings.
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { JSX, ReactNode } from 'react'
 import { ActivationTextarea, WorkflowHint } from './ActivationGlow'
 import type { ACPCommand, ACPConfigOption } from '@shared/acp'
@@ -241,13 +241,8 @@ export default function Composer({ chat, promptSeed, dock, onSubmit }: ComposerP
     return () => clearTimeout(id)
   }, [hint])
 
-  // Auto-grow: 1–12 lines; the CSS max-height stops it and scrolls.
-  useLayoutEffect(() => {
-    const el = textareaRef.current
-    if (!el) return
-    el.style.height = 'auto'
-    el.style.height = `${el.scrollHeight}px`
-  }, [draft])
+  // Auto-grow, 1–12 lines, is the stylesheet's (chat.css .composer-input):
+  // measuring the field here forced a layout of the page on every key.
 
   const addAttachment = useCallback(async (blob: Blob): Promise<void> => {
     const attachment = await attachmentFrom(blob)
@@ -501,7 +496,7 @@ export default function Composer({ chat, promptSeed, dock, onSubmit }: ComposerP
                 say so while it is being typed rather than after the fact. */}
             <ActivationTextarea
               textareaRef={textareaRef}
-              className="composer-input"
+              className="composer-input composer-input--grow"
               rows={1}
               value={draft}
               placeholder={placeholder}

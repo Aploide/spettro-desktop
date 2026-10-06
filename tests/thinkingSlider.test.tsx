@@ -240,6 +240,23 @@ describe('the meteor', () => {
     expect(meteor()).not.toBeNull()
   })
 
+  it('flies once, from where it set out, while the CLI catches up one option at a time', async () => {
+    const { rerender } = render(<ThinkingSlider chat={chat(options({ thinking: 'low', ultra: false }))} />)
+    press('End')
+    const first = meteor()
+    expect(first).not.toBeNull()
+    // Both calls have returned, but only the first option update is in:
+    // the CLI's ultra=true arrives a beat after its reply.
+    await settle()
+    rerender(<ThinkingSlider chat={chat(options({ thinking: 'high', ultra: false }))} />)
+    await settle()
+    expect(slider().getAttribute('aria-valuetext')).toBe('Ultra')
+    expect(meteor()).toBe(first)
+    rerender(<ThinkingSlider chat={chat(options({ thinking: 'high', ultra: true }))} />)
+    await settle()
+    expect(meteor()).toBe(first)
+  })
+
   it('does not play for a slider drawn with Ultra already on, or re-drawn there', () => {
     const { rerender } = render(
       <ThinkingSlider chat={chat(options({ thinking: 'high', ultra: true }))} />
@@ -272,7 +289,7 @@ describe('the meteor', () => {
       rerender(<ThinkingSlider chat={chat(options({ thinking: 'high', ultra: true }))} />)
       expect(meteor()).not.toBeNull()
       await act(async () => {
-        vi.advanceTimersByTime(1000)
+        vi.advanceTimersByTime(1300)
       })
       expect(meteor()).toBeNull()
       expect(document.querySelector('.thinking-slider--ultra')).not.toBeNull()

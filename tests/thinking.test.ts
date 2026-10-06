@@ -14,7 +14,7 @@ import {
   previewState,
   thinkingState
 } from '@renderer/views/chat/thinking'
-import { planMeteor } from '@renderer/views/chat/meteor'
+import { meteorTiming, planMeteor } from '@renderer/views/chat/meteor'
 
 /** thinkingConfigOption: Off, Low, Medium, High, X-High, Max. */
 function thinking(value: string, values = ['off', 'low', 'medium', 'high', 'x-high', 'max']): ACPConfigOption {
@@ -192,8 +192,42 @@ describe('whether the model reasons', () => {
 })
 
 describe('the meteor', () => {
+  // The slider body the numbers were tuned in: a 36px band, a 300px rail.
+  const body = { railLeft: 20, railWidth: 300, y: 18, height: 36, toFrac: 1 }
+
   it('is the same run for the same seed, so a frozen frame is reproducible', () => {
-    expect(planMeteor(10, 300, 20, 40, 7)).toEqual(planMeteor(10, 300, 20, 40, 7))
-    expect(planMeteor(10, 300, 20, 40, 7)).not.toEqual(planMeteor(10, 300, 20, 40, 8))
+    const run = (seed: number): unknown => planMeteor({ ...body, fromFrac: 0 }, seed)
+    expect(run(7)).toEqual(run(7))
+    expect(run(7)).not.toEqual(run(8))
+  })
+
+  it('runs about a second from Low, shorter from Max, and lands before it cools', () => {
+    const low = meteorTiming(0, 1)
+    const max = meteorTiming(0.8, 1)
+    expect(low.totalMs).toBeGreaterThanOrEqual(900)
+    expect(low.totalMs).toBeLessThanOrEqual(1200)
+    expect(max.totalMs).toBeLessThan(low.totalMs)
+    for (const t of [low, max]) {
+      expect(t.lands).toBeGreaterThan(0.3)
+      expect(t.lands).toBeLessThan(0.75)
+    }
+  })
+
+  it('sets out from behind Max for a one-step run, so the streak has room to show', () => {
+    expect(meteorTiming(0.8, 1).startFrac).toBeLessThan(0.8)
+    expect(meteorTiming(0, 1).startFrac).toBe(0)
+    const run = planMeteor({ ...body, fromFrac: 0.8 }, 7)
+    // The fill still ends at Max: the streak is drawn on from there.
+    expect(run.fillX).toBe(20 + 0.8 * 300)
+    expect(run.fromX).toBeLessThan(run.fillX)
+  })
+
+  it('throws 40–120 sparks, each out before the run ends', () => {
+    for (const fromFrac of [0, 0.8]) {
+      const run = planMeteor({ ...body, fromFrac }, 7)
+      expect(run.sparks.length).toBeGreaterThanOrEqual(40)
+      expect(run.sparks.length).toBeLessThanOrEqual(120)
+      for (const s of run.sparks) expect(s.born + s.life).toBeLessThanOrEqual(run.total + 1e-9)
+    }
   })
 })

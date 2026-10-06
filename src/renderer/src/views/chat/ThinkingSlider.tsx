@@ -24,7 +24,7 @@ import type { ChatDetail } from '@shared/model'
 import { call, useApp } from '@renderer/state/store'
 import { Icon } from '@renderer/design/icons'
 import Popover from '@renderer/views/common/Popover'
-import { METEOR_LANDS, METEOR_MS, drawMeteor, planMeteor, readPalette } from './meteor'
+import { drawMeteor, meteorTiming, planMeteor, readPalette } from './meteor'
 import {
   PERMISSION_ID,
   RESTRICTED,
@@ -41,6 +41,9 @@ import './thinkingSlider.css'
 
 const OFF_CAPTION = 'Thinking is off — the model answers straight away'
 const PAUSED_CAPTION = 'Ultra is saved, but workflows don’t run under Ask first'
+/** How long a move's preview outlives its calls when the options never come
+ *  round to it (the CLI refused, and rolled the option back). */
+const SETTLE_MS = 1200
 
 interface SliderProps {
   chat: ChatDetail
@@ -63,6 +66,8 @@ export default function ThinkingSlider({
 }: SliderProps): JSX.Element | null {
   const base = thinkingState(chat.configOptions)
   const [pending, setPending] = useState<ThinkingStop | null>(null)
+  // The move's calls have all returned; the preview waits for the options.
+  const [sent, setSent] = useState(false)
   const [drag, setDrag] = useState<number | null>(null)
   const [dismissed, setDismissed] = useState(false)
   const commit = useCommit(chat.id, base)
@@ -82,6 +87,32 @@ export default function ThinkingSlider({
     return () => clearTimeout(id)
   }, [autoFocus])
 
+  // The preview gives way once the options say what it says. A call's reply
+  // and the option update it causes arrive separately, the update a beat
+  // later: clearing the preview on the reply showed the old value for a
+  // frame — Ultra going dark between "thinking high" and "ultra on", which
+  // relaunched the meteor from High. If the options never come round (a
+  // refusal rolls them back), the preview lets go shortly after the calls.
+  const caughtUp =
+    !!base &&
+    !!pending &&
+    base.ultraOn === pending.ultra &&
+    (pending.ultra || base.thinking === pending.id)
+  useEffect(() => {
+    if (!pending) return
+    if (caughtUp) {
+      setPending(null)
+      setSent(false)
+      return
+    }
+    if (!sent) return
+    const id = setTimeout(() => {
+      setPending(null)
+      setSent(false)
+    }, SETTLE_MS)
+    return () => clearTimeout(id)
+  }, [pending, sent, caughtUp])
+
   // "Keep Ask first" dismisses the prompt until Ultra next pauses.
   const paused = !!state?.paused
   useEffect(() => {
@@ -97,27 +128,27 @@ export default function ThinkingSlider({
   const frac = (i: number): number => (last <= 0 ? 0 : Math.max(0, i) / last)
   const ultraIndex = stops.findIndex((s) => s.ultra)
 
-  // A frozen harness frame puts the fill where the head is; live, the CSS
-  // transition is timed to the head's own easing and gets there by itself.
   const flight =
     meteorProgress !== undefined
       ? { from: meteorFrom ?? Math.max(0, ultraIndex - 1), progress: meteorProgress }
       : meteor.flight
-  const landed = meteorProgress !== undefined ? meteorProgress >= METEOR_LANDS : meteor.landed
-  let fillFrac = frac(shown)
-  if (meteorProgress !== undefined) {
-    const u = Math.min(1, meteorProgress / METEOR_LANDS)
-    const from = frac(meteorFrom ?? Math.max(0, ultraIndex - 1))
-    fillFrac = from + (frac(ultraIndex) - from) * (1 - Math.pow(1 - u, 3))
-  }
+  const landed =
+    meteorProgress !== undefined && flight
+      ? meteorProgress >= meteorTiming(frac(flight.from), frac(ultraIndex)).lands
+      : meteor.landed
+  // In flight the meteor's streak *is* the fill: the bar stays where the eye
+  // last saw it and the canvas burns it the rest of the way, so fire and fill
+  // can never come apart. It takes over again, whole, at impact.
+  const fillFrac = flight && !landed ? frac(flight.from) : frac(shown)
 
   const select = (i: number): void => {
     if (disabled || i < 0 || i > last || i === state.index) return
     setPending(stops[i])
+    setSent(false)
     void commit(stops[i]).then((settled) => {
-      // Only the last move in a burst clears the preview, so the thumb never
+      // Only the last move in a burst lets the preview go, so the thumb never
       // steps back through a stale value between two of them.
-      if (settled) setPending(null)
+      if (settled) setSent(true)
     })
   }
 
@@ -509,8 +540,9 @@ function MeteorCanvas({
       // Nothing to draw on (no canvas support): keep the timing, so the
       // thumb still lands and lights.
       if (progress !== undefined) return
-      const landT = setTimeout(() => callbacks.current.onLanded(), METEOR_MS * METEOR_LANDS)
-      const doneT = setTimeout(() => callbacks.current.onDone(), METEOR_MS)
+      const timing = meteorTiming(fromFrac, toFrac)
+      const landT = setTimeout(() => callbacks.current.onLanded(), timing.landsMs)
+      const doneT = setTimeout(() => callbacks.current.onDone(), timing.totalMs)
       return () => {
         clearTimeout(landT)
         clearTimeout(doneT)
@@ -522,8 +554,17 @@ function MeteorCanvas({
     canvas.width = Math.round(width * dpr)
     canvas.height = Math.round(height * dpr)
     // The rail sits inset in the body; the canvas covers the body.
-    const x = (f: number): number => rail.offsetLeft + f * rail.offsetWidth
-    const run = planMeteor(x(fromFrac), x(toFrac), rail.offsetTop + rail.offsetHeight / 2, height, seed)
+    const run = planMeteor(
+      {
+        railLeft: rail.offsetLeft,
+        railWidth: rail.offsetWidth,
+        y: rail.offsetTop + rail.offsetHeight / 2,
+        height,
+        fromFrac,
+        toFrac
+      },
+      seed
+    )
     const palette = readPalette(canvas)
     const paint = (p: number): void => {
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
@@ -537,9 +578,10 @@ function MeteorCanvas({
     let frame = 0
     let landed = false
     const start = performance.now()
+    const lands = run.flight / run.total
     const tick = (now: number): void => {
-      const p = (now - start) / METEOR_MS
-      if (!landed && p >= METEOR_LANDS) {
+      const p = (now - start) / (run.total * 1000)
+      if (!landed && p >= lands) {
         landed = true
         callbacks.current.onLanded()
       }

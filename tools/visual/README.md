@@ -39,11 +39,13 @@ chip, and the composer's glow: a lit phrase, a `+500k` budget directive with its
 variant with its "switch permission" line. `chrome:thinking` lays out the
 thinking slider in every state (High, Ultra lit, Ultra paused with its
 "Switch to Restricted?" prompt, Extra high, Off, a model that doesn't reason)
-and its chip; `chrome:meteor` freezes the meteor at points of its flight, from
-Max and from Low. The meteor is a pure function of its progress, so
-`chrome:meteor&meteorProgress=0.3` (optionally `&meteorFrom=<stop>`) is the
-same frame every time. It is a few pixels tall: `SHOT_SCALE=3` renders any
-scene at three times the density for looking closely.
+and its chip; `chrome:meteor` freezes the meteor at twelve points of its run,
+from Max and from Low: the flight, the impact (from Max at about 0.49, from Low
+at about 0.6) and the cooling into the lit thumb. The meteor is a pure function
+of its progress and a fixed seed, so `chrome:meteor&meteorProgress=0.3`
+(optionally `&meteorFrom=<stop>`, 0 for Low) is the same frame every time. It
+lives in a 36px band: `SHOT_SCALE=3` renders any scene at three times the
+density for looking closely.
 
 ## The app harness
 

@@ -234,12 +234,13 @@ describe('the settings popover', () => {
     expect(screen.getByText('Applies to all sessions')).toBeTruthy()
   })
 
-  it('shows thinking as the slider, permission first, then size', () => {
+  it('leaves thinking to its chip — permission first, then size, no second slider', () => {
     open([size('medium'), thinking('high'), ultra(false), permission('restricted')])
     const sections = Array.from(document.querySelectorAll('.session-settings-section'))
+    expect(sections).toHaveLength(2)
     expect(sections[0].getAttribute('aria-label')).toBe('Permission')
-    expect(sections[1].querySelector('[role="slider"]')).not.toBeNull()
-    expect(sections[2].getAttribute('aria-label')).toBe('Workflow size')
+    expect(sections[1].getAttribute('aria-label')).toBe('Workflow size')
+    expect(document.querySelector('.session-settings-panel [role="slider"]')).toBeNull()
   })
 
   it('stays data-driven — an unknown boolean renders as a switch and toggles', () => {

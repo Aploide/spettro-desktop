@@ -21,22 +21,21 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { JSX, RefObject } from 'react'
 import type { ACPConfigChoice, ACPConfigOption } from '@shared/acp'
 import type { ChatDetail } from '@shared/model'
-import { call, useApp } from '@renderer/state/store'
+import { call } from '@renderer/state/store'
 import { Icon } from '@renderer/design/icons'
 import Popover from '@renderer/views/common/Popover'
-import ThinkingSlider from './ThinkingSlider'
 import { MODEL_ID } from './ModelMenu'
-import { THINKING_ID, ULTRA_ID, modelReasons } from './thinking'
+import { THINKING_ID, ULTRA_ID } from './thinking'
 
 export const MODE_ID = 'mode'
 export const PERMISSION_ID = 'permission'
 export const WORKFLOW_SIZE_ID = 'workflow_size'
 
 /** Options with a control elsewhere: the mode chip, the model button, and
- *  Ultra (the slider's last stop). */
-const ELSEWHERE = new Set([MODE_ID, MODEL_ID, ULTRA_ID])
+ *  the thinking chip, whose slider also holds Ultra (its last stop). */
+const ELSEWHERE = new Set([MODE_ID, MODEL_ID, THINKING_ID, ULTRA_ID])
 /** Shown first, in this order; anything else follows in the CLI's order. */
-const ORDER = [PERMISSION_ID, THINKING_ID, WORKFLOW_SIZE_ID]
+const ORDER = [PERMISSION_ID, WORKFLOW_SIZE_ID]
 
 /** The permission levels in words a first-time user can act on. "YOLO" is
  *  the CLI's name and stays in brackets, so the two can be matched up. */
@@ -203,9 +202,7 @@ export function SessionSettingsPanel({
   chat: ChatDetail
   panelRef?: RefObject<HTMLDivElement>
 }): JSX.Element {
-  const app = useApp()
   const options = settingsOptions(chat.configOptions)
-  const reasons = modelReasons(chat.configOptions, app?.extensions?.models.models ?? [])
   const set = (option: ACPConfigOption, value: string | boolean): void => {
     if (typeof value === 'boolean') void call('setBoolOption', chat.id, option.id, value)
     else void call('setSelectOption', chat.id, option.id, value)
@@ -218,13 +215,6 @@ export function SessionSettingsPanel({
         <span className="session-settings-caption">Applies to all sessions</span>
       </div>
       {options.map((option) => {
-        if (option.id === THINKING_ID) {
-          return (
-            <section className="session-settings-section" key={option.id}>
-              <ThinkingSlider chat={chat} reasons={reasons} />
-            </section>
-          )
-        }
         if (option.kind.type === 'boolean') {
           const on = option.kind.currentValue
           return (

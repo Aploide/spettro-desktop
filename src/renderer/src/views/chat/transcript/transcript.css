@@ -299,6 +299,48 @@
   user-select: text;
 }
 
+/* After /clear: a hairline across the column with the words in the middle. */
+.tr-cleared {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: var(--sp-md) 0;
+  font-size: var(--fs-sm);
+  color: var(--text-tertiary);
+  text-align: center;
+}
+
+.tr-cleared::before,
+.tr-cleared::after {
+  content: '';
+  flex: 1;
+  min-width: 24px;
+  height: 1px;
+  background: var(--hairline);
+}
+
+.tr-cleared-text {
+  user-select: text;
+}
+
+/* What came before it is still there to read, but Spettro no longer has it:
+   dimmed, and brought back while the pointer is on it. */
+.chat-transcript-inner > :has(~ .tr-cleared) {
+  opacity: 0.5;
+  transition: opacity 0.2s ease;
+}
+
+.chat-transcript-inner > :has(~ .tr-cleared):hover,
+.chat-transcript-inner > :has(~ .tr-cleared):focus-within {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-transcript-inner > :has(~ .tr-cleared) {
+    transition: none;
+  }
+}
+
 .tr-error {
   display: flex;
   align-items: center;

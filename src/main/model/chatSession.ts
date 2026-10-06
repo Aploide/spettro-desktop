@@ -72,6 +72,12 @@ const LOCAL_COMMANDS = new Set([
   'approve'
 ])
 
+/** The CLI's whole reply to `/clear` (internal/acp commands.go). */
+const CLEARED_REPLY = 'conversation history cleared'
+
+/** What the transcript says in its place. */
+export const CONTEXT_CLEARED_TEXT = 'Context cleared. Spettro won’t remember the messages above.'
+
 /** Whether `text` is one of those commands. The CLI matches the name in any
  *  case; `/workflows run …` (or `start`, or the singular) and `/plan <task>`
  *  are turns, bare `/plan` only switches the mode. */
@@ -806,6 +812,27 @@ export class ChatSession {
     for (let n = 2; taken(id); n++) id = `${toolCallId}~${n}`
     if (PER_TURN_TOOL_ID.test(toolCallId)) this.turnIds.set(toolCallId, id)
     return id
+  }
+
+  /** At the end of a `/clear` turn, the CLI's reply ("conversation history
+   *  cleared", in monospace like any of its commands) becomes a divider
+   *  saying what it means: everything above is still on screen, but the
+   *  agent no longer has it (ChatMessage.contextCleared). */
+  markContextCleared(): void {
+    const opener = this.items[this.turnStart]
+    if (opener?.kind !== 'message' || opener.message.role !== 'user') return
+    if (opener.message.text.trim().split(/\s+/)[0]?.toLowerCase() !== '/clear') return
+    for (const item of this.items.slice(this.turnStart + 1)) {
+      if (item.kind !== 'message' || item.message.role !== 'assistant') continue
+      if (item.message.text.trim() !== CLEARED_REPLY) continue
+      const message = item.message
+      message.role = 'notice'
+      message.noticeIsError = false
+      message.contextCleared = true
+      message.text = CONTEXT_CLEARED_TEXT
+      delete message.plain
+      this.emitItem(item)
+    }
   }
 
   /** Marks the current streamed bubbles as finished at turn's end. */

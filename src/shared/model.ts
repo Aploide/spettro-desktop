@@ -60,6 +60,10 @@ export interface ChatMessage {
    *  (/help, /ultra, /models…) — column-aligned plain text, which markdown
    *  would fold into one paragraph — shown as written. */
   plain?: boolean
+  /** Notice only: `/clear` emptied the agent's memory here. Drawn as a
+   *  divider, with everything above it dimmed: the transcript still shows
+   *  those messages, but Spettro no longer remembers them. */
+  contextCleared?: boolean
   /** User messages only: the project files @-mentioned in it (relative
    *  paths), so Try again and Edit & resend send them as files again rather
    *  than as the bare text "@src/x.ts". */

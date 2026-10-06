@@ -1011,3 +1011,63 @@ describe('sessions the app started', () => {
     expect(['old-a', 's1', 'scratch-1'].every((id) => prefs.isKnownSession(id))).toBe(true)
   })
 })
+
+describe('/clear', () => {
+  it('turns the CLI’s reply into a divider saying the context is gone', async () => {
+    liveModel()
+    const session = await liveChat()
+    fake.handlers['session/prompt'] = () => {
+      // commands.go: the whole reply to /clear.
+      fake.update('s1', agentChunk('conversation history cleared'))
+      return promptResult({})
+    }
+    model.send(session.id, '/clear', [])
+    await settle()
+    const last = session.items.at(-1)
+    expect(last?.kind === 'message' && last.message).toMatchObject({
+      role: 'notice',
+      contextCleared: true,
+      text: 'Context cleared. Spettro won’t remember the messages above.'
+    })
+  })
+
+  it('leaves the same words alone in an ordinary turn', async () => {
+    liveModel()
+    const session = await liveChat()
+    fake.handlers['session/prompt'] = () => {
+      fake.update('s1', agentChunk('conversation history cleared'))
+      return promptResult({})
+    }
+    model.send(session.id, 'what does /clear print?', [])
+    await settle()
+    const last = session.items.at(-1)
+    expect(last?.kind === 'message' && last.message.role).toBe('assistant')
+  })
+})
+
+describe('an imported conversation', () => {
+  it('replays a failed or interrupted turn as the notice it got, not as "[turn failed: …]"', async () => {
+    liveModel()
+    fake.handlers['session/load'] = () => {
+      fake.update('tui-1', userChunk('hello'))
+      // bridge.go Prompt stores a turn that ended without an answer so.
+      fake.update('tui-1', agentChunk('[turn failed: agent call failed: no API endpoint configured for provider ""]'))
+      fake.update('tui-1', userChunk('again'))
+      fake.update('tui-1', agentChunk('[turn interrupted]'))
+      return { configOptions: [] }
+    }
+    const chatId = await model.importCLISession('tui-1', dir)
+    const session = model.sessionById(chatId ?? '') as ChatSession
+    const lines = session.items.map((i) =>
+      i.kind === 'message' ? `${i.message.role}${i.message.noticeIsError ? '!' : ''}: ${i.message.detail ?? i.message.text}` : ''
+    )
+    expect(lines).toEqual([
+      'user: hello',
+      'notice!: agent call failed: no API endpoint configured for provider ""',
+      'user: again',
+      'notice: Interrupted'
+    ])
+    expect(notices(session)[0]).toMatch(/connect a model/i)
+  })
+})
+

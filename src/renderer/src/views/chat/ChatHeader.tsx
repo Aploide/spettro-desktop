@@ -9,7 +9,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import type { ACPUsage } from '@shared/acp'
-import type { ChatDetail, GitStat } from '@shared/model'
+import type { ChatDetail, GitStat, TurnSummary } from '@shared/model'
 import { call, useApp, useStore } from '@renderer/state/store'
 import { startNewSession, toggleSidebar, toggleTerminal, useShell } from '@renderer/state/shell'
 import { Icon } from '@renderer/design/icons'
@@ -71,7 +71,9 @@ export default function ChatHeader({ chat }: { chat: ChatDetail }): JSX.Element 
       <ReconnectingPill />
       <div className="chat-header-chips">
         {git.files.length > 0 && <GitStatChip git={git} projectPath={chat.projectPath} />}
-        {chat.usage && <ContextMeter usage={chat.usage} />}
+        {chat.usage && (
+          <ContextMeter usage={chat.usage} lastTurn={chat.lastTurn} sessionTokens={chat.sessionTokens} />
+        )}
         <button
           type="button"
           className={'header-btn' + (terminalVisible ? ' header-btn--on' : '')}
@@ -248,11 +250,23 @@ const RING_STROKE = 2.5
 const RING_RADIUS = (RING_SIZE - RING_STROKE) / 2
 const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS
 
-function ContextMeter({ usage }: { usage: ACPUsage }): JSX.Element {
+function ContextMeter({
+  usage,
+  lastTurn,
+  sessionTokens
+}: {
+  usage: ACPUsage
+  lastTurn: TurnSummary | null
+  sessionTokens: number
+}): JSX.Element {
   const [open, setOpen] = useState(false)
   const ref = useDismiss(open, () => setOpen(false))
 
   const fraction = Math.min(1, Math.max(0, usage.used / usage.size))
+  // What the chat has cost: every turn's provider total, added up here; the
+  // CLI's own running count stands in until a turn has been filed.
+  const chatTotal = sessionTokens > 0 ? sessionTokens : (usage.tokensUsed ?? 0)
+  const reply = lastTurn ? lastReplyLine(lastTurn) : null
   const ringColor =
     fraction > 0.9 ? 'var(--diff-removed)' : fraction > 0.75 ? 'var(--mode-yellow)' : 'var(--accent)'
 
@@ -261,7 +275,11 @@ function ContextMeter({ usage }: { usage: ACPUsage }): JSX.Element {
       <button
         type="button"
         className="chip"
-        title="Context window used"
+        data-testid="context-meter"
+        title={
+          `Context: ${formatTokens(usage.used)} of ${formatTokens(usage.size)} tokens` +
+          (chatTotal > usage.used ? ` · this chat ${formatTokens(chatTotal)} in total` : '')
+        }
         onClick={() => setOpen((o) => !o)}
       >
         <svg
@@ -301,15 +319,22 @@ function ContextMeter({ usage }: { usage: ACPUsage }): JSX.Element {
           <div className="context-usage-line">
             {formatTokens(usage.used)} of {formatTokens(usage.size)} tokens ({percentLabel(fraction)})
           </div>
-          {usage.tokensUsed != null && usage.tokensUsed > usage.used && (
-            <div className="context-total-line">
-              Total processed: {formatTokens(usage.tokensUsed)} tokens
-            </div>
+          {reply && <div className="context-total-line">{reply}</div>}
+          {chatTotal > usage.used && (
+            <div className="context-total-line">This chat: {formatTokens(chatTotal)} tokens in total</div>
           )}
         </div>
       )}
     </div>
   )
+}
+
+/** "Last reply: 12.4k in · 820 out (9.1k cached)" — what the latest turn
+ *  sent and got back; null when the agent reported no accounting for it. */
+export function lastReplyLine(turn: TurnSummary): string | null {
+  if (turn.inputTokens === 0 && turn.outputTokens === 0) return null
+  const cached = turn.cachedReadTokens > 0 ? ` (${formatTokens(turn.cachedReadTokens)} cached)` : ''
+  return `Last reply: ${formatTokens(turn.inputTokens)} in · ${formatTokens(turn.outputTokens)} out${cached}`
 }
 
 /** ContextMeter.percentLabel — whole percents; non-zero below 1% is "<1%". */

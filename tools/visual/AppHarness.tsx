@@ -22,7 +22,8 @@
 //                 no-model | no-model-sent | no-model-connect |
 //                 no-model-error | no-model-menu | mode-menu | welcome-sent |
 //                 welcome-new-project | welcome-more | installing-slow |
-//                 gate-signin | gate-local | no-model-signin | error-toast
+//                 gate-signin | gate-local | no-model-signin | error-toast |
+//                 context | cleared
 
 import './appPrelude'
 import { createRoot } from 'react-dom/client'
@@ -277,6 +278,28 @@ function transcript(mode: string): TranscriptItem[] {
         )
       )
       return items
+    case 'cleared': {
+      // `/clear` after the fix: the CLI's reply turned into a divider
+      // (ChatSession.markContextCleared), then a fresh start below it.
+      items.push(
+        tool({
+          title: 'bash {"command":"npm test"}',
+          kind: 'execute',
+          argsJSON: JSON.stringify({ command: 'npm test' }),
+          output: TEST_OUTPUT
+        }),
+        say('assistant', ANSWER),
+        say('user', '/clear')
+      )
+      const divider = say('notice', 'Context cleared. Spettro won’t remember the messages above.')
+      if (divider.kind === 'message') divider.message.contextCleared = true
+      items.push(
+        divider,
+        say('user', 'Add a loading spinner to SaveButton while it saves.'),
+        say('assistant', 'Sure. I’ll show a small spinner inside the button while `saving` is true and keep its width fixed so the label doesn’t jump.')
+      )
+      return items
+    }
     case 'no-model-error':
       // What a send with nothing connected used to leave behind: the
       // humanized sentence, the CLI's words behind "Show details".
@@ -480,7 +503,14 @@ const CHAT: ChatDetail = {
         { content: 'Run the tests and lint', status: 'completed' }
       ],
   usage: { used: 38_400, size: 200_000, tokensUsed: 51_200 },
-  lastTurn: null,
+  lastTurn: {
+    stopReason: 'end_turn',
+    inputTokens: 12_400,
+    outputTokens: 820,
+    cachedReadTokens: 9_100,
+    totalTokens: 13_220,
+    durationMs: 41_000
+  },
   sessionTokens: 51_200
 }
 
@@ -1187,6 +1217,7 @@ function pushEvents(): void {
   if (MODE === 'no-model-menu') setTimeout(() => click('[data-testid="model-button"]'), 60)
   if (MODE === 'mode-menu') setTimeout(() => click('.config-chip--tinted'), 60)
   if (MODE === 'model-menu') setTimeout(() => click('[data-testid="model-button"]'), 60)
+  if (MODE === 'context') setTimeout(() => click('[data-testid="context-meter"]'), 60)
   if (MODE === 'session-settings') setTimeout(() => click('[data-testid="session-settings"]'), 60)
   if (MODE === 'thinking' || MODE === 'thinking-paused') {
     setTimeout(() => click('[data-testid="thinking-chip"]'), 60)

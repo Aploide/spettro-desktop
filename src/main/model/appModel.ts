@@ -1344,6 +1344,7 @@ export class AppModel extends EventEmitter {
     session.endStreaming()
     const stopReason: TurnSummary['stopReason'] =
       failure !== null ? 'error' : (result?.stopReason ?? 'end_turn')
+    if (stopReason === 'end_turn') session.markContextCleared()
     // Mirrors whatever inline notice the local transcript gets, so a remote
     // screen ends the turn in the same visible state.
     // A failure is said in words (shared/humanize.ts), with the error as it
@@ -2118,6 +2119,7 @@ export class AppModel extends EventEmitter {
     if (!session.isReplaying) this.emit('chat-update-raw', session.id, raw)
     switch (update.kind) {
       case 'agent_message_chunk':
+        if (session.isReplaying && this.replayedTurnNote(session, update.text)) break
         session.appendAssistant(update.text)
         break
       case 'user_message_chunk':
@@ -2165,6 +2167,20 @@ export class AppModel extends EventEmitter {
       case 'other':
         break
     }
+  }
+
+  /** A turn that ended without an answer is stored by the CLI as the
+   *  assistant line "[turn failed: <reason>]" or "[turn interrupted]"
+   *  (bridge.go Prompt), and session/load replays it as text. Shown as the
+   *  notice the turn got when it ran here; true when `text` was one. */
+  private replayedTurnNote(session: ChatSession, text: string): boolean {
+    const note = /^\[turn (?:failed: ([\s\S]+)|interrupted)\]$/.exec(text.trim())
+    if (!note) return false
+    session.endStreaming()
+    const reason = note[1]
+    if (reason !== undefined) session.appendNotice(humanSentence(reason), true, false, reason)
+    else session.appendNotice('Interrupted', false)
+    return true
   }
 
   // -------------------------------------------------------------------------

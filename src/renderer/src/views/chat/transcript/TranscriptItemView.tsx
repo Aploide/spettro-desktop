@@ -256,6 +256,14 @@ function ReasoningView({ message }: { message: ChatMessage }): JSX.Element {
 function NoticeView({ message, isError }: { message: ChatMessage; isError: boolean }): JSX.Element {
   const { retry, retryNoticeId } = useTranscriptActions()
   const app = useApp()
+  // `/clear`: a line across the column; CSS dims everything above it.
+  if (message.contextCleared) {
+    return (
+      <div className="tr-cleared" role="note">
+        <span className="tr-cleared-text">{message.text}</span>
+      </div>
+    )
+  }
   if (!isError) {
     return (
       <div className="tr-notice" role="note">

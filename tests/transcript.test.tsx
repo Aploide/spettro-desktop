@@ -18,6 +18,7 @@ import {
   transcriptAnchors
 } from '@renderer/views/chat/transcript/TranscriptActions'
 import { runPhase } from '@renderer/views/chat/transcript/RunTicker'
+import { lastReplyLine } from '@renderer/views/chat/ChatHeader'
 import { initStore } from '@renderer/state/store'
 
 let seq = 0
@@ -143,6 +144,19 @@ describe('notices and actions', () => {
     // Information is a line, not an alert.
     expect(screen.getAllByRole('alert')).toHaveLength(2)
     expect(screen.getByRole('note').textContent).toContain('Interrupted')
+  })
+
+  it('draws /clear as a divider that says what it means', () => {
+    renderRows([
+      say('assistant', 'done'),
+      say('user', '/clear'),
+      say('notice', 'Context cleared. Spettro won’t remember the messages above.', { contextCleared: true })
+    ])
+    const divider = screen.getByRole('note')
+    expect(divider.className).toBe('tr-cleared')
+    expect(divider.textContent).toBe('Context cleared. Spettro won’t remember the messages above.')
+    // A line, not the info icon of an ordinary notice.
+    expect(divider.querySelector('svg')).toBeNull()
   })
 
   it('hangs Try again only on the error a finished turn ended on', () => {
@@ -298,5 +312,22 @@ describe('what the run ticker says the turn is doing', () => {
     expect(runPhase([say('user', 'a'), read('/a'), say('assistant', 'done'), say('user', 'b')], false)).toBe(
       'Working…'
     )
+  })
+})
+
+describe('what a turn cost (the context meter’s popover)', () => {
+  const turn = { stopReason: 'end_turn' as const, totalTokens: 0, durationMs: 0 }
+
+  it('says what the last reply sent and got back, cache included', () => {
+    expect(lastReplyLine({ ...turn, inputTokens: 12_400, outputTokens: 820, cachedReadTokens: 9_100 })).toBe(
+      'Last reply: 12.4k in · 820 out (9.1k cached)'
+    )
+    expect(lastReplyLine({ ...turn, inputTokens: 300, outputTokens: 40, cachedReadTokens: 0 })).toBe(
+      'Last reply: 300 in · 40 out'
+    )
+  })
+
+  it('says nothing for a turn the agent reported no accounting for', () => {
+    expect(lastReplyLine({ ...turn, inputTokens: 0, outputTokens: 0, cachedReadTokens: 0 })).toBeNull()
   })
 })

@@ -56,6 +56,8 @@ SCENES=(
   app:chat-tools
   app:chat-error
   app:chat-steering
+  app:cleared
+  app:context
   app:busy
   app:guide
   app:ultra

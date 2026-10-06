@@ -10,6 +10,7 @@ import type { AppModel } from './model/appModel'
 import { gitStat } from './model/gitStat'
 import { listProjectFiles } from './model/projectFiles'
 import { loadMemory, saveMemory } from './model/memoryStore'
+import { RendererEventQueue } from './rendererEvents'
 import type { RemoteHost } from './remote/host'
 import type { TerminalManager } from './terminal/panels'
 
@@ -27,6 +28,24 @@ export function registerIpc(
 ): IpcHandle {
   const termIds = new Set<string>()
 
+  // The model's events, coalesced per frame and trimmed to what the renderer
+  // holds (rendererEvents.ts). A page (re)load — or a new window — starts
+  // with an empty store, so what it held is forgotten then.
+  let watched: Electron.WebContents | null = null
+  const currentWindow = (): BrowserWindow | null => {
+    const win = getWindow()
+    if (!win || win.isDestroyed()) return null
+    if (win.webContents !== watched) {
+      watched = win.webContents
+      queue.reset()
+      win.webContents.on('did-start-loading', () => queue.reset())
+    }
+    return win
+  }
+  const queue = new RendererEventQueue((event) => {
+    currentWindow()?.webContents.send(EVENT_CHANNEL, event)
+  })
+
   /** Keep AppStateDTO.remote in sync after direct remote-host calls; the
    *  host also pushes through onStateChanged, but a synchronous refresh
    *  makes the invoke's own app-state echo immediate. */
@@ -37,7 +56,13 @@ export function registerIpc(
   const api: RendererApi = {
     // -- Bootstrap / state --------------------------------------------------
     getState: async () => model.getState(),
-    getChat: async (chatId) => model.getChatDetail(chatId),
+    getChat: async (chatId) => {
+      currentWindow()
+      const chat = model.getChatDetail(chatId)
+      // Whatever is queued goes first: the detail returned is newer.
+      if (chat) queue.markLoaded(chatId)
+      return chat
+    },
 
     // -- Lifecycle ----------------------------------------------------------
     retryBootstrap: async () => model.retryBootstrap(),
@@ -214,16 +239,16 @@ export function registerIpc(
   })
 
   const onEvent = (event: MainEvent): void => {
-    const win = getWindow()
-    if (win && !win.isDestroyed()) {
-      win.webContents.send(EVENT_CHANNEL, event)
-    }
+    // Noticing a new window or a reload before queueing, so an event for the
+    // new page isn't dropped as one for the old.
+    if (currentWindow()) queue.push(event)
   }
   model.on('event', onEvent)
 
   return {
     shutdown: () => {
       model.off('event', onEvent)
+      queue.dispose()
       ipcMain.removeHandler(INVOKE_CHANNEL)
       for (const id of termIds) {
         try {

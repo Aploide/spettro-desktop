@@ -37,6 +37,9 @@ const DEFAULT_HEIGHT = 280
 /** Written into a tab whose shell has exited. */
 const EXITED_LINE = '\r\n\x1b[2m[Process exited — press Enter to restart]\x1b[0m\r\n'
 
+/** The only main events the drawer reads (see SpettroBridge.onEvent). */
+const TERMINAL_EVENTS = ['terminal-data', 'terminal-exit'] as const
+
 interface Tab {
   /** The tab's own identity: its first shell's id, kept across restarts so
    *  the xterm (and its scrollback) stays attached. */
@@ -387,7 +390,7 @@ export default function TerminalDrawer({
         sessions.current.get(tab.id)?.term.write(EXITED_LINE)
         updateTab(setTabsByProject, tab.id, { running: false })
       }
-    })
+    }, TERMINAL_EVENTS)
   }, [])
 
   // ---- xterm attach (once per tab; DOM persists across tab switches) ------

@@ -10,7 +10,7 @@
 // up through an engine restart, too — main keeps the phase and says
 // "reconnecting" instead — so a crash or an update never unmounts a draft.
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import './design/theme.css'
 import './design/shell.css'
 import type { MenuCommand } from '@shared/shortcuts'
@@ -176,11 +176,18 @@ export default function App(): JSX.Element {
 
   // The application menu's items (main/menu.ts): the same actions as the
   // shortcuts, for whoever looks for them there.
+  // Subscribed once, calling the newest runMenuCommand (it closes over this
+  // render's state): re-subscribing on every render churned the bridge.
+  const runMenuCommandRef = useRef(runMenuCommand)
+  runMenuCommandRef.current = runMenuCommand
   useEffect(() => {
-    return window.spettro.onEvent((event) => {
-      if (event.type === 'menu') runMenuCommand(event.command)
-    })
-  })
+    return window.spettro.onEvent(
+      (event) => {
+        if (event.type === 'menu') runMenuCommandRef.current(event.command)
+      },
+      ['menu']
+    )
+  }, [])
 
   // Main's one-off messages (a bad CLI path, the engine restarting). Keyed
   // on the nonce, so the same message twice is shown twice. Setup shows its

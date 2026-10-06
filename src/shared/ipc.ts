@@ -73,6 +73,10 @@ export type MainEvent =
         >
       >
     }
+  /** One config option's shown value changed (a chip moved, a shared
+   *  setting spread from another chat). The rest of the option set — the
+   *  model catalog in it runs to tens of KB — is what the renderer has. */
+  | { type: 'chat-config-value'; chatId: string; configId: string; value: string | boolean }
   /** A chat was removed. */
   | { type: 'chat-removed'; chatId: string }
   /** Permission queue changed; renderer shows the first element. */
@@ -265,7 +269,10 @@ export interface SpettroBridge {
     method: M,
     ...args: Parameters<RendererApi[M]>
   ): ReturnType<RendererApi[M]>
-  onEvent(listener: (event: MainEvent) => void): () => void
+  /** Subscribes to main's events — only those of `types`, when given. Each
+   *  event a listener receives is its own copy across the context bridge,
+   *  so a listener that wants a few kinds should say which. */
+  onEvent(listener: (event: MainEvent) => void, types?: readonly MainEvent['type'][]): () => void
   platform: NodeJS.Platform
   /** The accent this window was opened with, known before the first paint
    *  (main hands it over as a launch argument; app-state follows later). */

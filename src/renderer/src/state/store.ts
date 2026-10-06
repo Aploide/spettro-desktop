@@ -3,7 +3,7 @@
 // immutable snapshot, views subscribe with useSyncExternalStore.
 
 import { useSyncExternalStore } from 'react'
-import type { ACPPermissionRequest, ACPQuestionRequest } from '@shared/acp'
+import type { ACPConfigOption, ACPPermissionRequest, ACPQuestionRequest } from '@shared/acp'
 import type { MainEvent, SpettroBridge } from '@shared/ipc'
 import type { AppStateDTO, ChatDetail } from '@shared/model'
 import { transcriptItemId } from '@shared/model'
@@ -61,6 +61,15 @@ function reduce(event: MainEvent): void {
       emit({ ...state, chats: { ...state.chats, [event.chatId]: { ...chat, ...event.meta } } })
       break
     }
+    case 'chat-config-value': {
+      const chat = state.chats[event.chatId]
+      if (!chat) break
+      const configOptions = chat.configOptions.map((o) =>
+        o.id === event.configId ? withValue(o, event.value) : o
+      )
+      emit({ ...state, chats: { ...state.chats, [event.chatId]: { ...chat, configOptions } } })
+      break
+    }
     case 'chat-removed': {
       // A deleted chat's unsent words go with it.
       saveDraft(event.chatId, '')
@@ -81,13 +90,37 @@ function reduce(event: MainEvent): void {
   }
 }
 
+/** The main events the store folds in (the terminal's and the menu's go to
+ *  their own listeners): each listener gets its own copy of an event. */
+const STORE_EVENTS: readonly MainEvent['type'][] = [
+  'app-state',
+  'chat-reset',
+  'chat-item',
+  'chat-meta',
+  'chat-config-value',
+  'chat-removed',
+  'permissions',
+  'questions'
+]
+
+/** An option showing a new value — what main's applyLocalConfigValue did. */
+function withValue(option: ACPConfigOption, value: string | boolean): ACPConfigOption {
+  if (option.kind.type === 'select' && typeof value === 'string') {
+    return { ...option, kind: { ...option.kind, currentValue: value } }
+  }
+  if (option.kind.type === 'boolean' && typeof value === 'boolean') {
+    return { ...option, kind: { ...option.kind, currentValue: value } }
+  }
+  return option
+}
+
 let initialized = false
 
 /** Idempotent; call once from App. Pulls the initial snapshot and subscribes. */
 export function initStore(): void {
   if (initialized) return
   initialized = true
-  window.spettro.onEvent(reduce)
+  window.spettro.onEvent(reduce, STORE_EVENTS)
   void window.spettro.call('getState').then((app) => emit({ ...state, app }))
 }
 

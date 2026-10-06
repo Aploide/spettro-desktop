@@ -55,13 +55,37 @@ function markAccent(accent: Accent): void {
 const accent = launchAccent()
 markAccent(accent)
 
+/** The page's event listeners, each with the kinds it asked for (null: all).
+ *  One IPC listener feeds them, and an event crosses the context bridge —
+ *  a full copy of it — only to the listeners that want it: the terminal
+ *  never pays for a chat's transcript, nor the store for terminal output. */
+interface Subscription {
+  listener: (event: MainEvent) => void
+  types: ReadonlySet<string> | null
+}
+const subscriptions = new Set<Subscription>()
+
+ipcRenderer.on(EVENT_CHANNEL, (_e: Electron.IpcRendererEvent, event: MainEvent) => {
+  for (const sub of subscriptions) {
+    if (sub.types && !sub.types.has(event.type)) continue
+    try {
+      sub.listener(event)
+    } catch (err) {
+      // One listener's failure must not keep the event from the rest.
+      console.error(err)
+    }
+  }
+})
+
 const bridge: SpettroBridge = {
   call: ((method: string, ...args: unknown[]) =>
     ipcRenderer.invoke(INVOKE_CHANNEL, method, ...args)) as SpettroBridge['call'],
-  onEvent(listener: (event: MainEvent) => void) {
-    const handler = (_e: Electron.IpcRendererEvent, event: MainEvent): void => listener(event)
-    ipcRenderer.on(EVENT_CHANNEL, handler)
-    return () => ipcRenderer.removeListener(EVENT_CHANNEL, handler)
+  onEvent(listener: (event: MainEvent) => void, types?: readonly MainEvent['type'][]) {
+    const sub: Subscription = { listener, types: types ? new Set(types) : null }
+    subscriptions.add(sub)
+    return () => {
+      subscriptions.delete(sub)
+    }
   },
   platform: process.platform,
   accent

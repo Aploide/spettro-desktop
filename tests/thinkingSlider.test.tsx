@@ -262,6 +262,50 @@ describe('the Ultra stop', () => {
   })
 })
 
+describe('the chip, while its slider moves', () => {
+  const chipLabel = (): string => screen.getByTestId('thinking-chip').textContent ?? ''
+
+  it('names where the move is going, not the CLI’s halfway values', async () => {
+    holding = true
+    const { rerender } = render(<ThinkingChip chat={chat(options({ thinking: 'max', ultra: false }))} />)
+    fireEvent.click(screen.getByTestId('thinking-chip'))
+    press('End')
+    // In the same render as the slider: lit, before the CLI has answered.
+    expect(chipLabel()).toContain('Ultra')
+    expect(screen.getByTestId('thinking-chip').className).toContain('thinking-chip--ultra')
+    // Thinking high has landed, ultracode not yet: the chip doesn't say High.
+    rerender(<ThinkingChip chat={chat(options({ thinking: 'high', ultra: false }))} />)
+    expect(chipLabel()).toContain('Ultra')
+    expect(chipLabel()).not.toContain('High')
+    holding = false
+    await act(async () => hold?.release())
+    await settle()
+    rerender(<ThinkingChip chat={chat(options({ thinking: 'high', ultra: true }))} />)
+    await settle()
+    expect(chipLabel()).toContain('Ultra')
+  })
+
+  it('says Paused at once under Ask first', () => {
+    holding = true
+    render(<ThinkingChip chat={chat(options({ thinking: 'max', ultra: false, permission: 'ask-first' }))} />)
+    fireEvent.click(screen.getByTestId('thinking-chip'))
+    press('End')
+    expect(chipLabel()).toContain('Paused')
+    expect(screen.getByTestId('thinking-chip').className).toContain('thinking-chip--paused')
+  })
+
+  it('goes back to the options when the slider closes mid-move', () => {
+    holding = true
+    render(<ThinkingChip chat={chat(options({ thinking: 'max', ultra: false }))} />)
+    fireEvent.click(screen.getByTestId('thinking-chip'))
+    press('End')
+    expect(chipLabel()).toContain('Ultra')
+    fireEvent.click(screen.getByTestId('thinking-chip'))
+    expect(screen.queryByRole('slider')).toBeNull()
+    expect(chipLabel()).toContain('Max')
+  })
+})
+
 describe('the meteor', () => {
   const meteor = (): Element | null => document.querySelector('.thinking-meteor')
 

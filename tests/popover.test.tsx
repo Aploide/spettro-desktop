@@ -6,7 +6,7 @@
 // clipped, its last section behind a scroll.
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, render } from '@testing-library/react'
+import { act, cleanup, render } from '@testing-library/react'
 import { createRef } from 'react'
 import Popover from '@renderer/views/common/Popover'
 
@@ -61,5 +61,39 @@ describe('Popover placement', () => {
     const style = place(406, 434, 492)
     expect(style.top).toBe('8px')
     expect(style.maxHeight).toBe('492px')
+  })
+
+  it('is placed again in the frame its content grows, not a task later', () => {
+    // The thinking slider's Ask first prompt: the panel grows by a row while
+    // it is open. The observer reports before the browser paints; a frame
+    // that showed the panel still capped at its old height had its content
+    // clipped behind a scrollbar.
+    let report: (() => void) | null = null
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        constructor(cb: () => void) {
+          report = cb
+        }
+        observe(): void {}
+        disconnect(): void {}
+      }
+    )
+    const style = place(790, 818, 122)
+    expect(style.top).toBe(`${790 - 6 - 122}px`)
+    vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(210)
+    // Called as the browser calls it: outside React, with nothing to flush
+    // a deferred update before the frame is drawn.
+    const prev = (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT
+    ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = false
+    try {
+      report!()
+      expect(style.top).toBe(`${790 - 6 - 210}px`)
+      expect(style.maxHeight).toBe('210px')
+    } finally {
+      ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = prev
+      act(() => {})
+      vi.unstubAllGlobals()
+    }
   })
 })

@@ -11,7 +11,7 @@
 // model list needs — the CLI advertises 200+ models in one menu.
 
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react'
-import { createPortal } from 'react-dom'
+import { createPortal, flushSync } from 'react-dom'
 
 const MARGIN = 8
 const GAP = 6
@@ -101,8 +101,14 @@ export default function Popover({
     place()
     // Content that changes size while open is placed again. Its first child
     // is watched too: a capped panel doesn't grow when its content does.
+    // Placed in the frame it grew in: the observer reports after layout and
+    // before paint, but a plain state update would land a task later, and
+    // that frame showed the panel still capped at its old height — its
+    // content clipped behind a scrollbar that narrowed it (the thinking
+    // slider's Ask first prompt appearing), then jumping into place.
     const panel = panelRef.current
-    const observer = typeof ResizeObserver === 'function' && panel ? new ResizeObserver(place) : null
+    const observer =
+      typeof ResizeObserver === 'function' && panel ? new ResizeObserver(() => flushSync(place)) : null
     if (observer && panel) {
       observer.observe(panel)
       if (panel.firstElementChild) observer.observe(panel.firstElementChild)

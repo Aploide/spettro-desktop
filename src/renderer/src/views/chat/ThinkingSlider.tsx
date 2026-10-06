@@ -75,6 +75,11 @@ interface SliderProps {
   meteorFrom?: number
   /** Harness only: freeze lit Ultra's smoulder this many seconds in. */
   idleTime?: number
+  /** Told the stop a move is previewing, and null once the options have it
+   *  (or the slider goes away): the chip that opened it names what the
+   *  slider names, rather than stepping through the CLI's halfway values —
+   *  "High" between Max and Ultra. */
+  onPreview?: (stop: ThinkingStop | null) => void
 }
 
 export default function ThinkingSlider({
@@ -83,10 +88,19 @@ export default function ThinkingSlider({
   autoFocus = false,
   meteorProgress,
   meteorFrom,
-  idleTime
+  idleTime,
+  onPreview
 }: SliderProps): JSX.Element | null {
   const base = thinkingState(chat.configOptions)
-  const [pending, setPending] = useState<ThinkingStop | null>(null)
+  const [pending, setPendingState] = useState<ThinkingStop | null>(null)
+  const previewTo = useRef(onPreview)
+  previewTo.current = onPreview
+  // The chip's copy is set in the same tick, so React renders both at once.
+  const setPending = useCallback((stop: ThinkingStop | null): void => {
+    setPendingState(stop)
+    previewTo.current?.(stop)
+  }, [])
+  useEffect(() => () => previewTo.current?.(null), [])
   // The move's calls have all returned; the preview waits for the options.
   const [sent, setSent] = useState(false)
   const [drag, setDrag] = useState<Press | null>(null)
@@ -137,7 +151,7 @@ export default function ThinkingSlider({
       setSent(false)
     }, SETTLE_MS)
     return () => clearTimeout(id)
-  }, [pending, sent, caughtUp])
+  }, [pending, sent, caughtUp, setPending])
 
   // "Keep Ask first" dismisses the prompt until Ultra next pauses.
   const paused = !!state?.paused
@@ -795,6 +809,8 @@ export function ThinkingChip({ chat }: { chat: ChatDetail }): JSX.Element | null
   const [open, setOpen] = useState(false)
   const anchorRef = useRef<HTMLButtonElement>(null)
   const dialogRef = useRef<HTMLDivElement>(null)
+  // The open slider's move in progress: the chip names where it is going.
+  const [preview, setPreview] = useState<ThinkingStop | null>(null)
   const close = useCallback(() => {
     // The slider took focus when the popover opened; hand it back to the chip
     // on the way out, or Escape strands a keyboard user on <body>. A click
@@ -806,8 +822,9 @@ export function ThinkingChip({ chat }: { chat: ChatDetail }): JSX.Element | null
     }
     setOpen(false)
   }, [])
-  const state = thinkingState(chat.configOptions)
-  if (!state) return null
+  const base = thinkingState(chat.configOptions)
+  if (!base) return null
+  const state = preview ? previewState(base, preview) : base
 
   const reasons = modelReasons(chat.configOptions, app?.extensions?.models.models ?? [])
   const lit = state.ultraOn && !state.paused
@@ -856,7 +873,7 @@ export function ThinkingChip({ chat }: { chat: ChatDetail }): JSX.Element | null
         className="thinking-popover"
       >
         <div role="dialog" aria-label="Thinking" ref={dialogRef}>
-          <ThinkingSlider chat={chat} reasons={reasons} autoFocus />
+          <ThinkingSlider chat={chat} reasons={reasons} autoFocus onPreview={setPreview} />
         </div>
       </Popover>
     </div>

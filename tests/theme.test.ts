@@ -369,7 +369,15 @@ describe('accents', () => {
     // Label on a filled accent button (and on its hover shade).
     expect(contrast(at('--accent-contrast'), at('--accent'))).toBeGreaterThanOrEqual(4.5)
     expect(contrast(at('--accent-contrast'), at('--accent-hover'))).toBeGreaterThanOrEqual(4.5)
+    // Label on a filled danger control (Delete, an armed menu item).
+    expect(contrast(at('--danger-contrast'), at('--danger-fill'))).toBeGreaterThanOrEqual(4.5)
     for (const s of surfaces) {
+      // Danger as text (a destructive menu item) on every surface.
+      expect(contrast(at('--danger'), at(s)), `--danger on ${s}`).toBeGreaterThanOrEqual(4.5)
+      // Ultra's fire as text: both ends of its gradient.
+      for (const t of ['--ultra-text-ember', '--ultra-text-flame']) {
+        expect(contrast(at(t), at(s)), `${t} on ${s}`).toBeGreaterThanOrEqual(4.5)
+      }
       for (const t of ['--text-primary', '--text-secondary', '--text-tertiary', '--accent-text']) {
         expect(contrast(at(t), at(s)), `${t} on ${s}`).toBeGreaterThanOrEqual(4.5)
       }
@@ -396,6 +404,23 @@ describe('accents', () => {
         .map((line) => `${f.slice(RENDERER.length)}: ${line.trim()}`)
     )
     expect(offenders).toEqual([])
+  })
+
+  it('keeps every stop of the activation shimmer readable on the composer and the bubble', () => {
+    const css = stripComments(readFileSync(join(RENDERER, 'views/chat/activation.css'), 'utf8'))
+    const ramps = [...css.matchAll(/--glow-ramp:\s*([^;]+);/g)].map((m) =>
+      m[1].split(',').map((c) => c.trim())
+    )
+    // Declared in order: lilac dark, lilac light, mono dark, mono light.
+    expect(ramps).toHaveLength(COMBOS.length)
+    COMBOS.forEach(([accent, scheme], i) => {
+      const p = resolved(accent, scheme)
+      for (const stop of ramps[i]) {
+        for (const s of ['--surface-raised', '--user-bubble-bg']) {
+          expect(contrast(stop, p.get(s)!), `${accent} ${scheme}: ${stop} on ${s}`).toBeGreaterThanOrEqual(4.5)
+        }
+      }
+    })
   })
 })
 

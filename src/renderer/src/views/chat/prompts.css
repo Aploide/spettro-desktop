@@ -485,12 +485,12 @@
 
 .prompt-btn--danger {
   border-color: transparent;
-  background: var(--danger);
+  background: var(--danger-fill);
   color: var(--danger-contrast);
 }
 
 .prompt-btn--danger:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--danger) 88%, var(--canvas));
+  background: color-mix(in srgb, var(--danger-fill) 88%, black);
 }
 
 /* Unarmed: the buttons are there to read, not yet to press. */

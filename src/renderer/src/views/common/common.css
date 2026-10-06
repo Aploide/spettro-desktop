@@ -186,15 +186,16 @@
 }
 
 .btn.btn--destructive-fill {
-  background: var(--danger);
+  background: var(--danger-fill);
   border-color: transparent;
   color: var(--danger-contrast);
   font-weight: 500;
 }
 
 .btn.btn--destructive-fill:hover {
-  background: var(--danger);
-  filter: brightness(1.08);
+  /* A shade deeper, not a brightness filter: lightening the red would
+     take its white label under AA. */
+  background: color-mix(in srgb, var(--danger-fill) 88%, black);
 }
 
 .confirm-card .btn:focus-visible,

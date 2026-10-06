@@ -18,12 +18,42 @@ function launchAccent(): Accent {
 }
 
 /** Just enough of the DOM for that: preload is built against Node's types. */
-interface PageRoot {
-  document?: { documentElement?: { setAttribute(name: string, value: string): void } | null }
+interface PageElement {
+  setAttribute(name: string, value: string): void
+}
+interface PageDocument {
+  documentElement: PageElement | null
+}
+interface PageGlobals {
+  document?: PageDocument
+  MutationObserver?: new (callback: () => void) => {
+    observe(target: PageDocument, options: { childList: boolean }): void
+    disconnect(): void
+  }
+}
+
+/** Preload runs before the HTML is parsed, when the document has no <html>
+ *  element yet, so a plain setAttribute here would land nowhere. Watch the
+ *  document instead and mark <html> the moment the parser creates it: still
+ *  before any page script or paint. */
+function markAccent(accent: Accent): void {
+  const page = globalThis as PageGlobals
+  const doc = page.document
+  if (!doc) return
+  const mark = (): boolean => {
+    if (!doc.documentElement) return false
+    doc.documentElement.setAttribute('data-accent', accent)
+    return true
+  }
+  if (mark() || !page.MutationObserver) return
+  const observer = new page.MutationObserver(() => {
+    if (mark()) observer.disconnect()
+  })
+  observer.observe(doc, { childList: true })
 }
 
 const accent = launchAccent()
-;(globalThis as PageRoot).document?.documentElement?.setAttribute('data-accent', accent)
+markAccent(accent)
 
 const bridge: SpettroBridge = {
   call: ((method: string, ...args: unknown[]) =>

@@ -111,7 +111,11 @@
   /* Text on a filled warning surface — a fixed near-black that stays legible
      on amber in either scheme. */
   --warning-contrast: #1a1205;
-  /* Text on a filled danger button (Delete): white in both schemes. */
+  /* A filled danger control (Delete, an armed menu item) and its white
+     label. --danger is tuned to read as text on the dark surfaces, which
+     makes it too light to carry white text (2.9:1), so the fill is a deeper
+     red of its own. */
+  --danger-fill: #d0433a;
   --danger-contrast: #ffffff;
 
   --diff-added: var(--success);
@@ -157,6 +161,10 @@
   --ultra-flame: #ff8a3d;
   --ultra-spark: #ffd36b;
   --ultra-core: #fffbea;
+  /* Fire as text (the Ultra value, label and chip): the same ramp pulled
+     into AA on the raised surfaces and on the chip's tint. */
+  --ultra-text-ember: #ff8064;
+  --ultra-text-flame: #ffa060;
 
   /* Aliases kept for one release so views not yet moved to the names above
      keep rendering. */
@@ -200,6 +208,7 @@
     --danger: #c93a30;
     --warning: #9a6210;
     --warning-contrast: #1a1205;
+    --danger-fill: #c93a30;
     --danger-contrast: #ffffff;
 
     --diff-added: var(--success);
@@ -237,6 +246,8 @@
     --ultra-flame: #e8641c;
     --ultra-spark: #f2a516;
     --ultra-core: #fff1c2;
+    --ultra-text-ember: #c2341d;
+    --ultra-text-flame: #b5470f;
 
     --assistant-bubble: var(--surface-raised);
     --user-bubble: var(--user-bubble-bg);

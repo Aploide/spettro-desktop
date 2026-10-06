@@ -1014,7 +1014,7 @@
 .ctx-item--armed,
 .ctx-item--armed:hover,
 .ctx-item--armed:focus-visible {
-  background: var(--danger);
+  background: var(--danger-fill);
   color: var(--danger-contrast);
 }
 

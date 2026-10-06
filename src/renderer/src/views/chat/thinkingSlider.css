@@ -50,7 +50,7 @@
 .thinking-slider--ultra .thinking-value,
 .thinking-slider--ultra .thinking-label--ultra,
 .thinking-chip--ultra .config-chip-label {
-  background: linear-gradient(90deg, var(--ultra-ember), var(--ultra-flame));
+  background: linear-gradient(90deg, var(--ultra-text-ember), var(--ultra-text-flame));
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
@@ -325,7 +325,7 @@
 }
 
 .thinking-label--ultra {
-  color: color-mix(in srgb, var(--ultra-flame) 75%, var(--text-secondary));
+  color: color-mix(in srgb, var(--ultra-text-flame) 75%, var(--text-secondary));
 }
 
 .thinking-slider--disabled .thinking-label {
@@ -403,7 +403,7 @@
 /* ------------------------------------------------------------------ chip */
 
 .thinking-chip--ultra {
-  color: var(--ultra-flame);
+  color: var(--ultra-text-flame);
   border-color: color-mix(in srgb, var(--ultra-flame) 45%, var(--hairline));
   background: color-mix(in srgb, var(--ultra-flame) 9%, var(--surface-raised));
 }

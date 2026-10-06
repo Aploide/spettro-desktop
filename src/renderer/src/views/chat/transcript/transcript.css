@@ -839,12 +839,26 @@
 /* Neutral, with one thin rail in the agent colour: another agent at work is
    worth marking, not worth a coloured slab. */
 .tr-agent {
+  position: relative;
   width: 100%;
   min-width: 0;
   border-radius: var(--rad-md);
   border: 1px solid var(--hairline);
   background: var(--surface-raised);
-  box-shadow: inset 2px 0 0 var(--agent-accent);
+}
+
+/* The rail is its own straight bar, inset from the corners: an inset shadow
+   would follow the radius and curve like a bracket. */
+.tr-agent::before {
+  content: '';
+  position: absolute;
+  left: -1px;
+  top: 10px;
+  bottom: 10px;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--agent-accent);
+  pointer-events: none;
 }
 
 .tr-agent-header {

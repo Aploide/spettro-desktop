@@ -392,6 +392,43 @@ export const SCENES: Scene[] = [
     })()
   },
   {
+    id: 'workflow-failed',
+    title: 'Workflow — failed before any agent ran, then the fixed run',
+    note: 'The script would not parse, so no member exists to carry the reason: the card must lead with it in words ("The workflow script has a syntax error (line 35)"), with no empty meter. The re-run below finished cleanly: a green check beside the name and green phase dots, as finished as the failure looks failed.',
+    items: (() => {
+      const base: CardRun = {
+        runId: 'wf_20261006120501_5e1d02aa',
+        name: 'typo-review-one-agent-per-file',
+        description: 'Review each file for typos with its own dedicated agent',
+        size: 'medium',
+        sizeAgents: 10,
+        budget: 100_000,
+        phases: [{ title: 'Review' }],
+        logs: []
+      }
+      const broken: CardRun = { ...base, status: 'error', agents: [] }
+      const fixed: CardRun = {
+        ...base,
+        runId: 'wf_20261006120544_77b0c1de',
+        status: 'success',
+        agents: [
+          { instance: 'review#1', task: 'review README.md', phase: 'Review', status: 'success' },
+          { instance: 'review#2', task: 'review notes.txt', phase: 'Review', status: 'success' }
+        ]
+      }
+      return [
+        say('user', 'ultracode +100k: review README.md and notes.txt for typos, one agent per file'),
+        workflowCard(broken, {
+          summary:
+            'error: workflow "typo-review-one-agent-per-file": script does not parse: SyntaxError: (anonymous): Line 35:177 Unexpected token )'
+        }),
+        say('assistant', 'Syntax error — fixing the parens.'),
+        workflowCard(fixed, { summary: '2 agents · 0 failed · 0 replayed' }),
+        ...callsFor(fixed, { 'review#1': { summary: 'No typos.' }, 'review#2': { summary: 'One typo: "recieve".' } })
+      ]
+    })()
+  },
+  {
     id: 'mixed',
     title: 'Mixed transcript',
     note: 'A plain delegation, an ordinary tool row and a run in one turn — checks that grouping preserves order and that nothing leaks into the flat rows.',

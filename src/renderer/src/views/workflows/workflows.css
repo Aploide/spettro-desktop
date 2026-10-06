@@ -28,9 +28,8 @@
 }
 
 .wfs-cwd {
-  font-size: 11px;
+  font-size: 13px;
   color: var(--text-secondary);
-  font-family: var(--font-mono);
   max-width: 46ch;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -68,22 +67,10 @@
   gap: 2px;
 }
 
+/* An ordinary secondary button (.btn), stretched to the list's width. */
 .wfs-new {
-  border: 1px dashed var(--hairline);
-  background: transparent;
-  color: var(--text-secondary);
-  border-radius: var(--rad-sm);
-  padding: 8px 10px;
-  font: inherit;
-  font-size: 12px;
-  cursor: pointer;
-  text-align: left;
+  align-self: stretch;
   margin-bottom: var(--sp-xs);
-}
-
-.wfs-new:hover {
-  color: var(--text-primary);
-  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
 }
 
 .wfs-row {
@@ -163,10 +150,9 @@
 }
 
 .wfs-pill {
-  font-size: 9px;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  padding: 1px 5px;
+  font-size: var(--fs-xs);
+  line-height: 15px;
+  padding: 0 6px;
   border-radius: 999px;
   background: color-mix(in srgb, var(--text-primary) 12%, transparent);
   color: var(--text-secondary);
@@ -218,7 +204,12 @@
   line-height: 1.55;
 }
 
+.wfs-paths {
+  max-width: 100%;
+}
+
 .wfs-paths code {
+  white-space: nowrap;
   font-size: 11px;
   background: var(--surface-raised);
   padding: 2px 5px;
@@ -237,22 +228,30 @@
   font-weight: 600;
 }
 
+/* A menu button like the composer's chips: quiet until hovered. */
 .wfs-scope {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  font-size: 11px;
+  gap: 5px;
+  padding: 4px 8px;
+  border: none;
+  border-radius: var(--rad-sm);
+  background: none;
+  font: inherit;
+  font-size: 12px;
   color: var(--text-secondary);
+  cursor: pointer;
 }
 
-.wfs-scope select {
-  font: inherit;
-  font-size: 11px;
+.wfs-scope:hover,
+.wfs-scope[aria-expanded='true'] {
+  background: var(--hover-fill);
   color: var(--text-primary);
-  background: var(--surface-raised);
-  border: 1px solid var(--hairline);
-  border-radius: var(--rad-sm);
-  padding: 3px 6px;
+}
+
+.wfs-scope:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  outline-offset: 1px;
 }
 
 .wfs-btn {
@@ -273,6 +272,15 @@
 .wfs-btn:disabled {
   opacity: 0.4;
   cursor: default;
+}
+
+/* Disabled is neutral, not a dimmed accent: a half-transparent orange over
+   the dark surface comes out a muddy brown that reads as a colour, not as
+   "not yet". */
+.wfs-btn--primary:disabled {
+  opacity: 1;
+  background: var(--selected-fill);
+  color: var(--text-tertiary);
 }
 
 .wfs-btn--primary {

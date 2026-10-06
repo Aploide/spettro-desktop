@@ -196,12 +196,16 @@
   padding: 6px var(--sp-md) 0;
 }
 
+/* One row height across every pane (the grouped-list rhythm): a row of
+   buttons, a toggle and a plain "label · value" all sit 40px tall, so no
+   pane looks cramped beside another. */
 .form-scroll .form-row {
   display: flex;
   align-items: center;
   gap: var(--sp-md);
-  min-height: 30px;
-  padding: 7px var(--sp-md);
+  min-height: 40px;
+  padding: 6px var(--sp-md);
+  box-sizing: border-box;
 }
 
 /* Hairline between rows, never after the last one. */
@@ -227,6 +231,14 @@
   color: var(--text-secondary);
   text-align: right;
   user-select: text;
+}
+
+/* A path is a value like any other — right-aligned against the edge — but
+   it truncates at its head, which needs a block box: in a flex box the
+   `direction: rtl` that moves the ellipsis also flips flex-end to the left,
+   and that is how paths came to start at the label column. */
+.form-scroll .form-value.path-value {
+  display: block;
 }
 
 .form-scroll .form-value--primary {

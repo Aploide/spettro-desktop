@@ -32,6 +32,10 @@
   min-width: 0;
   overflow-y: auto;
   overflow-x: hidden;
+  /* The scrollbar's room is kept on both sides whether or not the chat
+     scrolls yet, so the column doesn't jump left when it starts to, and it
+     stays centred on the same line as the composer below. */
+  scrollbar-gutter: stable both-edges;
 }
 
 .chat-jump-latest {
@@ -1225,7 +1229,6 @@
 }
 
 .model-menu-list {
-  scrollbar-width: thin;
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;

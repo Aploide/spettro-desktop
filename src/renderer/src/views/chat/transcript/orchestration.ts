@@ -1310,3 +1310,31 @@ export function sizeLabel(run: Pick<WorkflowRun, 'size' | 'sizeAgents'>): string
 export function memberTint(specId: string): string {
   return modeColor(specId, 'var(--agent-accent)')
 }
+
+/**
+ * A workflow's failure in one plain sentence, for a card whose run died before
+ * any member could carry the reason — a script that would not parse, a saved
+ * workflow that is not there. The CLI's text is `error: workflow "x": script
+ * does not parse: SyntaxError: (anonymous): Line 35:177 Unexpected token )`,
+ * which is accurate and unreadable; the cases worth a sentence get one, and
+ * anything else is shown with its plumbing ("error: workflow …:") taken off.
+ * '' for an empty input. The caller keeps the full text for a tooltip.
+ */
+export function plainWorkflowError(raw: string): string {
+  const first = raw.trim().split('\n')[0]?.trim() ?? ''
+  if (first === '') return ''
+  if (/does not parse|SyntaxError/.test(first)) {
+    const line = /\bline (\d+)/i.exec(first)
+    return line === null
+      ? 'The workflow script has a syntax error.'
+      : `The workflow script has a syntax error (line ${line[1]}).`
+  }
+  const missing = /no saved workflow named "([^"]+)"/.exec(first)
+  if (missing !== null) return `There’s no saved workflow named “${missing[1]}”.`
+  const text = first
+    .replace(/^error:\s*/i, '')
+    .replace(/^workflow(?: "[^"]*")?:\s*/i, '')
+    .trim()
+  if (text === '') return ''
+  return text.charAt(0).toUpperCase() + text.slice(1)
+}

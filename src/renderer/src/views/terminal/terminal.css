@@ -166,6 +166,13 @@
   height: 100%;
 }
 
+/* xterm's viewport sits behind the text layer, so the pointer is never over
+   it and the app-wide "thumb while hovered" rule wouldn't fire: show it while
+   the pointer is anywhere over the terminal instead. */
+.terminal-slot__host .xterm:hover .xterm-viewport::-webkit-scrollbar-thumb {
+  background-color: color-mix(in srgb, var(--text-tertiary) 40%, transparent);
+}
+
 /* Subtle exited state shown briefly before the tab closes. */
 .terminal-slot__exited {
   position: absolute;

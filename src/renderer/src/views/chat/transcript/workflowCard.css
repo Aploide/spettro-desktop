@@ -156,12 +156,11 @@
   align-items: center;
   gap: 4px;
   flex: none;
-  padding: 1px 6px;
+  padding: 1px 7px;
   border-radius: 999px;
-  font-size: 9.5px;
-  font-weight: 600;
-  letter-spacing: 0.3px;
-  text-transform: uppercase;
+  font-size: var(--fs-xs);
+  font-weight: 550;
+  line-height: 16px;
 }
 
 .wfc-badge--running {
@@ -177,6 +176,11 @@
 .wfc-badge--paused {
   background: color-mix(in srgb, var(--warning) 18%, transparent);
   color: color-mix(in srgb, var(--warning) 78%, var(--text-primary));
+}
+
+.wfc-done {
+  flex: none;
+  color: var(--success);
 }
 
 .wfc-badge--stopped,
@@ -272,6 +276,10 @@
   margin-top: 2px;
 }
 
+.wfc-state--failed {
+  background: color-mix(in srgb, var(--diff-removed) 9%, transparent);
+}
+
 .wfc-state--paused {
   background: color-mix(in srgb, var(--warning) 10%, transparent);
 }
@@ -295,7 +303,7 @@
 .wfc-state-meta {
   flex: none;
   font-family: var(--font-mono);
-  font-size: 10.5px;
+  font-size: var(--fs-xs);
   color: var(--tr-tertiary);
   padding-top: 1px;
 }
@@ -378,7 +386,7 @@
 }
 
 .wfc-phase--done .wfc-dot {
-  background: color-mix(in srgb, var(--text-secondary) 60%, transparent);
+  background: var(--success);
 }
 
 .wfc-phasebody {
@@ -413,8 +421,8 @@
   padding: 0 5px;
   border-radius: 999px;
   border: 1px solid var(--hairline);
-  font-size: 9.5px;
-  line-height: 14px;
+  font-size: var(--fs-xs);
+  line-height: 15px;
   color: var(--tr-tertiary);
 }
 
@@ -435,17 +443,16 @@
 
 .wfc-phaseratio {
   flex: none;
-  font-size: 10.5px;
+  font-size: var(--fs-xs);
   font-variant-numeric: tabular-nums;
   color: var(--text-secondary);
 }
 
+/* Plain muted words, like a tool row's meta — not a pill: nothing has
+   happened here, and a badge would make it the loudest thing on the line. */
 .wfc-phasepending {
   flex: none;
-  font-size: 9.5px;
-  font-weight: 600;
-  letter-spacing: 0.4px;
-  text-transform: uppercase;
+  font-size: var(--fs-xs);
   color: var(--tr-tertiary);
 }
 
@@ -516,7 +523,7 @@
 }
 
 /* ------------------------------------------------------------------------- */
-/* Log tail and the raw tree                                                  */
+/* Log tail                                                                   */
 /* ------------------------------------------------------------------------- */
 
 .wfc-log {
@@ -567,36 +574,12 @@
 
 .wfc-logpeek {
   font-family: var(--font-mono);
-  font-size: 10.5px;
+  font-size: var(--fs-xs);
   color: var(--tr-tertiary);
   min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-.wfc-raw {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-xs);
-  min-width: 0;
-  padding-top: var(--sp-sm);
-  border-top: 1px solid var(--hairline);
-}
-
-.wfc-pre {
-  margin: 0;
-  max-height: 320px;
-  overflow: auto;
-  padding: var(--sp-sm);
-  border-radius: var(--rad-sm);
-  background: var(--tr-panel);
-  font-family: var(--font-mono);
-  font-size: 11px;
-  line-height: 1.55;
-  color: var(--text-secondary);
-  white-space: pre;
-  user-select: text;
 }
 
 /* ------------------------------------------------------------------------- */

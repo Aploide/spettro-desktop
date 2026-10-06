@@ -7,7 +7,7 @@
 // Updates pane leads with one "up to date / Update Now" row.
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { EMPTY_EXTENSIONS } from '@shared/extensions'
 import { EMPTY_COMPONENT_UPDATE, EMPTY_UPDATE_STATE } from '@shared/update'
 import type { ACPConfigOption } from '@shared/acp'
@@ -131,8 +131,11 @@ describe('Settings', () => {
 
   it('changes the default permission from General', () => {
     render(<SettingsView pane="general" onClose={() => undefined} />)
-    fireEvent.change(screen.getByRole('combobox', { name: 'Default permission' }), { target: { value: 'ask-first' } })
+    const group = screen.getByRole('radiogroup', { name: 'Default permission' })
+    fireEvent.click(within(group).getByRole('radio', { name: 'Ask first' }))
     expect(calls.filter(([m]) => m === 'setDefaultOption')).toEqual([['setDefaultOption', ['permission', 'ask-first']]])
+    // A segmented control like Theme's, not the platform's drop-down.
+    expect(screen.queryByRole('combobox', { name: 'Default permission' })).toBeNull()
   })
 
   it('says Spettro is up to date in one row, and offers Update Now when it isn’t', async () => {

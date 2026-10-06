@@ -438,29 +438,36 @@
   gap: var(--sp-md);
 }
 
-/* A thin, quiet scrollbar with no arrow buttons: the platform default is a
-   slab of grey beside rows this light. (::-webkit-scrollbar rather than
-   scrollbar-width, which on Linux still draws the arrows.) */
-.chat-list::-webkit-scrollbar {
+/* Every scroller gets a thin, quiet scrollbar with no arrow buttons: the
+   platform default is a slab of grey with arrows beside rows this light.
+   (::-webkit-scrollbar rather than scrollbar-width, which on Linux still
+   draws the arrows — and which, set anywhere, switches these rules off.) */
+::-webkit-scrollbar {
   width: 10px;
+  height: 10px;
 }
 
-.chat-list::-webkit-scrollbar-track {
+::-webkit-scrollbar-button {
+  display: none;
+}
+
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
   background: transparent;
 }
 
-.chat-list::-webkit-scrollbar-thumb {
+::-webkit-scrollbar-thumb {
   border: 3px solid transparent;
   border-radius: 999px;
   background: transparent padding-box;
 }
 
-/* Like an overlay scrollbar: there while the pointer is over the list. */
-.chat-list:hover::-webkit-scrollbar-thumb {
+/* Like an overlay scrollbar: there while the pointer is over the scroller. */
+:hover::-webkit-scrollbar-thumb {
   background-color: color-mix(in srgb, var(--text-tertiary) 40%, transparent);
 }
 
-.chat-list::-webkit-scrollbar-thumb:hover {
+::-webkit-scrollbar-thumb:hover {
   background-color: color-mix(in srgb, var(--text-tertiary) 70%, transparent);
 }
 

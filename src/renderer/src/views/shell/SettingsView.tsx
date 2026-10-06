@@ -203,23 +203,18 @@ function usePermissionOption(): ACPConfigOption | null {
   return fromChat ?? app?.defaultConfigOptions.find((o) => o.id === PERMISSION_ID) ?? null
 }
 
+/** The permission levels by their short names, for a control too narrow for
+ *  "Don’t ask (YOLO)"; the Permissions pane spells each one out. */
+const PERMISSION_SHORT: Record<string, string> = {
+  'ask-first': 'Ask first',
+  restricted: 'Restricted',
+  yolo: 'Don’t ask'
+}
+
 function GeneralPane(): JSX.Element {
   const app = useApp()
   const current = app?.appearance ?? 'system'
   const permission = usePermissionOption()
-  // A radio group is one tab stop; the arrows move the choice (and the
-  // focus) along it, the way a native segmented control does.
-  const onKeyDown = (e: React.KeyboardEvent<HTMLElement>): void => {
-    const step =
-      e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1 : e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? -1 : 0
-    if (step === 0) return
-    e.preventDefault()
-    const at = APPEARANCES.findIndex((a) => a.id === current)
-    const next = (at + step + APPEARANCES.length) % APPEARANCES.length
-    void call('setAppearance', APPEARANCES[next].id)
-    const buttons = e.currentTarget.querySelectorAll<HTMLButtonElement>('[role="radio"]')
-    buttons[next]?.focus()
-  }
   return (
     <div className="form-scroll">
       <section className="form-section">
@@ -228,21 +223,12 @@ function GeneralPane(): JSX.Element {
           <div className="form-row">
             <span className="form-label">Theme</span>
             <span className="form-value">
-              <span className="segmented segmented--inline" role="radiogroup" aria-label="Theme" onKeyDown={onKeyDown}>
-                {APPEARANCES.map((a) => (
-                  <button
-                    key={a.id}
-                    type="button"
-                    role="radio"
-                    aria-checked={current === a.id}
-                    tabIndex={current === a.id ? 0 : -1}
-                    className={current === a.id ? 'active' : ''}
-                    onClick={() => void call('setAppearance', a.id)}
-                  >
-                    {a.label}
-                  </button>
-                ))}
-              </span>
+              <Segmented
+                label="Theme"
+                value={current}
+                choices={APPEARANCES.map((a) => ({ value: a.id, label: a.label }))}
+                onChange={(id) => void call('setAppearance', id as Appearance)}
+              />
             </span>
           </div>
         </div>
@@ -256,18 +242,16 @@ function GeneralPane(): JSX.Element {
             <span className="form-label">Permission</span>
             <span className="form-value">
               {permission && permission.kind.type === 'select' ? (
-                <select
-                  className="form-select"
-                  aria-label="Default permission"
+                <Segmented
+                  label="Default permission"
                   value={permission.kind.currentValue ?? ''}
-                  onChange={(e) => void call('setDefaultOption', PERMISSION_ID, e.target.value)}
-                >
-                  {choicesOf(permission).map((c) => (
-                    <option key={c.value} value={c.value}>
-                      {permissionName(c)}
-                    </option>
-                  ))}
-                </select>
+                  choices={choicesOf(permission).map((c) => ({
+                    value: c.value,
+                    label: PERMISSION_SHORT[c.value] ?? permissionName(c),
+                    title: permissionGloss(c) ?? c.description ?? undefined
+                  }))}
+                  onChange={(value) => void call('setDefaultOption', PERMISSION_ID, value)}
+                />
               ) : (
                 <span className="form-text">Available once Spettro is running</span>
               )}
@@ -285,11 +269,62 @@ function GeneralPane(): JSX.Element {
           </div>
         </div>
         <div className="form-footer">
-          Spettro keeps the permission level for every session. The notification only appears while
-          Spettro&rsquo;s window is in the background.
+          Spettro keeps the permission level for every session; Permissions explains each one. The
+          notification only appears while Spettro&rsquo;s window is in the background.
         </div>
       </section>
     </div>
+  )
+}
+
+/**
+ * A segmented control as a row's value: one radio group, one tab stop, the
+ * arrows moving the choice (and the focus) along it the way a native
+ * segmented control does. Theme and Permission share it, so the two choices
+ * in one pane look like one kind of thing.
+ */
+function Segmented({
+  label,
+  value,
+  choices,
+  onChange
+}: {
+  label: string
+  value: string
+  choices: { value: string; label: string; title?: string }[]
+  onChange: (value: string) => void
+}): JSX.Element {
+  const onKeyDown = (e: React.KeyboardEvent<HTMLElement>): void => {
+    const step =
+      e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1 : e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? -1 : 0
+    if (step === 0) return
+    e.preventDefault()
+    const at = choices.findIndex((c) => c.value === value)
+    const next = (at + step + choices.length) % choices.length
+    onChange(choices[next].value)
+    const buttons = e.currentTarget.querySelectorAll<HTMLButtonElement>('[role="radio"]')
+    buttons[next]?.focus()
+  }
+  // A value none of the choices names (an older CLI's level) still leaves the
+  // group reachable by Tab, through its first segment.
+  const known = choices.some((c) => c.value === value)
+  return (
+    <span className="segmented segmented--inline" role="radiogroup" aria-label={label} onKeyDown={onKeyDown}>
+      {choices.map((c, i) => (
+        <button
+          key={c.value}
+          type="button"
+          role="radio"
+          aria-checked={value === c.value}
+          tabIndex={value === c.value || (!known && i === 0) ? 0 : -1}
+          className={value === c.value ? 'active' : ''}
+          title={c.title}
+          onClick={() => onChange(c.value)}
+        >
+          {c.label}
+        </button>
+      ))}
+    </span>
   )
 }
 

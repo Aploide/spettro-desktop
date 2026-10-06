@@ -39,7 +39,7 @@
 import { useEffect, useState } from 'react'
 import type { JSX } from 'react'
 import type { MemberCall, OrchCounts, WorkflowPhase, WorkflowRun } from './orchestration'
-import { memberTint, sizeLabel } from './orchestration'
+import { memberTint, plainWorkflowError, sizeLabel } from './orchestration'
 import { compactTokens } from '@shared/workflowBudget'
 import { CountsLabel, MemberRow, ProgressMeter, StatusGlyph } from './OrchestrationBits'
 import { Icon, ToolRow } from './ToolCallView'
@@ -57,7 +57,6 @@ export function WorkflowCard({ run }: { run: WorkflowRun }): JSX.Element {
   // a settled run compacts rather than disappears — but a reader who closes
   // the card keeps it closed as further updates arrive.
   const [override, setOverride] = useState<boolean | null>(null)
-  const [rawOpen, setRawOpen] = useState(false)
   const continued = run.continued
   const running = run.status === 'running' && !continued
   const settled = !running
@@ -84,8 +83,12 @@ export function WorkflowCard({ run }: { run: WorkflowRun }): JSX.Element {
 
   const phases = run.phases.filter((phase) => phase.title !== '' || phase.members.length > 0)
   const plan = planLabel(run)
-  const state = stateLine(run)
+  const failure = continued ? null : runFailure(run)
+  const state = failure?.text ?? stateLine(run)
   const tone = continued ? 'continued' : run.status
+  // A run that died before any agent started has nothing to measure: an empty
+  // grey bar there reads as "0% of something", so it goes.
+  const metered = total > 0 || running
 
   return (
     <section
@@ -110,7 +113,7 @@ export function WorkflowCard({ run }: { run: WorkflowRun }): JSX.Element {
           </span>
           {open && (
             <span className="wfc-metrics">
-              <ProgressMeter counts={run.counts} width={128} />
+              {metered && <ProgressMeter counts={run.counts} width={128} />}
               {total > 0 && (
                 <span className="wfc-ratio">
                   {finished}/{total}
@@ -128,7 +131,7 @@ export function WorkflowCard({ run }: { run: WorkflowRun }): JSX.Element {
             </span>
           )}
         </span>
-        {!open && <ProgressMeter counts={run.counts} width={56} />}
+        {!open && metered && <ProgressMeter counts={run.counts} width={56} />}
         <span className={`tr-chevron${open ? ' tr-chevron--open' : ''}`}>
           <Icon name="chevron.right" size={8} />
         </span>
@@ -137,7 +140,7 @@ export function WorkflowCard({ run }: { run: WorkflowRun }): JSX.Element {
       {open && (
         <div className="wfc-body" id={bodyId}>
           {state !== '' && (
-            <p className={`wfc-state wfc-state--${tone}`}>
+            <p className={`wfc-state wfc-state--${tone}`} title={failure?.raw}>
               {continued ? (
                 <span className="orch-glyph wfc-state-arrow" aria-hidden="true">
                   <Icon name="arrow.down" size={11} />
@@ -167,22 +170,6 @@ export function WorkflowCard({ run }: { run: WorkflowRun }): JSX.Element {
           )}
           {run.logs.length > 0 && (
             <LogBlock logs={run.logs} dropped={run.droppedLogLines} compact={settled} />
-          )}
-          {run.rendered !== '' && (
-            <div className="wfc-raw">
-              <button
-                className="wfc-disclose"
-                type="button"
-                aria-expanded={rawOpen}
-                onClick={() => setRawOpen((value) => !value)}
-              >
-                <span className={`tr-chevron${rawOpen ? ' tr-chevron--open' : ''}`}>
-                  <Icon name="chevron.right" size={8} />
-                </span>
-                raw tree
-              </button>
-              {rawOpen && <pre className="wfc-pre">{run.rendered}</pre>}
-            </div>
           )}
         </div>
       )}
@@ -252,12 +239,12 @@ function PhaseGroup({
           <span className="wfc-phasetitle">{phase.title === '' ? 'No phase' : phase.title}</span>
           {phase.dynamic && (
             <span className="wfc-phasetag" title="The workflow added this phase while it ran">
-              added
+              Added
             </span>
           )}
           {phase.detail !== '' && <span className="wfc-phasedetail">{phase.detail}</span>}
           {state === 'pending' ? (
-            <span className="wfc-phasepending">{over ? 'not run' : 'pending'}</span>
+            <span className="wfc-phasepending">{over ? 'Not run' : 'Pending'}</span>
           ) : (
             <>
               <ProgressMeter counts={phase.counts} width={56} />
@@ -510,8 +497,30 @@ function StatusBadge({ run }: { run: WorkflowRun }): JSX.Element | null {
         </span>
       )
     case 'done':
-      return null
+      // No pill — a success is the quiet state — but the same green check a
+      // finished tool row wears, so a run that worked looks as finished as
+      // one that failed looks failed.
+      return (
+        <span className="orch-glyph wfc-done" aria-label="Done" title="Done">
+          <Icon name="checkmark" size={11} />
+        </span>
+      )
   }
+}
+
+/**
+ * Why a failed run failed, when no member can say it: the run died on the way
+ * in (a script that would not parse) or around its agents rather than in one.
+ * The CLI puts that error where a finished run's counts go, so it is the
+ * summary — unless the summary IS the counts, in which case a member failed
+ * and its own row carries the reason. Null when there is nothing to add.
+ */
+function runFailure(run: WorkflowRun): { text: string; raw: string } | null {
+  if (run.status !== 'failed' || run.counts.failed > 0) return null
+  const raw = run.summary.trim()
+  if (/^\d+ agents? · /.test(raw)) return null
+  const text = plainWorkflowError(raw)
+  return { text: text === '' ? 'The workflow ended with an error before it finished.' : text, raw }
 }
 
 /**
@@ -541,6 +550,8 @@ function stateDetail(run: WorkflowRun): string {
     return message === '' ? 'Waiting for Spettro to continue it' : message
   }
   if (run.status === 'stopped') return run.stoppedReason
+  const failure = runFailure(run)
+  if (failure !== null) return failure.text
   return summaryText(run)
 }
 

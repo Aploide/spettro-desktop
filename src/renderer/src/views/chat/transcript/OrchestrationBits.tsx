@@ -18,6 +18,7 @@ import { useState } from 'react'
 import type { JSX, ReactNode } from 'react'
 import { displayDetail } from './toolPresentation'
 import type { MemberCall, OrchCounts, OrchStatus, RunStatus, WorkflowScript } from './orchestration'
+import { plainWorkflowError } from './orchestration'
 import { Icon } from './ToolCallView'
 import { MarkdownText } from './MarkdownText'
 import { SpettroSpinner } from './RunTicker'
@@ -273,7 +274,9 @@ export function MemberRow({
 export function ScriptCallRow({ script }: { script: WorkflowScript }): JSX.Element {
   const [expanded, setExpanded] = useState(false)
   const name = script.savedAs === '' ? 'workflow' : script.savedAs
-  const reason = script.error !== '' ? script.error : script.tool.output.trim()
+  const raw = script.error !== '' ? script.error : script.tool.output.trim()
+  // The same sentence a run card that died this way leads with.
+  const reason = script.status === 'failed' ? plainWorkflowError(raw) : raw.split('\n')[0]
   const hasSource = script.source !== '' || script.returned !== ''
 
   return (
@@ -293,7 +296,11 @@ export function ScriptCallRow({ script }: { script: WorkflowScript }): JSX.Eleme
           Workflow<span className="orch-script-name"> · {name}</span>
         </span>
         <StatusGlyph status={script.status} />
-        {reason !== '' && <span className="orch-script-reason">{reason.split('\n')[0]}</span>}
+        {reason !== '' && (
+          <span className="orch-script-reason" title={raw}>
+            {reason}
+          </span>
+        )}
         <span className="orch-script-spacer" />
         {hasSource && (
           <span className={`tr-chevron${expanded ? ' tr-chevron--open' : ''}`}>

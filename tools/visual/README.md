@@ -29,6 +29,8 @@ tree recoverable only from the rendered text. The cards the current CLI sends
 are built with `tests/wire.ts` `workflowCard` (a port of `render()` and the
 `_meta` it carries), so the scenes and the tests agree on the wire: running,
 `workflow-paused` (waiting at a checkpoint), `workflow-stopped`,
+`workflow-failed` (a script that would not parse, said in words, then the
+re-run that worked, with its check),
 `workflow-continued` (a card a later turn took over, then its successor) and
 `workflow-detail` (every line the text can carry, read without `_meta`).
 

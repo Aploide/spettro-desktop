@@ -41,6 +41,7 @@ SCENES=(
   workflow-stopped
   workflow-continued
   workflow-detail
+  workflow-failed
   mixed
   studio
   studio:empty

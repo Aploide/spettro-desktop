@@ -43,6 +43,8 @@ import { groupToolRuns } from '@renderer/views/chat/transcript/toolGroups'
 import { TranscriptRowView } from '@renderer/views/chat/transcript/TranscriptItemView'
 import { Icon } from '@renderer/views/chat/transcript/ToolCallView'
 import { SpettroSpinner } from '@renderer/views/chat/transcript/RunTicker'
+import Popover from '@renderer/views/common/Popover'
+import { basename } from '@renderer/views/shell/util'
 import ScriptEditor from './ScriptEditor'
 import './workflows.css'
 
@@ -271,8 +273,8 @@ export default function WorkflowStudio({
           <Icon name="flowchart" size={15} />
           <h2>Workflows</h2>
           <span className="wfs-spacer" />
-          <button className="icon-btn" onClick={() => void close()} title="Close" aria-label="Close workflows">
-            <Icon name="xmark.circle.fill" size={15} />
+          <button type="button" className="btn btn--prominent" onClick={() => void close()}>
+            Done
           </button>
         </header>
         <div className="wfs-body">
@@ -295,17 +297,21 @@ export default function WorkflowStudio({
       <header className="wfs-head">
         <Icon name="flowchart" size={15} />
         <h2>Workflows</h2>
-        <span className="wfs-cwd" title={list.cwd}>
-          {list.cwd}
-        </span>
+        {/* The project by name, as the sidebar says it; the path is a hover
+            away for whoever needs it. */}
+        {list.cwd !== '' && (
+          <span className="wfs-cwd" title={list.cwd}>
+            {basename(list.cwd)}
+          </span>
+        )}
         <span className="wfs-spacer" />
         {busy && (
           <span className="wfs-busy">
             <SpettroSpinner size={11} /> {busy}
           </span>
         )}
-        <button className="icon-btn" onClick={() => void close()} title="Close" aria-label="Close workflows">
-          <Icon name="xmark.circle.fill" size={15} />
+        <button type="button" className="btn btn--prominent" onClick={() => void close()}>
+          Done
         </button>
       </header>
 
@@ -319,7 +325,7 @@ export default function WorkflowStudio({
         />
 
         {draft === null ? (
-          <EmptyState searchPaths={list.searchPaths} onNew={() => void newDraft()} />
+          <EmptyState searchPaths={list.searchPaths} />
         ) : (
           <section className="wfs-main">
             <EditorHeader
@@ -367,8 +373,9 @@ function WorkflowList({
 }): JSX.Element {
   return (
     <aside className="wfs-list">
-      <button className="wfs-new" type="button" onClick={onNew}>
-        + New workflow
+      <button className="btn wfs-new" type="button" onClick={onNew}>
+        <Icon name="plus" size={11} />
+        New workflow
       </button>
       {draft !== null && draft.name === '' && (
         <div className="wfs-row wfs-row--active wfs-row--draft">
@@ -382,12 +389,12 @@ function WorkflowList({
         >
           <button className="wfs-row-open" type="button" onClick={() => onOpen(info)}>
             <span className="wfs-row-name">{info.name}</span>
-            {info.scope === 'global' && <span className="wfs-pill">global</span>}
+            {info.scope === 'global' && <span className="wfs-pill">All projects</span>}
             {/* A script that does not compile is still listed — hiding it just
                 moves the discovery to whoever runs it next. */}
             {info.error && (
               <span className="wfs-pill wfs-pill--bad" title={info.error}>
-                broken
+                Broken
               </span>
             )}
             {info.description && <span className="wfs-row-desc">{info.description}</span>}
@@ -415,29 +422,25 @@ function WorkflowList({
   )
 }
 
-function EmptyState({
-  searchPaths,
-  onNew
-}: {
-  searchPaths: string[]
-  onNew: () => void
-}): JSX.Element {
+/** Nothing open. It explains rather than offers: "New workflow" is already
+ *  at the top of the list, and two of the same button on one screen asks the
+ *  reader which one to press. */
+function EmptyState({ searchPaths }: { searchPaths: string[] }): JSX.Element {
   return (
     <section className="wfs-main wfs-main--empty">
       <Icon name="flowchart" size={40} />
       <h3>Write a workflow</h3>
       <p>
-        A workflow decides in ordinary control flow — not by asking a model — which sub-agents run,
-        in what order, and how their results combine.
+        A workflow is a saved recipe that runs several agents in a fixed order — the same steps
+        every time, for jobs too big for one.
       </p>
       {searchPaths.length > 0 && (
-        <p className="wfs-paths">
-          Saved to <code>{searchPaths[0]}</code>, so it is versioned with the project.
+        <p className="wfs-paths" title={searchPaths[0]}>
+          Saved in this project&rsquo;s <code>.spettro/workflows</code> folder, so it&rsquo;s
+          versioned with the code.
         </p>
       )}
-      <button className="wfs-new" type="button" onClick={onNew}>
-        + New workflow
-      </button>
+      <p className="wfs-paths">Choose one on the left, or start a new one there.</p>
     </section>
   )
 }
@@ -465,18 +468,9 @@ function EditorHeader({
   return (
     <div className="wfs-editor-head">
       <span className="wfs-editor-name">{name}</span>
-      {draft.dirty && <span className="wfs-pill">unsaved</span>}
+      {draft.dirty && <span className="wfs-pill">Unsaved</span>}
       <span className="wfs-spacer" />
-      <label className="wfs-scope">
-        <span>Save to</span>
-        <select
-          value={draft.scope}
-          onChange={(e) => onScope(e.target.value as WorkflowScope)}
-        >
-          <option value="project">this project</option>
-          <option value="global">every project</option>
-        </select>
-      </label>
+      <ScopeMenu scope={draft.scope} onScope={onScope} />
       <button className="wfs-btn" type="button" onClick={onSave} disabled={!draft.dirty}>
         Save
       </button>
@@ -490,6 +484,66 @@ function EditorHeader({
         Run
       </button>
     </div>
+  )
+}
+
+const SCOPES: { value: WorkflowScope; name: string; description: string }[] = [
+  { value: 'project', name: 'This project', description: 'Saved with the code, for everyone who works on it' },
+  { value: 'global', name: 'Every project', description: 'Saved on this computer, for all your projects' }
+]
+
+/** Where Save puts the script, as the composer's chips choose things: a
+ *  button naming the choice, and a menu that says what each one means. */
+function ScopeMenu({
+  scope,
+  onScope
+}: {
+  scope: WorkflowScope
+  onScope: (scope: WorkflowScope) => void
+}): JSX.Element {
+  const [open, setOpen] = useState(false)
+  const anchorRef = useRef<HTMLButtonElement>(null)
+  const close = useCallback(() => setOpen(false), [])
+  const current = SCOPES.find((s) => s.value === scope) ?? SCOPES[0]
+  return (
+    <>
+      <button
+        ref={anchorRef}
+        type="button"
+        className="wfs-scope"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+      >
+        Save to {current.name.toLowerCase()}
+        <Icon name="chevron.down" size={8} />
+      </button>
+      <Popover anchorRef={anchorRef} open={open} onClose={close} align="end" className="config-menu">
+        <div className="config-menu-group" role="menu" aria-label="Save to">
+          {SCOPES.map((choice) => (
+            <button
+              type="button"
+              role="menuitemradio"
+              aria-checked={choice.value === scope}
+              key={choice.value}
+              className="config-menu-row"
+              onClick={() => {
+                setOpen(false)
+                if (choice.value !== scope) onScope(choice.value)
+              }}
+            >
+              <span className="config-menu-check">
+                {choice.value === scope && <Icon name="checkmark" size={12} />}
+              </span>
+              <span className="config-menu-texts">
+                <span className="config-menu-name">{choice.name}</span>
+                <span className="config-menu-description">{choice.description}</span>
+              </span>
+            </button>
+          ))}
+        </div>
+      </Popover>
+    </>
   )
 }
 

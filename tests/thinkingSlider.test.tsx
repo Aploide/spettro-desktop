@@ -196,6 +196,25 @@ describe('the Ultra stop', () => {
     ])
   })
 
+  it('holds a burst that comes back to where it started until its calls are through', async () => {
+    holding = true
+    const { rerender } = render(<ThinkingSlider chat={chat(options({ thinking: 'high', ultra: true }))} />)
+    press('ArrowLeft') // Max: ultracode off is sent, and held
+    press('ArrowRight') // back to Ultra, where the options still are
+    const flying = document.querySelector('.thinking-meteor')
+    // The first call's option lands; the burst's last move is still to go.
+    rerender(<ThinkingSlider chat={chat(options({ thinking: 'high', ultra: false }))} />)
+    expect(slider().getAttribute('aria-valuetext')).toBe('Ultra')
+    expect(document.querySelector('.thinking-meteor')).toBe(flying)
+    holding = false
+    await act(async () => hold?.release())
+    await settle()
+    rerender(<ThinkingSlider chat={chat(options({ thinking: 'high', ultra: true }))} />)
+    await settle()
+    expect(slider().getAttribute('aria-valuetext')).toBe('Ultra')
+    expect(document.querySelector('.thinking-meteor')).toBe(flying)
+  })
+
   it('is paused under Ask first, and offers Restricted', async () => {
     render(
       <ThinkingSlider
@@ -255,6 +274,17 @@ describe('the meteor', () => {
     rerender(<ThinkingSlider chat={chat(options({ thinking: 'high', ultra: true }))} />)
     await settle()
     expect(meteor()).toBe(first)
+  })
+
+  it('leaves the stops ahead of the head unlit until the streak reaches them', () => {
+    holding = true
+    render(<ThinkingSlider chat={chat(options({ thinking: 'low', ultra: false }))} />)
+    press('End')
+    expect(meteor()).not.toBeNull()
+    const passed = [...document.querySelectorAll('.thinking-tick')].map((t) =>
+      t.classList.contains('thinking-tick--passed')
+    )
+    expect(passed).toEqual([true, false, false, false, false, false])
   })
 
   it('does not play for a slider drawn with Ultra already on, or re-drawn there', () => {

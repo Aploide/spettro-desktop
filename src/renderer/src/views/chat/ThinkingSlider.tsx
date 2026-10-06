@@ -93,19 +93,22 @@ export default function ThinkingSlider({
   // frame — Ultra going dark between "thinking high" and "ultra on", which
   // relaunched the meteor from High. If the options never come round (a
   // refusal rolls them back), the preview lets go shortly after the calls.
+  // Only once they are all through, though: a burst that comes back to where
+  // it began (Ultra, ←, →) matches the options before its first call's
+  // update has even arrived, and letting go then shows that update — High,
+  // the meteor relaunching — on its way back.
   const caughtUp =
     !!base &&
     !!pending &&
     base.ultraOn === pending.ultra &&
     (pending.ultra || base.thinking === pending.id)
   useEffect(() => {
-    if (!pending) return
+    if (!pending || !sent) return
     if (caughtUp) {
       setPending(null)
       setSent(false)
       return
     }
-    if (!sent) return
     const id = setTimeout(() => {
       setPending(null)
       setSent(false)
@@ -274,7 +277,11 @@ export default function ThinkingSlider({
           {stops.map((stop, i) => (
             <span
               key={stop.id}
-              className={'thinking-tick' + (i <= shown ? ' thinking-tick--passed' : '')}
+              // Lit where the fill is: in flight, the ticks ahead of the head
+              // wait for the streak (which covers them as it passes).
+              className={
+                'thinking-tick' + (i <= shown && frac(i) <= fillFrac ? ' thinking-tick--passed' : '')
+              }
               style={{ left: `${frac(i) * 100}%` }}
             />
           ))}

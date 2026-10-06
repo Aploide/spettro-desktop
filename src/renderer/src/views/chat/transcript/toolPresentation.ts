@@ -57,6 +57,24 @@ export interface ParsedTitle {
  * truncates inline args at 120 chars, often leaving invalid JSON.
  */
 export function parsedTitle(tool: Pick<ToolCallItem, 'title' | 'argsJSON'>): ParsedTitle {
+  // Asked for five to seven times per row drawn, and once per tool call by
+  // every fold of the transcript: one JSON.parse per call, not per question.
+  const known = titles.get(tool)
+  if (known && known.title === tool.title && known.argsJSON === tool.argsJSON) return known.parsed
+  const parsed = parseTitle(tool)
+  titles.set(tool, { title: tool.title, argsJSON: tool.argsJSON, parsed })
+  return parsed
+}
+
+/** Per tool call object (the store replaces one when it changes); what it
+ *  was parsed from is kept too, so an object changed in place is parsed
+ *  again rather than answered stale. */
+const titles = new WeakMap<
+  object,
+  { title: string; argsJSON: string | undefined | null; parsed: ParsedTitle }
+>()
+
+function parseTitle(tool: Pick<ToolCallItem, 'title' | 'argsJSON'>): ParsedTitle {
   let text = tool.title
   let agent: string | null = null
   if (text.startsWith('[')) {
@@ -327,15 +345,38 @@ function askedQuestion(args: Record<string, unknown> | null | undefined): string
 /** The `[exit status N]` a failed shell command's output ends with
  *  (internal/agent/llm_runtime_shell.go); null when there is none. */
 export function exitCode(output: string): number | null {
-  const match = /\[?exit status (\d+)\]?\s*$/.exec(output.trim())
+  // Only the end can match: a command's whole output is not trimmed, copied
+  // and scanned for it on every render of its row.
+  const end = contentEnd(output)
+  const match = /\[?exit status (\d+)\]?$/.exec(output.slice(Math.max(0, end - EXIT_TAIL), end))
   return match ? Number(match[1]) : null
 }
 
-/** Non-empty lines in a tool's output. */
+/** Enough of the end of an output to hold `[exit status N]`. */
+const EXIT_TAIL = 128
+
+const SPACE = /\s/
+
+/** Where `text` ends once trailing whitespace is left off (what trimEnd
+ *  would keep), without copying it. */
+function contentEnd(text: string): number {
+  let end = text.length
+  while (end > 0 && SPACE.test(text[end - 1])) end--
+  return end
+}
+
+/** Whether `text` has anything but whitespace in it. */
+export function hasContent(text: string): boolean {
+  return contentEnd(text) > 0
+}
+
+/** Non-empty lines in a tool's output, counted in place. */
 function outputLines(output: string): number {
-  const trimmed = output.replace(/\s+$/, '')
-  if (trimmed === '') return 0
-  return trimmed.split('\n').length
+  const end = contentEnd(output)
+  if (end === 0) return 0
+  let lines = 1
+  for (let i = output.indexOf('\n'); i !== -1 && i < end; i = output.indexOf('\n', i + 1)) lines++
+  return lines
 }
 
 /**
@@ -362,7 +403,7 @@ export function rowMeta(
   if (n === 0) return null
   if (verb === 'Read') return `${n} line${n === 1 ? '' : 's'}`
   if (verb === 'Search' || verb === 'List') {
-    if (/^no (matches|results|files)/i.test(tool.output.trim())) return 'no results'
+    if (/^\s*no (matches|results|files)/i.test(tool.output)) return 'no results'
     return `${n} result${n === 1 ? '' : 's'}`
   }
   return null

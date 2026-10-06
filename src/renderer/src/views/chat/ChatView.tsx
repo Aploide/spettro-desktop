@@ -12,7 +12,7 @@
 // of the composer or the terminal drawer, and the transcript's centred measure
 // simply narrows around it.
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { JSX } from 'react'
 import { call, ensureChatLoaded, useApp, useChat, useStore } from '@renderer/state/store'
 import { setTerminalVisible, useShell } from '@renderer/state/shell'
@@ -45,7 +45,11 @@ const PANEL_VISIBLE_KEY = 'spettro.orchestrationPanelVisible'
 /** How close to the bottom (px) still counts as "pinned to the tail". */
 const PIN_THRESHOLD = 64
 
-export default function ChatView({ chatId }: { chatId: string }): JSX.Element {
+/** Memoised: the shell re-renders on every app state, and the chat — the
+ *  whole transcript under it — has nothing to redraw for one. */
+export default memo(ChatView)
+
+function ChatView({ chatId }: { chatId: string }): JSX.Element {
   const chat = useChat(chatId)
   const scrollRef = useRef<HTMLDivElement>(null)
   const pinnedRef = useRef(true)
@@ -204,14 +208,22 @@ export default function ChatView({ chatId }: { chatId: string }): JSX.Element {
   }
 
   const busy = chat?.isBusy ?? false
+  // Kept the same object while the two anchors stay put: every row reads
+  // this context, and a new value per streamed chunk re-rendered them all.
+  const { lastUserMessageId, retryNoticeId } = useMemo(
+    () => transcriptAnchors(items ?? [], busy),
+    [items, busy]
+  )
   const actions = useMemo<TranscriptActions>(
     () => ({
       editMessage: (text, mentions) => setPromptSeed({ text, mentions, nonce: Date.now() }),
       retry: () => void call('retryLast', chatId),
-      ...transcriptAnchors(items ?? [], busy)
+      lastUserMessageId,
+      retryNoticeId
     }),
-    [chatId, items, busy]
+    [chatId, lastUserMessageId, retryNoticeId]
   )
+  const closeTerminal = useCallback(() => setTerminalVisible(false), [])
 
   // Esc interrupts a running turn from the composer or the transcript —
   // never from inside a menu or popover (they take Escape for themselves),
@@ -306,7 +318,7 @@ export default function ChatView({ chatId }: { chatId: string }): JSX.Element {
         <TerminalDrawer
           projectPath={chat.projectPath}
           visible={terminalVisible}
-          onClose={() => setTerminalVisible(false)}
+          onClose={closeTerminal}
         />
       </div>
     </ProjectPathContext.Provider>

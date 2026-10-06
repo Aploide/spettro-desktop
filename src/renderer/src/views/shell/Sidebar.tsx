@@ -12,7 +12,7 @@
 // a row on its way out is simply not drawn. The update row asks before it
 // stops running work.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ChatSummary } from '@shared/model'
 import { isUpdateBusy, type UpdateState } from '@shared/update'
 import { call, useApp, useStore } from '@renderer/state/store'
@@ -50,7 +50,11 @@ interface MenuState {
   session: ChatSummary
 }
 
-export default function Sidebar({ onOpenWorkflows }: Props): JSX.Element {
+/** Memoised: it has its own subscriptions, and nothing to redraw when only
+ *  the shell around it re-renders. */
+export default memo(Sidebar)
+
+function Sidebar({ onOpenWorkflows }: Props): JSX.Element {
   const app = useApp()
   const deleting = usePendingDeletes()
   const width = useShell((s) => s.sidebarWidth)
@@ -90,6 +94,7 @@ export default function Sidebar({ onOpenWorkflows }: Props): JSX.Element {
   }, [])
 
   const closeMenu = useCallback(() => setMenu(null), [])
+  const endRename = useCallback(() => setRenamingId(null), [])
   const closeFooterMenu = useCallback(() => setFooterMenu(null), [])
 
   const menuEntries = (session: ChatSummary): ContextMenuEntry[] => [
@@ -132,7 +137,7 @@ export default function Sidebar({ onOpenWorkflows }: Props): JSX.Element {
     menuId: menu?.session.id ?? null,
     renamingId,
     onRename: setRenamingId,
-    onRenameDone: () => setRenamingId(null),
+    onRenameDone: endRename,
     onContextMenu: openMenuAtPointer,
     onMore: openMenuAtButton
   }
@@ -469,7 +474,26 @@ function ArchivedSection({
 
 // ------------------------------------------------------------------- rows
 
-function ChatRow({
+/** Each app state brings every summary as a new object; a row redraws only
+ *  when what it shows has changed. */
+const ChatRow = memo(ChatRowView, (prev, next) => {
+  if (Object.keys(prev).length !== Object.keys(next).length) return false
+  for (const key of Object.keys(next) as (keyof typeof next)[]) {
+    if (key === 'session') continue
+    if (prev[key] !== next[key]) return false
+  }
+  return sameSummary(prev.session, next.session)
+})
+
+function sameSummary(a: ChatSummary, b: ChatSummary): boolean {
+  if (a === b) return true
+  for (const key of Object.keys(b) as (keyof ChatSummary)[]) {
+    if (a[key] !== b[key]) return false
+  }
+  return Object.keys(a).length === Object.keys(b).length
+}
+
+function ChatRowView({
   session,
   subtitle,
   now,

@@ -21,12 +21,54 @@ export interface RendererState {
 let state: RendererState = { app: null, chats: {}, permissions: [], questions: [] }
 const listeners = new Set<() => void>()
 
-function emit(next: RendererState): void {
-  state = next
+/** A notification the views are owed, waiting for the next frame. */
+let frameRequest = 0
+let fallbackTimer: ReturnType<typeof setTimeout> | null = null
+/** A window that is hidden gets no frames; it still catches up this soon. */
+const HIDDEN_CATCH_UP_MS = 100
+
+function notify(): void {
+  if (frameRequest) cancelAnimationFrame(frameRequest)
+  if (fallbackTimer) clearTimeout(fallbackTimer)
+  frameRequest = 0
+  fallbackTimer = null
   listeners.forEach((l) => l())
 }
 
-function subscribe(listener: () => void): () => void {
+/** The frame's (or the hidden window's) notification, unless an urgent one
+ *  has already paid it. */
+function owed(): void {
+  if (frameRequest || fallbackTimer) notify()
+}
+
+/** Under React's act() (the tests), nothing waits for a frame: act renders
+ *  what was dispatched inside it before it returns. */
+function inAct(): boolean {
+  return (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT === true
+}
+
+/**
+ * The state changes at once — getState() is always current — but the views
+ * hear of a chat's streaming changes once a frame. Main sends one message per
+ * changed item each frame, and each one used to be its own synchronous
+ * React commit of the whole chat: renders nobody ever saw. What changes what
+ * the window is (a new state from main, a chat arriving or leaving, a prompt
+ * waiting on the user) is told at once, and takes anything owed with it.
+ */
+function emit(next: RendererState, urgent = true): void {
+  state = next
+  if (urgent || inAct() || typeof requestAnimationFrame !== 'function') {
+    notify()
+    return
+  }
+  if (frameRequest) return
+  frameRequest = requestAnimationFrame(owed)
+  fallbackTimer = setTimeout(owed, HIDDEN_CATCH_UP_MS)
+}
+
+/** The views' way in (useStore); exported for what must hear of every
+ *  change without rendering. */
+export function subscribe(listener: () => void): () => void {
   listeners.add(listener)
   return () => listeners.delete(listener)
 }
@@ -50,15 +92,19 @@ function reduce(event: MainEvent): void {
       const chat = state.chats[event.chatId]
       if (!chat) break
       const id = transcriptItemId(event.item)
-      const idx = chat.items.findIndex((it) => transcriptItemId(it) === id)
-      const items = idx >= 0 ? chat.items.map((it, i) => (i === idx ? event.item : it)) : [...chat.items, event.item]
-      emit({ ...state, chats: { ...state.chats, [event.chatId]: { ...chat, items } } })
+      // From the end: a streaming turn updates the items it just added.
+      let idx = chat.items.length - 1
+      while (idx >= 0 && transcriptItemId(chat.items[idx]) !== id) idx--
+      const items = chat.items.slice()
+      if (idx >= 0) items[idx] = event.item
+      else items.push(event.item)
+      emit({ ...state, chats: { ...state.chats, [event.chatId]: { ...chat, items } } }, false)
       break
     }
     case 'chat-meta': {
       const chat = state.chats[event.chatId]
       if (!chat) break
-      emit({ ...state, chats: { ...state.chats, [event.chatId]: { ...chat, ...event.meta } } })
+      emit({ ...state, chats: { ...state.chats, [event.chatId]: { ...chat, ...event.meta } } }, false)
       break
     }
     case 'chat-config-value': {
@@ -67,7 +113,7 @@ function reduce(event: MainEvent): void {
       const configOptions = chat.configOptions.map((o) =>
         o.id === event.configId ? withValue(o, event.value) : o
       )
-      emit({ ...state, chats: { ...state.chats, [event.chatId]: { ...chat, configOptions } } })
+      emit({ ...state, chats: { ...state.chats, [event.chatId]: { ...chat, configOptions } } }, false)
       break
     }
     case 'chat-removed': {

@@ -20,6 +20,7 @@ import {
   diffOf,
   diffStat,
   displayName,
+  hasContent,
   parsedTitle,
   rowArgument,
   rowMeta,
@@ -54,7 +55,7 @@ export function ToolRow({ tool }: { tool: ToolCallItem }): JSX.Element {
   const command = shellCommand(tool)
   const images = tool.images ?? []
   const hasDetail =
-    tool.output.trim() !== '' ||
+    hasContent(tool.output) ||
     tool.diffs.length > 0 ||
     images.length > 0 ||
     command !== null ||

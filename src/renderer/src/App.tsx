@@ -10,7 +10,7 @@
 // up through an engine restart, too — main keeps the phase and says
 // "reconnecting" instead — so a crash or an update never unmounts a draft.
 
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import './design/theme.css'
 import './design/shell.css'
 import type { MenuCommand } from '@shared/shortcuts'
@@ -189,6 +189,13 @@ export default function App(): JSX.Element {
     )
   }, [])
 
+  // The sidebar is memoised; a callback made anew each render would undo that.
+  const selectedRef = useRef(selectedId)
+  selectedRef.current = selectedId
+  const openWorkflows = useCallback(() => {
+    if (selectedRef.current) setWorkflowsChatId(selectedRef.current)
+  }, [])
+
   // Main's one-off messages (a bad CLI path, the engine restarting). Keyed
   // on the nonce, so the same message twice is shown twice. Setup shows its
   // own inline.
@@ -345,7 +352,7 @@ export default function App(): JSX.Element {
         return (
           <div className="split">
             {!sidebarCollapsed && (
-              <Sidebar onOpenWorkflows={() => selectedId && setWorkflowsChatId(selectedId)} />
+              <Sidebar onOpenWorkflows={openWorkflows} />
             )}
             <main className="detail">
               {phase.kind !== 'needsProject' && selectedId ? (

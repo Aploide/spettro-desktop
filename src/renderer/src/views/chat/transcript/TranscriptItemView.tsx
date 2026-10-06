@@ -14,7 +14,7 @@
 // rather than in ChatView is deliberate — ChatView is about layout, and the
 // question "what does this row look like" already has exactly one home.
 
-import { useEffect, useRef, useState } from 'react'
+import { memo, useEffect, useRef, useState } from 'react'
 import type { JSX } from 'react'
 import type { ChatMessage, TranscriptItem } from '@shared/model'
 import { MarkdownText } from './MarkdownText'
@@ -43,7 +43,33 @@ import './transcript.css'
  * still carries the tools that sub-agent ran, so it renders as the ordinary
  * sub-agent card with those folded in.
  */
-export function TranscriptRowView({ row }: { row: DisplayRow }): JSX.Element {
+export const TranscriptRowView = memo(TranscriptRow, (prev, next) => sameRow(prev.row, next.row))
+
+/**
+ * Whether a row would draw the same as before. The fold builds new row
+ * objects on every change to the chat, but the items in them are the
+ * store's, replaced only when they change: a streamed chunk is one new item,
+ * and every other row of a long transcript is left alone. A run or a lone
+ * sub-agent is assembled from many items, and is simply drawn again.
+ */
+export function sameRow(a: DisplayRow, b: DisplayRow): boolean {
+  if (a === b) return true
+  if (a.kind !== b.kind || a.id !== b.id) return false
+  switch (a.kind) {
+    case 'item':
+      return a.item === (b as typeof a).item
+    case 'script':
+      return a.item === (b as typeof a).item
+    case 'tools': {
+      const tools = (b as typeof a).tools
+      return a.tools.length === tools.length && a.tools.every((t, i) => t === tools[i])
+    }
+    default:
+      return false
+  }
+}
+
+function TranscriptRow({ row }: { row: DisplayRow }): JSX.Element {
   switch (row.kind) {
     case 'item':
       return <TranscriptItemView item={row.item} />

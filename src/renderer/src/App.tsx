@@ -2,18 +2,25 @@
 // screen per app phase, hosts the app-wide sheets (permission, question,
 // settings, remote access) so they are reachable in every phase, shows the
 // transient banner as a top toast, and binds the global keyboard shortcuts.
+//
+// Once the agent is up the shell is persistent, like the Claude Code tab: the
+// sidebar stays put (unless collapsed with Ctrl/Cmd+B) and the main column
+// shows either the selected session or the new-session empty state.
 
 import { useEffect, useState } from 'react'
 import './design/theme.css'
 import './design/shell.css'
 import { call, ensureChatLoaded, getState, initStore, useApp, useStore } from './state/store'
+import { focusComposer, startNewSession, toggleSidebar, toggleTerminal, useShell } from './state/shell'
 import LoadingView from './views/shell/LoadingView'
 import FailureView from './views/shell/FailureView'
 import Sidebar from './views/shell/Sidebar'
-import ProjectPickerView from './views/shell/ProjectPickerView'
+import NewSessionView from './views/shell/NewSessionView'
+import QuickSwitcher from './views/shell/QuickSwitcher'
 import OnboardingView from './views/shell/OnboardingView'
 import SettingsView, { type SettingsPane } from './views/shell/SettingsView'
-import { defaultProjectPath } from './views/shell/util'
+import { visibleSessionOrder } from './views/shell/sessionGroups'
+import { isMac } from './views/shell/util'
 import ChatView from '@renderer/views/chat/ChatView'
 import PermissionSheet from '@renderer/views/sheets/PermissionSheet'
 import QuestionSheet from '@renderer/views/sheets/QuestionSheet'
@@ -31,6 +38,8 @@ export default function App(): JSX.Element {
   // pane the sheet opens on.
   const [settingsPane, setSettingsPane] = useState<SettingsPane | null>(null)
   const [remoteOpen, setRemoteOpen] = useState(false)
+  const [switcherOpen, setSwitcherOpen] = useState(false)
+  const sidebarCollapsed = useShell((s) => s.sidebarCollapsed)
   // The studio is pinned to the chat that opened it, not to whatever is
   // selected now: it holds an unsaved draft, and having the project shift out
   // from under an editor mid-edit would be a good way to save into the wrong
@@ -55,41 +64,79 @@ export default function App(): JSX.Element {
     if (selectedId) void ensureChatLoaded(selectedId)
   }, [selectedId])
 
-  // Global shortcuts: Ctrl/Cmd+N new chat (ready only), Ctrl/Cmd+, settings,
-  // Ctrl/Cmd+Shift+R remote access, Escape closes the topmost shell sheet.
+  // Global shortcuts. Ctrl/Cmd+N new session, +B sidebar, +K switch session,
+  // +L focus the composer, +1…9 the Nth session in the sidebar, +, settings,
+  // +Shift+R remote access, +Shift+W workflows; Ctrl+` the terminal; Escape
+  // closes the topmost shell sheet.
+  //
+  // Inside the terminal every key belongs to the shell (Ctrl+N is its history,
+  // Ctrl+K kills a line, Ctrl+L clears), so none of these fire there — except
+  // Ctrl+`, which is how you get out of it.
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
+      const state = getState().app
+      const phase = state?.phase.kind
+      const shellUp =
+        phase === 'ready' ||
+        phase === 'needsProject' ||
+        (phase === 'needsProvider' && providerSetupSkipped)
+
+      if (e.ctrlKey && !e.metaKey && !e.altKey && (e.code === 'Backquote' || e.key === '`')) {
+        if (shellUp && state?.selectedSessionId) {
+          e.preventDefault()
+          toggleTerminal()
+        }
+        return
+      }
+      if (e.target instanceof Element && e.target.closest('.xterm')) return
+
       if (e.key === 'Escape') {
         if (remoteOpen) setRemoteOpen(false)
         else if (workflowsChatId) setWorkflowsChatId(null)
         else if (settingsPane) setSettingsPane(null)
         return
       }
-      if (!(e.metaKey || e.ctrlKey)) return
+      // Cmd on macOS, Ctrl elsewhere: on a Mac, Ctrl+K and friends are text
+      // editing keys in every field and must keep working.
+      if (!(isMac() ? e.metaKey : e.ctrlKey) || e.altKey) return
       const key = e.key.toLowerCase()
-      if (key === 'n' && !e.shiftKey && !e.altKey) {
-        const state = getState().app
-        if (state?.phase.kind === 'ready') {
-          e.preventDefault()
-          void call('newChat', defaultProjectPath(state))
-        }
-      } else if (e.key === ',') {
+      if (e.key === ',') {
         e.preventDefault()
         setSettingsPane('general')
       } else if (key === 'r' && e.shiftKey) {
         e.preventDefault()
         setRemoteOpen(true)
       } else if (key === 'w' && e.shiftKey) {
-        const selected = getState().app?.selectedSessionId ?? null
+        const selected = state?.selectedSessionId ?? null
         if (selected) {
           e.preventDefault()
           setWorkflowsChatId(selected)
+        }
+      } else if (!shellUp || e.shiftKey) {
+        return
+      } else if (key === 'n') {
+        e.preventDefault()
+        startNewSession()
+      } else if (key === 'b') {
+        e.preventDefault()
+        toggleSidebar()
+      } else if (key === 'k') {
+        e.preventDefault()
+        setSwitcherOpen((open) => !open)
+      } else if (key === 'l') {
+        e.preventDefault()
+        focusComposer()
+      } else if (/^[1-9]$/.test(e.key)) {
+        const target = visibleSessionOrder(state?.sessions ?? [])[Number(e.key) - 1]
+        if (target) {
+          e.preventDefault()
+          void call('openChat', target.id)
         }
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [remoteOpen, settingsPane, workflowsChatId])
+  }, [remoteOpen, settingsPane, workflowsChatId, providerSetupSkipped])
 
   // The transient banner toast. It re-arms whenever the banner text changes
   // and hides itself; onboarding shows the same banner inline, so the toast
@@ -114,6 +161,8 @@ export default function App(): JSX.Element {
       {renderPhase()}
 
       {settingsPane && <SettingsView initialPane={settingsPane} onClose={() => setSettingsPane(null)} />}
+
+      {switcherOpen && <QuickSwitcher onClose={() => setSwitcherOpen(false)} />}
 
       {workflowsChatId && (
         <div className="modal-backdrop" role="presentation">
@@ -198,20 +247,22 @@ export default function App(): JSX.Element {
       case 'ready':
         return (
           <div className="split">
-            <Sidebar
-              onOpenSettings={(pane) => setSettingsPane(pane ?? 'general')}
-              onOpenRemote={() => setRemoteOpen(true)}
-              onOpenWorkflows={() => selectedId && setWorkflowsChatId(selectedId)}
-            />
-            <div className="detail">
+            {!sidebarCollapsed && (
+              <Sidebar
+                onOpenSettings={(pane) => setSettingsPane(pane ?? 'general')}
+                onOpenRemote={() => setRemoteOpen(true)}
+                onOpenWorkflows={() => selectedId && setWorkflowsChatId(selectedId)}
+              />
+            )}
+            <main className="detail">
               {phase.kind !== 'needsProject' && selectedId ? (
                 // Keyed by session id so switching chats rebuilds the whole
                 // chat hierarchy instead of diffing two conversations.
                 <ChatView key={selectedId} chatId={selectedId} />
               ) : (
-                <ProjectPickerView />
+                <NewSessionView />
               )}
-            </div>
+            </main>
           </div>
         )
     }

@@ -45,7 +45,13 @@ SCENES=(
   studio:broken
   chrome
   app:welcome
+  app:welcome-empty
+  app:welcome-folders
   app:chat
+  app:sidebar-many
+  app:sidebar-menu
+  app:collapsed
+  app:switcher
   app:permission-bash
   app:permission-diff
   app:question

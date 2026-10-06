@@ -1,12 +1,17 @@
 // Port of Platforms/macOS/Views/ComposerView.swift (docs 25 + 14): the growing
 // text field with slash-command palette, image attachments, config bar, and
-// the send/stop + terminal buttons.
+// the send/stop button.
+//
+// It also serves the new-session view, where no chat exists yet: there it is
+// handed a draft (see draftChat) and an `onSubmit`, and the caller creates the
+// chat with the first message.
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { ActivationTextarea } from './ActivationGlow'
 import type { ACPCommand } from '@shared/acp'
 import type { ChatDetail } from '@shared/model'
 import { call, useApp } from '@renderer/state/store'
+import { FOCUS_COMPOSER_EVENT } from '@renderer/state/shell'
 import ConfigBar from './ConfigBar'
 import { projectName } from './ChatHeader'
 
@@ -25,19 +30,46 @@ interface PendingAttachment {
   height: number
 }
 
-interface ComposerProps {
-  chat: ChatDetail
-  terminalVisible: boolean
-  onToggleTerminal: () => void
-  promptSeed: string
+/** Text to put in the composer from outside (a starter prompt). The nonce
+ *  makes every click a new seed, so choosing the same prompt twice — after
+ *  editing or clearing the first — still fills the field. */
+export interface PromptSeed {
+  text: string
+  nonce: number
 }
 
-export default function Composer({
-  chat,
-  terminalVisible,
-  onToggleTerminal,
-  promptSeed
-}: ComposerProps): JSX.Element {
+export type SubmitAttachment = { data: string; mimeType: string }
+
+interface ComposerProps {
+  chat: ChatDetail
+  promptSeed?: PromptSeed | null
+  /** New-session mode: there is no chat to send to yet, so the message goes
+   *  to the caller instead of `send`. Returning false keeps it in the field. */
+  onSubmit?: (text: string, attachments: SubmitAttachment[]) => boolean | void
+}
+
+/** The stand-in a chat-less composer renders against: nothing is busy, no
+ *  options or commands are known yet, and the id is never sent anywhere
+ *  (onSubmit takes the message instead). */
+export function draftChat(projectPath: string): ChatDetail {
+  return {
+    id: '',
+    title: '',
+    projectPath,
+    acpSessionId: null,
+    isPinned: false,
+    isArchived: false,
+    isBusy: false,
+    createdAt: 0,
+    items: [],
+    configOptions: [],
+    commands: [],
+    plan: [],
+    usage: null
+  }
+}
+
+export default function Composer({ chat, promptSeed, onSubmit }: ComposerProps): JSX.Element {
   const app = useApp()
   const [draft, setDraft] = useState('')
   const [attachments, setAttachments] = useState<PendingAttachment[]>([])
@@ -61,10 +93,21 @@ export default function Composer({
   }, [chat.id])
 
   useEffect(() => {
-    if (promptSeed === '') return
-    setDraft(promptSeed)
-    textareaRef.current?.focus()
+    if (!promptSeed) return
+    setDraft(promptSeed.text)
+    const el = textareaRef.current
+    if (!el) return
+    el.focus()
+    // Caret at the end, ready to add detail to the starter prompt.
+    requestAnimationFrame(() => el.setSelectionRange(el.value.length, el.value.length))
   }, [promptSeed])
+
+  // Ctrl/Cmd+L and New session ask for the composer by event.
+  useEffect(() => {
+    const focus = (): void => textareaRef.current?.focus()
+    window.addEventListener(FOCUS_COMPOSER_EVENT, focus)
+    return () => window.removeEventListener(FOCUS_COMPOSER_EVENT, focus)
+  }, [])
 
   // Auto-grow: 2–12 lines (lineLimit(2...12) on the vertical TextField).
   useLayoutEffect(() => {
@@ -95,9 +138,15 @@ export default function Composer({
     const trimmed = text.trim()
     if (!((trimmed.length > 0 || attachments.length > 0) && !chat.isBusy && ready)) return
     const toSend = attachments.map((a) => ({ data: a.data, mimeType: a.mimeType }))
+    if (onSubmit) {
+      // The caller may decline (a folder it wants confirmed first); the
+      // message then stays put rather than vanishing.
+      if (onSubmit(trimmed, toSend) === false) return
+    } else {
+      void call('send', chat.id, trimmed, toSend)
+    }
     setDraft('')
     setAttachments([])
-    void call('send', chat.id, trimmed, toSend)
   }
 
   const moveCommand = (delta: number): void => {
@@ -162,9 +211,13 @@ export default function Composer({
     e.target.value = ''
   }
 
-  const placeholder = ready
-    ? `Message Spettro — working in ${projectName(chat.projectPath)}`
-    : 'Connecting…'
+  // The new-session view names the folder right under the field, so there
+  // the placeholder says what to type instead of where.
+  const placeholder = !ready
+    ? 'Connecting…'
+    : onSubmit
+      ? 'Describe a task, or ask about your code…'
+      : `Message Spettro — working in ${projectName(chat.projectPath)}`
 
   return (
     <div className="composer-outer">
@@ -261,18 +314,9 @@ export default function Composer({
             onChange={onFilesPicked}
           />
 
-          <ConfigBar chat={chat} />
+          {!onSubmit && <ConfigBar chat={chat} />}
 
           <div className="composer-options-spacer" />
-
-          <button
-            type="button"
-            className={'composer-btn' + (terminalVisible ? ' composer-btn--accent' : '')}
-            title={terminalVisible ? 'Hide terminal' : 'Show terminal'}
-            onClick={onToggleTerminal}
-          >
-            <TerminalIcon />
-          </button>
 
           {chat.isBusy ? (
             <button
@@ -378,15 +422,6 @@ function PlusIcon(): JSX.Element {
   return (
     <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden>
       <path d="M8 2.5v11M2.5 8h11" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-    </svg>
-  )
-}
-
-function TerminalIcon(): JSX.Element {
-  return (
-    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden>
-      <rect x="1.5" y="2.5" width="13" height="11" rx="2" stroke="currentColor" strokeWidth="1.3" />
-      <path d="m4.5 6 2 2-2 2M8 10.5h3.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   )
 }

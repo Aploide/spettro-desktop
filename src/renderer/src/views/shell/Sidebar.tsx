@@ -1,34 +1,33 @@
-// Port of SidebarView.swift: brand header (app icon, wordmark, plan badge,
-// new-chat-in-folder button), search field, the project-grouped chat list with
-// pinned-first ordering and a collapsed-by-default Archived section, and a
-// footer with the active model, CLI version, remote-access toggle and the
-// settings gear. Right-click on a row opens the pin/archive/close menu.
+// The session sidebar, after the Claude Code tab: a "New session" row and a
+// quiet search field on top; sessions grouped under their project's name,
+// most recent first, with pinned ones lifted and archived ones tucked into a
+// collapsed section; and an account row with Settings at the bottom.
+//
+// Every row action is reachable two ways — right-click, or the "…" button a
+// row shows on hover and focus — and both open the same menu, so nothing
+// depends on discovering the secondary click. The sidebar is resizable from
+// its right edge and collapsible (Ctrl/Cmd+B); both live in state/shell.ts.
 
-import { useMemo, useState } from 'react'
-import type { ACPConfigOption } from '@shared/acp'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import type { ChatSummary } from '@shared/model'
 import { isUpdateBusy, type UpdateState } from '@shared/update'
-import { call, useApp, useStore } from '@renderer/state/store'
+import { call, useApp } from '@renderer/state/store'
+import {
+  SIDEBAR_DEFAULT_WIDTH,
+  setSidebarWidth,
+  startNewSession,
+  toggleSidebar,
+  useShell
+} from '@renderer/state/shell'
+import { Icon } from '@renderer/design/icons'
 import type { SettingsPane } from './SettingsView'
-import AppIcon from './AppIcon'
 import PlanBadge from './PlanBadge'
 import Spinner from './Spinner'
 import ContextMenu, { type ContextMenuEntry } from './ContextMenu'
-import { basename } from './util'
-import {
-  ArchiveIcon,
-  ChevronRightIcon,
-  ClearIcon,
-  DownloadIcon,
-  FlowchartIcon,
-  FolderFillIcon,
-  FolderPlusIcon,
-  GearIcon,
-  MagnifyIcon,
-  PhoneIcon,
-  PinIcon,
-  PlusIcon
-} from './icons'
+import InlineRename from './InlineRename'
+import { groupSessions, type ProjectGroup } from './sessionGroups'
+import { basename, isMac, relativeTime, shortcutLabel, withShortcut } from './util'
+import { ArchiveIcon, ChevronRightIcon, ClearIcon, DownloadIcon, GearIcon, MagnifyIcon, PinIcon, PlusIcon } from './icons'
 
 interface Props {
   /** The pane argument lets the update prompt open Settings on Updates. */
@@ -40,161 +39,249 @@ interface Props {
   onOpenWorkflows: () => void
 }
 
-interface ProjectGroup {
-  path: string
-  sessions: ChatSummary[]
-}
-
 interface MenuState {
   x: number
   y: number
   session: ChatSummary
 }
 
-/** Stable sort lifting pinned chats without disturbing relative order. */
-function pinnedFirst(sessions: ChatSummary[]): ChatSummary[] {
-  return [...sessions].sort((a, b) => Number(b.isPinned) - Number(a.isPinned))
-}
-
 export default function Sidebar({ onOpenSettings, onOpenRemote, onOpenWorkflows }: Props): JSX.Element {
   const app = useApp()
+  const width = useShell((s) => s.sidebarWidth)
   const [searchText, setSearchText] = useState('')
   const [menu, setMenu] = useState<MenuState | null>(null)
+  const [renamingId, setRenamingId] = useState<string | null>(null)
+  const [footerMenu, setFooterMenu] = useState<{ x: number; y: number } | null>(null)
 
   const sessions = app?.sessions
   const selectedId = app?.selectedSessionId ?? null
-  const query = searchText.trim().toLowerCase()
-  const isSearching = query.length > 0
+  const isSearching = searchText.trim().length > 0
 
-  // A chat matches on its own title or on the name of the folder it runs in,
-  // so searching a folder name surfaces every chat inside it.
-  const { groups, archived } = useMemo(() => {
-    const matches = (s: ChatSummary): boolean =>
-      !query ||
-      s.title.toLowerCase().includes(query) ||
-      basename(s.projectPath).toLowerCase().includes(query)
+  const { groups, archived } = useMemo(
+    () => groupSessions(sessions ?? [], searchText),
+    [sessions, searchText]
+  )
+  const hasAny = (sessions ?? []).length > 0
 
-    const order: string[] = []
-    const buckets = new Map<string, ChatSummary[]>()
-    for (const s of sessions ?? []) {
-      if (s.isArchived || !matches(s)) continue
-      let bucket = buckets.get(s.projectPath)
-      if (!bucket) {
-        bucket = []
-        buckets.set(s.projectPath, bucket)
-        order.push(s.projectPath)
-      }
-      bucket.push(s)
-    }
-    return {
-      groups: order.map((path) => ({ path, sessions: pinnedFirst(buckets.get(path) ?? []) })),
-      archived: pinnedFirst((sessions ?? []).filter((s) => s.isArchived && matches(s)))
-    }
-  }, [sessions, query])
-
-  const openMenu = (e: React.MouseEvent, session: ChatSummary): void => {
+  const openMenuAtPointer = useCallback((e: React.MouseEvent, session: ChatSummary): void => {
     e.preventDefault()
     setMenu({ x: e.clientX, y: e.clientY, session })
-  }
+  }, [])
 
-  const newChatInPickedFolder = async (): Promise<void> => {
-    const path = await call('pickFolder')
-    if (path) await call('newChat', path)
-  }
+  const openMenuAtButton = useCallback((button: HTMLElement, session: ChatSummary): void => {
+    const rect = button.getBoundingClientRect()
+    setMenu({ x: rect.left, y: rect.bottom + 4, session })
+  }, [])
+
+  const closeMenu = useCallback(() => setMenu(null), [])
+  const closeFooterMenu = useCallback(() => setFooterMenu(null), [])
 
   const menuEntries = (session: ChatSummary): ContextMenuEntry[] => [
+    { label: 'Rename…', action: () => setRenamingId(session.id) },
     { label: session.isPinned ? 'Unpin' : 'Pin', action: () => void call('togglePin', session.id) },
     {
       label: session.isArchived ? 'Unarchive' : 'Archive',
       action: () => void call('toggleArchive', session.id)
     },
     'separator',
-    { label: 'Close Chat', destructive: true, action: () => void call('closeChat', session.id) }
+    {
+      label: 'Delete…',
+      confirmLabel: 'Delete permanently',
+      destructive: true,
+      action: () => void call('closeChat', session.id)
+    }
   ]
 
+  const remoteOn = app?.remote?.enabled ?? false
+  const footerEntries: ContextMenuEntry[] = [
+    {
+      label: 'Workflows…',
+      disabled: !selectedId,
+      action: onOpenWorkflows
+    },
+    {
+      // The companion app is iPhone-only, so the promise only makes sense on
+      // the Mac it pairs with; elsewhere it is plain remote access.
+      label: `${isMac() ? 'Control from your iPhone…' : 'Remote access…'}${remoteOn ? ' (on)' : ''}`,
+      action: onOpenRemote
+    }
+  ]
+
+  const rowProps = {
+    selectedId,
+    renamingId,
+    onRename: setRenamingId,
+    onRenameDone: () => setRenamingId(null),
+    onContextMenu: openMenuAtPointer,
+    onMore: openMenuAtButton
+  }
+
   return (
-    <div className="sidebar">
-      <div className="sidebar-header">
-        <AppIcon size={26} />
-        <span className="sidebar-title">Spettro</span>
-        <PlanBadge plan={app?.subscription.plan ?? 'unknown'} size={15} />
+    <aside className="sidebar" style={{ width }} aria-label="Sessions">
+      <div className="sidebar-top">
         <button
-          className="icon-btn"
-          title="New chat in a different folder…"
-          onClick={() => void newChatInPickedFolder()}
+          type="button"
+          className="sidebar-new"
+          title={withShortcut('New session', 'N')}
+          onClick={() => startNewSession()}
+          data-testid="new-session"
         >
-          <FolderPlusIcon size={16} />
+          <Icon name="square.and.pencil" size={15} />
+          <span className="sidebar-new-label">New session</span>
+          <kbd className="sidebar-kbd">{shortcutLabel('N')}</kbd>
+        </button>
+        <button
+          type="button"
+          className="sidebar-icon-btn"
+          title={withShortcut('Hide sidebar', 'B')}
+          aria-label="Hide sidebar"
+          onClick={toggleSidebar}
+        >
+          <Icon name="sidebar.left" size={15} />
         </button>
       </div>
 
-      <div className="search">
-        <MagnifyIcon size={12} />
+      <div className="sidebar-search">
+        <MagnifyIcon size={13} />
         <input
           type="text"
-          placeholder="Search"
+          placeholder="Search sessions"
+          aria-label="Search sessions"
           value={searchText}
           onChange={(e) => setSearchText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape' && searchText !== '') {
+              e.stopPropagation()
+              setSearchText('')
+            }
+          }}
         />
         {searchText.length > 0 && (
-          <button className="icon-btn" title="Clear search" onClick={() => setSearchText('')}>
+          <button
+            type="button"
+            className="sidebar-search-clear"
+            title="Clear search"
+            onClick={() => setSearchText('')}
+          >
             <ClearIcon size={13} />
           </button>
         )}
       </div>
 
-      <div className="divider divider--faint" />
-
-      <div className="chat-list">
+      <nav className="chat-list" aria-label="Session list">
+        {!hasAny && <div className="sidebar-empty">Your sessions will appear here</div>}
         {groups.map((group) => (
-          <ProjectSection
-            key={group.path}
-            group={group}
-            selectedId={selectedId}
-            forceExpanded={isSearching}
-            onContextMenu={openMenu}
-          />
+          <ProjectSection key={group.path} group={group} forceExpanded={isSearching} {...rowProps} />
         ))}
         {archived.length > 0 && (
-          <ArchivedSection
-            sessions={archived}
-            selectedId={selectedId}
-            forceExpanded={isSearching}
-            onContextMenu={openMenu}
-          />
+          <ArchivedSection sessions={archived} forceExpanded={isSearching} {...rowProps} />
         )}
         {isSearching && groups.length === 0 && archived.length === 0 && (
-          <div className="no-matches">No chats match &ldquo;{searchText}&rdquo;</div>
+          <div className="sidebar-empty">No sessions match &ldquo;{searchText.trim()}&rdquo;</div>
         )}
-      </div>
-
-      <div className="divider divider--faint" />
+      </nav>
 
       {app?.update && <UpdatePrompt update={app.update} onOpen={() => onOpenSettings('updates')} />}
 
       <div className="sidebar-footer">
-        <FooterStatus selectedId={selectedId} agentVersion={app?.agentVersion ?? null} />
+        <AccountRow onOpen={() => onOpenSettings('account')} />
         <button
-          className={`icon-btn${app?.remote?.enabled ? ' icon-btn--accent' : ''}`}
-          title={app?.remote?.enabled ? 'Remote access is on' : 'Control from your iPhone'}
-          onClick={onOpenRemote}
+          type="button"
+          className="sidebar-icon-btn"
+          title={withShortcut('Settings', ',')}
+          aria-label="Settings"
+          onClick={() => onOpenSettings()}
         >
-          <PhoneIcon size={16} active={app?.remote?.enabled ?? false} />
+          <GearIcon size={15} />
         </button>
         <button
-          className="icon-btn"
-          title={selectedId ? 'Workflows' : 'Open a chat to work on its workflows'}
-          disabled={!selectedId}
-          onClick={onOpenWorkflows}
+          type="button"
+          className={'sidebar-icon-btn' + (remoteOn ? ' sidebar-icon-btn--dot' : '')}
+          title="More"
+          aria-label="More"
+          aria-haspopup="menu"
+          onClick={(e) => {
+            const rect = e.currentTarget.getBoundingClientRect()
+            // Opens upward from the footer; ContextMenu clamps it on screen.
+            setFooterMenu({ x: rect.left, y: rect.top - 4 })
+          }}
         >
-          <FlowchartIcon size={16} />
-        </button>
-        <button className="icon-btn" title="Settings" onClick={() => onOpenSettings()}>
-          <GearIcon size={16} />
+          <Icon name="ellipsis" size={15} />
         </button>
       </div>
 
-      {menu && <ContextMenu x={menu.x} y={menu.y} entries={menuEntries(menu.session)} onClose={() => setMenu(null)} />}
-    </div>
+      <SidebarResizer width={width} />
+
+      {menu && (
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          label={menu.session.title}
+          entries={menuEntries(menu.session)}
+          onClose={closeMenu}
+        />
+      )}
+      {footerMenu && (
+        <ContextMenu
+          x={footerMenu.x}
+          y={footerMenu.y}
+          label="More"
+          above
+          entries={footerEntries}
+          onClose={closeFooterMenu}
+        />
+      )}
+    </aside>
+  )
+}
+
+// ---------------------------------------------------------------- resizer
+
+/** The sidebar's right edge. Drag to resize (220–360), double-click for the
+ *  default width, or focus it and use ←/→. The width is written to storage
+ *  once per drag, when the pointer lets go. */
+function SidebarResizer({ width }: { width: number }): JSX.Element {
+  const drag = useRef<{ startX: number; startWidth: number } | null>(null)
+
+  return (
+    <div
+      className="sidebar-resizer"
+      role="separator"
+      aria-orientation="vertical"
+      aria-label="Resize sidebar"
+      aria-valuemin={220}
+      aria-valuemax={360}
+      aria-valuenow={width}
+      tabIndex={0}
+      onPointerDown={(e) => {
+        if (e.button !== 0) return
+        e.preventDefault()
+        e.currentTarget.setPointerCapture(e.pointerId)
+        drag.current = { startX: e.clientX, startWidth: width }
+        document.body.classList.add('is-resizing-sidebar')
+      }}
+      onPointerMove={(e) => {
+        if (!drag.current) return
+        setSidebarWidth(drag.current.startWidth + e.clientX - drag.current.startX, false)
+      }}
+      onPointerUp={(e) => {
+        if (!drag.current) return
+        setSidebarWidth(drag.current.startWidth + e.clientX - drag.current.startX, true)
+        drag.current = null
+        document.body.classList.remove('is-resizing-sidebar')
+      }}
+      onPointerCancel={() => {
+        drag.current = null
+        document.body.classList.remove('is-resizing-sidebar')
+      }}
+      onDoubleClick={() => setSidebarWidth(SIDEBAR_DEFAULT_WIDTH, true)}
+      onKeyDown={(e) => {
+        if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+          e.preventDefault()
+          setSidebarWidth(width + (e.key === 'ArrowRight' ? 16 : -16), true)
+        }
+      }}
+    />
   )
 }
 
@@ -258,94 +345,86 @@ function UpdatePrompt({
 
 // --------------------------------------------------------------- sections
 
-interface SectionProps {
+interface RowHandlers {
   selectedId: string | null
-  forceExpanded: boolean
+  renamingId: string | null
+  onRename: (chatId: string) => void
+  onRenameDone: () => void
   onContextMenu: (e: React.MouseEvent, session: ChatSummary) => void
+  onMore: (button: HTMLElement, session: ChatSummary) => void
 }
 
 function ProjectSection({
   group,
-  selectedId,
   forceExpanded,
-  onContextMenu
-}: SectionProps & { group: ProjectGroup }): JSX.Element {
-  // Project sections start expanded; the Archived section starts collapsed.
+  ...rows
+}: RowHandlers & { group: ProjectGroup; forceExpanded: boolean }): JSX.Element {
   const [collapsed, setCollapsed] = useState(false)
   const isExpanded = forceExpanded || !collapsed
   const name = basename(group.path)
 
   return (
-    <div className="section">
+    <section className="section" aria-label={name}>
       <div className="section-header">
         <button
+          type="button"
           className="section-toggle"
           disabled={forceExpanded}
+          title={group.path}
+          aria-expanded={isExpanded}
           onClick={() => setCollapsed((c) => !c)}
         >
-          <span className={`section-chevron${isExpanded ? ' section-chevron--open' : ''}`}>
-            <ChevronRightIcon size={9} />
-          </span>
-          <FolderFillIcon size={12} />
           <span className="section-name">{name}</span>
+          <span className={`section-chevron${isExpanded ? ' section-chevron--open' : ''}`}>
+            <ChevronRightIcon size={8} />
+          </span>
         </button>
         <button
-          className="icon-btn"
-          title={`New chat in ${name}`}
-          onClick={() => void call('newChat', group.path)}
+          type="button"
+          className="section-add"
+          title={`New session in ${name}`}
+          aria-label={`New session in ${name}`}
+          onClick={() => startNewSession(group.path)}
         >
-          <PlusIcon size={12} />
+          <PlusIcon size={11} />
         </button>
       </div>
-      {isExpanded &&
-        group.sessions.map((session) => (
-          <ChatRow
-            key={session.id}
-            session={session}
-            isSelected={session.id === selectedId}
-            onContextMenu={onContextMenu}
-          />
-        ))}
-    </div>
+      {isExpanded && group.sessions.map((session) => <ChatRow key={session.id} session={session} {...rows} />)}
+    </section>
   )
 }
 
 function ArchivedSection({
   sessions,
-  selectedId,
   forceExpanded,
-  onContextMenu
-}: SectionProps & { sessions: ChatSummary[] }): JSX.Element {
+  ...rows
+}: RowHandlers & { sessions: ChatSummary[]; forceExpanded: boolean }): JSX.Element {
   const [collapsed, setCollapsed] = useState(true)
   const isExpanded = forceExpanded || !collapsed
 
   return (
-    <div className="section">
+    <section className="section section--archived" aria-label="Archived">
       <div className="section-header">
         <button
+          type="button"
           className="section-toggle"
           disabled={forceExpanded}
+          aria-expanded={isExpanded}
           onClick={() => setCollapsed((c) => !c)}
         >
-          <span className={`section-chevron${isExpanded ? ' section-chevron--open' : ''}`}>
-            <ChevronRightIcon size={9} />
-          </span>
-          <ArchiveIcon size={12} />
+          <ArchiveIcon size={11} />
           <span className="section-name">Archived</span>
+          <span className="section-count">{sessions.length}</span>
+          <span className={`section-chevron${isExpanded ? ' section-chevron--open' : ''}`}>
+            <ChevronRightIcon size={8} />
+          </span>
         </button>
-        <span className="section-count">{sessions.length}</span>
       </div>
       {isExpanded &&
         sessions.map((session) => (
-          <ChatRow
-            key={session.id}
-            session={session}
-            isSelected={session.id === selectedId}
-            subtitle={basename(session.projectPath)}
-            onContextMenu={onContextMenu}
-          />
+          <ChatRow key={session.id} session={session} subtitle={basename(session.projectPath)} {...rows} />
         ))}
-    </div>
+    </section>
   )
 }
 
@@ -353,71 +432,119 @@ function ArchivedSection({
 
 function ChatRow({
   session,
-  isSelected,
   subtitle,
-  onContextMenu
-}: {
-  session: ChatSummary
-  isSelected: boolean
-  subtitle?: string
-  onContextMenu: (e: React.MouseEvent, session: ChatSummary) => void
-}): JSX.Element {
+  selectedId,
+  renamingId,
+  onRename,
+  onRenameDone,
+  onContextMenu,
+  onMore
+}: RowHandlers & { session: ChatSummary; subtitle?: string }): JSX.Element {
+  const isSelected = session.id === selectedId
+  const renaming = renamingId === session.id
+  const open = (): void => void call('openChat', session.id)
+
+  // The row is a container, not a button: the title is the button (its
+  // ::after stretches over the whole row, so a click anywhere opens), and the
+  // "…" sits beside it as a real, separately reachable button — nested inside
+  // a role=button it would be invisible to a screen reader.
   return (
     <div
-      className={`chat-row${isSelected ? ' chat-row--selected' : ''}`}
-      onClick={() => void call('openChat', session.id)}
+      className={
+        'chat-row' +
+        (isSelected ? ' chat-row--selected' : '') +
+        (session.unread && !isSelected ? ' chat-row--unread' : '')
+      }
+      data-testid={`sidebar-row-${session.id}`}
       onContextMenu={(e) => onContextMenu(e, session)}
     >
-      <span className="chat-row-status">
-        {/* Working → spinner. Has at least one turn → accent dot. Untouched →
-            nothing, so an empty chat doesn't compete for attention. */}
-        {session.isBusy ? (
-          <Spinner size={10} />
-        ) : session.messageCount > 0 ? (
-          <span className="chat-row-dot" />
-        ) : null}
-      </span>
-      <span className="chat-row-text">
-        <span className="chat-row-title-line">
+      {renaming ? (
+        <span className="chat-row-text">
+          <InlineRename chatId={session.id} title={session.title} onDone={onRenameDone} />
+        </span>
+      ) : (
+        <button
+          type="button"
+          className="chat-row-open"
+          aria-current={isSelected ? 'page' : undefined}
+          title={session.title}
+          onClick={open}
+          onKeyDown={(e) => {
+            if (e.key === 'F2') {
+              e.preventDefault()
+              onRename(session.id)
+            }
+          }}
+        >
           <span className="chat-row-title">{session.title}</span>
+          {subtitle && <span className="chat-row-subtitle">{subtitle}</span>}
+        </button>
+      )}
+      {!renaming && (
+        <span className="chat-row-trail">
           {session.isPinned && (
-            <span className="chat-row-pin">
+            <span className="chat-row-pin" aria-label="Pinned">
               <PinIcon size={9} />
             </span>
           )}
+          <RowStatus session={session} isSelected={isSelected} />
+          <button
+            type="button"
+            className="chat-row-more"
+            title="More actions"
+            aria-label={`More actions for ${session.title}`}
+            aria-haspopup="menu"
+            onClick={(e) => onMore(e.currentTarget, session)}
+          >
+            <Icon name="ellipsis" size={13} />
+          </button>
         </span>
-        {subtitle && <span className="chat-row-subtitle">{subtitle}</span>}
-      </span>
+      )}
     </div>
+  )
+}
+
+/** The row's right-hand slot. Working → spinner. Finished while you were
+ *  elsewhere → accent dot. Otherwise the time since it last moved, which the
+ *  "…" button covers on hover. (The amber "needs you" badge joins this slot
+ *  with inline permission cards.) */
+function RowStatus({ session, isSelected }: { session: ChatSummary; isSelected: boolean }): JSX.Element {
+  if (session.isBusy) {
+    return (
+      <span className="chat-row-status" title="Working…">
+        <Spinner size={11} />
+      </span>
+    )
+  }
+  return (
+    <span className="chat-row-status">
+      {session.unread && !isSelected && (
+        <span className="chat-row-dot" role="img" aria-label="Finished while you were away" />
+      )}
+      <span className="chat-row-time">{relativeTime(session.updatedAt)}</span>
+    </span>
   )
 }
 
 // ----------------------------------------------------------------- footer
 
-/** Active model of the selected chat (its "model" config option) over the
- *  connected CLI version — the FooterStatus/ModelLabel pair from Swift. */
-function FooterStatus({
-  selectedId,
-  agentVersion
-}: {
-  selectedId: string | null
-  agentVersion: string | null
-}): JSX.Element {
-  const chat = useStore((s) => (selectedId ? (s.chats[selectedId] ?? null) : null))
-  const label = chat ? modelLabel(chat.configOptions) : null
-  return (
-    <div className="footer-status">
-      <span className="footer-model">{label ?? 'No model'}</span>
-      {agentVersion && <span className="footer-cli">CLI {agentVersion}</span>}
-    </div>
-  )
-}
+/** Who is signed in, at a glance: initial, email, plan. Opens Settings on
+ *  the Account pane, which is where signing in or out happens. */
+function AccountRow({ onOpen }: { onOpen: () => void }): JSX.Element {
+  const app = useApp()
+  const account = app?.extensions.account
+  const email = account?.signedIn ? account.email : (app?.subscription.email ?? null)
+  const signedIn = Boolean(account?.signedIn || email)
+  const plan = app?.subscription.plan ?? 'unknown'
+  const initial = (email ?? '').trim().charAt(0).toUpperCase()
 
-function modelLabel(options: ACPConfigOption[]): string | null {
-  const opt = options.find((o) => o.id === 'model')
-  if (!opt || opt.kind.type !== 'select') return null
-  const value = opt.kind.currentValue
-  if (value == null) return null
-  const all = [...opt.kind.flat, ...opt.kind.groups.flatMap((g) => g.options)]
-  return all.find((c) => c.value === value)?.name ?? value
+  return (
+    <button type="button" className="account-row" onClick={onOpen} title="Account">
+      <span className={'account-avatar' + (signedIn ? '' : ' account-avatar--empty')} aria-hidden>
+        {signedIn && initial ? initial : <Icon name="person.crop.circle" size={14} />}
+      </span>
+      <span className="account-email">{signedIn ? (email ?? 'Signed in') : 'Not signed in'}</span>
+      {signedIn && plan !== 'unknown' && <PlanBadge plan={plan} size={9} />}
+    </button>
+  )
 }

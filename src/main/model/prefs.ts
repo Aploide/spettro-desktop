@@ -135,6 +135,13 @@ export class Prefs {
     this.save()
   }
 
+  removeRecentProject(path: string): void {
+    const next = this.data.recentProjects.filter((p) => p !== path)
+    if (next.length === this.data.recentProjects.length) return
+    this.data.recentProjects = next
+    this.save()
+  }
+
   get cachedCommands(): ACPCommand[] {
     return structuredClone(this.data.cachedCommands)
   }

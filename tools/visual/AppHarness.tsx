@@ -8,10 +8,13 @@
 // (app-state, chat-reset, permissions, questions) are fed through the real
 // store reducer. Nothing about the views is faked.
 //
-//   app.html?mode=welcome | chat | busy | permission-bash | permission-diff |
-//                 question | settings | onboarding | installing |
-//                 install-failed | gate | failure | reconnecting
+//   app.html?mode=welcome | welcome-empty | welcome-folders | chat | chat-one |
+//                 busy | sidebar-many | sidebar-menu | collapsed | switcher |
+//                 permission-bash | permission-diff | question | settings |
+//                 onboarding | installing | install-failed | gate | failure |
+//                 reconnecting
 
+import './appPrelude'
 import { createRoot } from 'react-dom/client'
 import App from '@renderer/App'
 import type { ACPConfigOption, ACPPermissionRequest, ACPQuestionRequest } from '@shared/acp'
@@ -241,17 +244,65 @@ function summary(
     isBusy: false,
     messageCount: 4,
     preview: '',
+    unread: false,
     ...extra
   }
 }
 
-const SESSIONS: ChatSummary[] = [
+const GATEWAY = '/home/carlo/code/api-gateway'
+const DOTFILES = '/home/carlo/code/dotfiles'
+const HOME = '/home/carlo'
+
+const FEW_SESSIONS: ChatSummary[] = [
   summary('c1', CHAT.title, PROJECT, 2, { isBusy: BUSY }),
   summary('c2', 'Add dark mode to the marketing site', PROJECT, 45, { isPinned: true }),
   summary('c3', 'Why is the checkout test flaky?', PROJECT, 180),
-  summary('c4', 'Migrate the API client to fetch', '/home/carlo/code/api-gateway', 60 * 26),
-  summary('c5', 'Write release notes for 2.4', '/home/carlo/code/api-gateway', 60 * 50)
+  summary('c4', 'Migrate the API client to fetch', GATEWAY, 60 * 26),
+  summary('c5', 'Write release notes for 2.4', GATEWAY, 60 * 50)
 ]
+
+/** Twenty chats across three projects: pinned, archived, one working, two
+ *  finished while the user was elsewhere — every state a row can be in. */
+const MANY_SESSIONS: ChatSummary[] = [
+  summary('c1', CHAT.title, PROJECT, 1),
+  summary('m2', 'Refactor the checkout flow into steps', PROJECT, 3, { isBusy: true }),
+  summary('m3', 'Add dark mode to the marketing site', PROJECT, 45, { isPinned: true }),
+  summary('m4', 'Why is the checkout test flaky?', PROJECT, 12, { unread: true }),
+  summary('m5', 'Upgrade to React 19 and fix the warnings it prints', PROJECT, 60 * 5),
+  summary('m6', 'Explain how the cart state is persisted', PROJECT, 60 * 30),
+  summary('m7', 'Lighthouse score on the product page', PROJECT, 60 * 24 * 3),
+  summary('m8', 'Migrate the API client to fetch', GATEWAY, 25, { unread: true }),
+  summary('m9', 'Write release notes for 2.4', GATEWAY, 60 * 50),
+  summary('m10', 'Rate limiting for the public endpoints', GATEWAY, 60 * 3, { isPinned: true }),
+  summary('m11', 'Why does /health return 503 on cold start?', GATEWAY, 60 * 24 * 2),
+  summary('m12', 'Add OpenTelemetry tracing', GATEWAY, 60 * 24 * 9),
+  summary('m13', 'Split the auth middleware', GATEWAY, 60 * 24 * 40),
+  summary('m14', 'Set up the new laptop', DOTFILES, 60 * 24 * 4),
+  summary('m15', 'Make the prompt show the git branch', DOTFILES, 60 * 24 * 6),
+  summary('m16', 'Tmux config for split panes', DOTFILES, 60 * 24 * 20),
+  summary('m17', 'Clean up old zsh aliases', DOTFILES, 60 * 24 * 60),
+  summary('m18', 'Prototype a GraphQL gateway', GATEWAY, 60 * 24 * 90, { isArchived: true }),
+  summary('m19', 'Try Bun for the build', PROJECT, 60 * 24 * 120, { isArchived: true }),
+  summary('m20', 'Old Vim setup', DOTFILES, 60 * 24 * 400, { isArchived: true })
+]
+
+function sessionsFor(mode: string): ChatSummary[] {
+  switch (mode) {
+    case 'welcome-empty':
+      return []
+    case 'chat-one':
+      return [summary('c1', CHAT.title, PROJECT, 2)]
+    case 'sidebar-many':
+    case 'sidebar-menu':
+    case 'switcher':
+      return MANY_SESSIONS
+    default:
+      return FEW_SESSIONS
+  }
+}
+
+const SESSIONS = sessionsFor(MODE)
+const NO_SELECTION = MODE === 'welcome' || MODE === 'welcome-empty' || MODE === 'welcome-folders'
 
 // --------------------------------------------------------------- extensions
 
@@ -339,7 +390,7 @@ const app: AppStateDTO = {
   phase: phaseFor(MODE),
   cli: { path: '/home/carlo/.local/bin/spettro', version: '2.9.0', isDev: false },
   agentVersion: '2.9.0',
-  selectedSessionId: MODE === 'welcome' ? null : 'c1',
+  selectedSessionId: NO_SELECTION ? null : 'c1',
   sessions: SESSIONS,
   banner: null,
   installLog:
@@ -361,9 +412,16 @@ const app: AppStateDTO = {
   extensions: MODE === 'gate' ? GATE_EXTENSIONS : EXTENSIONS,
   update: EMPTY_UPDATE_STATE,
   remote: null,
-  lastProjectPath: PROJECT,
-  defaultProjectPath: PROJECT,
-  recentProjects: [PROJECT, '/home/carlo/code/api-gateway', '/home/carlo/code/dotfiles'],
+  // A first run starts in the home folder, which is exactly the case the
+  // new-session view warns about.
+  lastProjectPath: MODE === 'welcome-empty' ? null : PROJECT,
+  defaultProjectPath: MODE === 'welcome-empty' ? HOME : PROJECT,
+  recentProjects:
+    MODE === 'welcome-empty'
+      ? []
+      : [PROJECT, GATEWAY, DOTFILES, '/home/carlo/code/old-prototype'],
+  missingProjects: MODE === 'welcome-empty' ? [] : ['/home/carlo/code/old-prototype'],
+  homePath: HOME,
   appearance: 'system'
 }
 
@@ -462,11 +520,28 @@ function pushEvents(): void {
   if (MODE === 'permission-bash') push({ type: 'permissions', requests: [PERMISSION_BASH] })
   if (MODE === 'permission-diff') push({ type: 'permissions', requests: [PERMISSION_DIFF] })
   if (MODE === 'question') push({ type: 'questions', requests: [QUESTION] })
-  if (MODE === 'settings') {
-    // Settings is renderer-local state behind a shortcut; press it the way a
-    // user would rather than adding a prop the app would never use.
+  // Settings, the switcher and the menus are renderer-local state behind a
+  // shortcut or a click; press it the way a user would rather than adding a
+  // prop the app would never use.
+  const press = (key: string): void => {
+    window.dispatchEvent(new KeyboardEvent('keydown', { key, ctrlKey: true }))
+  }
+  const click = (selector: string): void => {
+    document.querySelector<HTMLElement>(selector)?.click()
+  }
+  if (MODE === 'settings') setTimeout(() => press(','), 60)
+  if (MODE === 'switcher') setTimeout(() => press('k'), 60)
+  if (MODE === 'welcome-folders') setTimeout(() => click('[data-testid="project-chip"]'), 60)
+  if (MODE === 'sidebar-menu') {
+    // A right-click near the row's end: the "…" button only exists on hover,
+    // which an offscreen page never has, and both open the same menu.
     setTimeout(() => {
-      window.dispatchEvent(new KeyboardEvent('keydown', { key: ',', ctrlKey: true }))
+      const row = document.querySelector('[data-testid="sidebar-row-m4"]')
+      const r = row?.getBoundingClientRect()
+      if (!row || !r) return
+      row.dispatchEvent(
+        new MouseEvent('contextmenu', { bubbles: true, clientX: r.right - 24, clientY: r.bottom - 4 })
+      )
     }, 60)
   }
 }

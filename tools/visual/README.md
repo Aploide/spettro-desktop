@@ -38,8 +38,15 @@ Pick the screen with `?mode=`:
 
 | mode | what it shows |
 | --- | --- |
-| `welcome` | ready, no chat selected |
+| `welcome` | ready, no chat selected: the new-session view |
+| `welcome-empty` | first run: no sessions yet, working in the home folder (the warning shows) |
+| `welcome-folders` | the new-session view with its folder menu open, including a recent that no longer exists |
 | `chat` | a finished turn: reasoning, read/search/edit/bash calls, a sub-agent, a markdown answer with a code block, a plan |
+| `chat-one` | the same chat as the only session in the sidebar |
+| `sidebar-many` | twenty sessions across three projects: pinned, archived, one working, two finished while away |
+| `sidebar-menu` | the same, with a row's menu open (Rename… / Pin / Archive / Delete…) |
+| `collapsed` | the sidebar collapsed (Ctrl/Cmd+B), its reopen button leading the header |
+| `switcher` | the Ctrl/Cmd+K quick switcher over many sessions |
 | `busy` | the same turn still running |
 | `permission-bash`, `permission-diff` | the approval sheet for a command and for an edit |
 | `question` | the ask-user sheet |
@@ -47,6 +54,11 @@ Pick the screen with `?mode=`:
 | `onboarding`, `installing`, `install-failed` | first run without a CLI |
 | `gate` | the CLI is up but no model is connected |
 | `failure`, `reconnecting` | the agent died / is starting |
+
+The window layout (sidebar width and collapse, terminal drawer) lives in
+localStorage, which persists across scenes in the capture's profile, so
+`appPrelude.ts` resets it before the app loads and applies only what the
+mode asks for.
 
 `shoot.sh` shoots the main ones as `app:<mode>` scenes. They are taken at the
 real window's size (1280×840, `SHOT_APP_HEIGHT` to change) rather than as a

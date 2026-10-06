@@ -250,6 +250,8 @@ export class AppModel extends EventEmitter {
       lastProjectPath: this.prefs.lastProjectPath || null,
       defaultProjectPath: this.defaultProjectPath,
       recentProjects: this.prefs.recentProjects,
+      missingProjects: this.prefs.recentProjects.filter((p) => !isDirectory(p)),
+      homePath: homedir(),
       appearance: this.prefs.appearance
     }
   }
@@ -783,6 +785,25 @@ export class AppModel extends EventEmitter {
     this.newChat(path)
   }
 
+  /** The new-session view's folder menu: the user chose where the next
+   *  session will work, without starting one yet. Remembered exactly like
+   *  chooseProject (default folder + recents), so the choice survives a
+   *  relaunch. */
+  rememberProject(path: string): void {
+    if (path === '') return
+    this.prefs.lastProjectPath = path
+    this.prefs.addRecentProject(path)
+    this.emitAppState()
+  }
+
+  /** "Remove from recents". Only the shortcut goes: chats in that folder and
+   *  the folder itself are untouched. */
+  removeRecentProject(path: string): void {
+    this.prefs.removeRecentProject(path)
+    if (this.prefs.lastProjectPath === path) this.prefs.lastProjectPath = ''
+    this.emitAppState()
+  }
+
   /** Creates a chat locally only: no ACP session is requested yet. The
    *  conversation becomes real (on the agent and on disk) when the first
    *  prompt is sent, so untouched empty chats are never persisted. */
@@ -817,6 +838,7 @@ export class AppModel extends EventEmitter {
     const session = this.sessionById(chatId)
     if (!session) return
     this.selectedSessionId = chatId
+    session.unread = false
     this.pushEvent({ type: 'chat-reset', chat: session.detail() })
     this.emitAppState()
     if (!this.agent && this.phase.kind !== 'connecting') {
@@ -828,7 +850,19 @@ export class AppModel extends EventEmitter {
 
   selectSession(chatId: string | null): void {
     this.selectedSessionId = chatId
+    const session = chatId ? this.sessionById(chatId) : null
+    if (session) session.unread = false
     this.emitAppState()
+  }
+
+  /** Sidebar / header rename. Persisted with the rest of the snapshot; an
+   *  untouched chat isn't on disk yet, and takes the new title with it when
+   *  its first prompt makes it real. */
+  renameChat(chatId: string, title: string): void {
+    const session = this.sessionById(chatId)
+    if (!session || !session.rename(title)) return
+    this.persist()
+    this.emit('chat-state', session.summary())
   }
 
   closeChat(chatId: string): void {
@@ -969,6 +1003,9 @@ export class AppModel extends EventEmitter {
       session.appendNotice(message, true)
     }
     session.setBusy(false)
+    // Finished out of sight: mark it so the sidebar can say so. The selected
+    // chat is on screen, and the user has already seen it end.
+    if (this.selectedSessionId !== session.id) session.unread = true
     this.persist()
     this.emit(
       'chat-state',

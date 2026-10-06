@@ -148,58 +148,63 @@
   opacity: 0.4;
 }
 
-/* Welcome banner (empty state) */
+/* Welcome banner (empty state): greeting, folder, starter chips. */
 .chat-welcome {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: var(--sp-md);
-  padding-top: var(--sp-xl);
+  gap: var(--sp-sm);
+  padding-top: 18vh;
 }
 
 .chat-welcome-title {
-  font-size: 24px;
-  font-weight: 600;
+  font-size: 28px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
 }
 
 .chat-welcome-sub {
-  font-size: 13px;
+  font-size: var(--fs-md);
   color: var(--text-secondary);
+  margin-bottom: var(--sp-sm);
 }
 
-.chat-welcome-prompts {
+/* Starter prompts (StarterPrompts.tsx), shared with the new-session view. */
+.starter-prompts {
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
   gap: var(--sp-sm);
-  margin-top: var(--sp-xs);
+  max-width: 680px;
 }
 
-.chat-welcome-prompts button {
-  padding: 8px 12px;
+.starter-prompt {
+  height: 32px;
+  padding: 0 14px;
   border: 1px solid var(--hairline);
-  border-radius: var(--rad-lg);
-  background: var(--surface-raised);
+  border-radius: 999px;
+  background: none;
   color: var(--text-secondary);
   font: inherit;
-  font-size: 12px;
-  cursor: pointer;
-  transition: border-color 120ms ease, color 120ms ease, background 120ms ease;
+  font-size: var(--fs-md);
+  cursor: default;
+  transition:
+    background 120ms ease,
+    color 120ms ease;
 }
 
-.chat-welcome-prompts button:hover {
-  border-color: color-mix(in srgb, var(--accent) 50%, var(--hairline));
-  background: color-mix(in srgb, var(--surface-raised) 92%, var(--accent));
+.starter-prompt:hover {
+  background: var(--hover-fill);
   color: var(--text-primary);
 }
 
-.chat-welcome-prompts button:focus-visible {
-  outline: 2px solid var(--accent);
+.starter-prompt:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 60%, transparent);
   outline-offset: 2px;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .chat-welcome-prompts button {
+  .starter-prompt {
     transition: none;
   }
 }
@@ -208,44 +213,72 @@
 /* ChatHeader                                                          */
 /* ------------------------------------------------------------------ */
 
+/* Slim, 44px, one line: title, breadcrumb, then the chips. */
 .chat-header {
   display: flex;
   align-items: center;
-  gap: var(--sp-md);
+  gap: var(--sp-sm);
   flex: none;
-  padding: var(--sp-sm) var(--sp-lg);
+  height: 44px;
+  padding: 0 var(--sp-sm) 0 var(--sp-md);
   background: var(--canvas);
   border-bottom: 1px solid var(--hairline);
 }
 
 .chat-header-titles {
   display: flex;
-  flex-direction: column;
-  gap: 1px;
+  align-items: baseline;
+  gap: var(--sp-sm);
   min-width: 0;
 }
 
+/* The title is a button (click to rename) that looks like a title until it
+   is pointed at. */
 .chat-header-title {
-  font-size: 13px;
-  font-weight: 600;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.chat-header-project {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 11px;
-  color: var(--text-secondary);
+  appearance: none;
   min-width: 0;
-}
-
-.chat-header-project-name {
+  max-width: 46ch;
+  padding: 3px 6px;
+  margin-left: -6px;
+  border: none;
+  border-radius: var(--rad-xs);
+  background: none;
+  font: inherit;
+  font-size: var(--fs-md);
+  font-weight: 500;
+  color: var(--text-primary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  cursor: text;
+}
+
+.chat-header-title:hover {
+  background: var(--hover-fill);
+}
+
+.chat-header-rename {
+  width: 32ch;
+  margin: 0 0 0 -6px;
+}
+
+.chat-header-crumb {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  min-width: 0;
+  font-size: var(--fs-sm);
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
+
+.chat-header-crumb-part {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chat-header-crumb-sep {
+  flex: none;
 }
 
 .chat-header-spacer {
@@ -255,8 +288,34 @@
 .chat-header-chips {
   display: flex;
   align-items: center;
-  gap: var(--sp-sm);
+  gap: var(--sp-xs);
   flex: none;
+}
+
+/* Icon buttons in a title bar (terminal, reopen sidebar). */
+.header-btn {
+  appearance: none;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: var(--rad-sm);
+  background: none;
+  color: var(--text-secondary);
+  cursor: default;
+}
+
+.header-btn:hover {
+  background: var(--hover-fill);
+  color: var(--text-primary);
+}
+
+.header-btn--on {
+  color: var(--text-primary);
+  background: var(--selected-fill);
 }
 
 /* Capsule glass chip (glassEffect(.regular.interactive(), in: .capsule)) */
@@ -269,20 +328,22 @@
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  padding: 4px var(--sp-sm);
-  border-radius: var(--rad-lg);
-  background: var(--surface-raised);
-  border: 1px solid var(--hairline);
+  height: 28px;
+  padding: 0 var(--sp-sm);
+  border-radius: var(--rad-sm);
+  background: none;
+  border: none;
   color: var(--text-secondary);
   font: inherit;
-  font-size: 11px;
+  font-size: var(--fs-sm);
   font-weight: 500;
-  cursor: pointer;
+  cursor: default;
 }
 
 .chip:hover {
-  background: color-mix(in srgb, var(--surface-raised) 85%, var(--text-primary));
+  background: var(--hover-fill);
 }
+
 
 .chip-label {
   color: var(--text-secondary);
@@ -333,11 +394,6 @@
   color: var(--text-secondary);
 }
 
-.popover--plan {
-  min-width: 240px;
-  max-width: 400px;
-}
-
 .popover--context {
   min-width: 200px;
   white-space: nowrap;
@@ -378,34 +434,6 @@
   color: var(--text-secondary);
   opacity: 0.7;
   padding-top: 2px;
-}
-
-.plan-row {
-  display: flex;
-  align-items: flex-start;
-  gap: 6px;
-}
-
-.plan-row-icon {
-  color: var(--text-secondary);
-  padding-top: 1px;
-  flex: none;
-  display: inline-flex;
-}
-
-.plan-row-icon--done {
-  color: var(--diff-added);
-}
-
-.plan-row-text {
-  font-size: 12px;
-  color: var(--text-primary);
-}
-
-.plan-row-text--done {
-  color: var(--text-secondary);
-  text-decoration: line-through;
-  text-decoration-color: var(--text-secondary);
 }
 
 /* Context meter */
@@ -605,10 +633,6 @@
 
 .composer-btn:hover {
   background: color-mix(in srgb, var(--surface-raised) 85%, var(--text-primary));
-}
-
-.composer-btn--accent {
-  color: var(--accent);
 }
 
 .send-btn:disabled {

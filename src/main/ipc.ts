@@ -43,6 +43,8 @@ export function registerIpc(
     installCLI: async () => model.installCLI(),
     useExplicitCLIPath: async (path) => model.useExplicitPath(path),
     chooseProject: async (path) => model.chooseProject(path),
+    rememberProject: async (path) => model.rememberProject(path),
+    removeRecentProject: async (path) => model.removeRecentProject(path),
     setAppearance: async (mode) => model.setAppearance(mode),
     pickFolder: async () => {
       const win = getWindow()
@@ -86,6 +88,7 @@ export function registerIpc(
     closeChat: async (chatId) => model.closeChat(chatId),
     togglePin: async (chatId) => model.togglePin(chatId),
     toggleArchive: async (chatId) => model.toggleArchive(chatId),
+    renameChat: async (chatId, title) => model.renameChat(chatId, title),
     selectSession: async (chatId) => model.selectSession(chatId),
 
     // -- Prompting ----------------------------------------------------------

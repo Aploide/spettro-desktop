@@ -29,7 +29,9 @@ the things a screenshot renders perfectly while being wrong:
 | `orchestration.test.ts` | `groupTranscript`, the most intricate pure function in the app. A member attached to the wrong run still draws beautifully. |
 | `toolPresentation.test.ts` | String surgery against title/args formats defined in another language in another repo, which rots quietly. |
 | `extensions.test.ts` | The `_spettro/*` decoders — specifically where their deliberate leniency stops. |
-| `chatSession.test.ts` | Transcript upsert semantics, including the `argsJSON` overwrite that the whole text-recovery path exists to survive. |
+| `chatSession.test.ts` | Transcript upsert semantics, including the `argsJSON` overwrite that the whole text-recovery path exists to survive. Also the session bookkeeping behind the sidebar, through `AppModel` (what the IPC handlers call): a rename survives a relaunch and reaches paired phones, a blank one is refused, a turn that ends on a chat you aren't looking at is marked unread until opened, and the new-session folder menu remembers and forgets recents (flagging ones that vanished) without creating a chat. |
+| `shellLayout.test.ts` | The sidebar's order (recency, pinned first, archived apart) — Ctrl/Cmd+1…9 and the switcher count rows in it — plus the row timestamp and the "this is your whole home folder" check. |
+| `appShell.test.tsx` | The persistent shell in jsdom: nothing selected shows the new-session view (never the old full-window picker), Ctrl+1/2 open sidebar rows, no global shortcut fires while focus is in the terminal, Ctrl+B collapses (persisted) and the header reopens, Ctrl+K filters and opens, rename from the "…" menu, Delete needs a second click, and the first message creates the chat in the chosen folder. |
 | `setConfigValue.test.ts` | Telling an agent's refusal from a dead pipe. Getting it wrong is invisible until you look closely. |
 | `configBar.test.tsx` | That the Ultra chip *does nothing* when locked — a screenshot only shows that it looks locked. |
 | `workflowStudio.test.tsx` | That Run saves first, refuses to run a broken script, and that an old CLI says so instead of showing an empty project. |

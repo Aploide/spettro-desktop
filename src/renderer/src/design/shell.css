@@ -257,11 +257,12 @@
 
 /* --------------------------------------------------------------- sidebar */
 
+/* The Claude Code tab's sidebar: a warm panel a shade off the canvas, quiet
+   type, rows that are text until hovered. Its width is set inline from
+   state/shell.ts (220–360, dragged from .sidebar-resizer). */
 .sidebar {
+  position: relative;
   flex: none;
-  width: 270px;
-  min-width: 240px;
-  max-width: 320px;
   height: 100%;
   display: flex;
   flex-direction: column;
@@ -269,60 +270,174 @@
   background: var(--sidebar-bg);
 }
 
-.sidebar-header {
+.sidebar-top {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2xs);
+  padding: var(--sp-sm) var(--sp-sm) var(--sp-2xs);
+}
+
+.sidebar-new {
+  appearance: none;
+  flex: 1;
+  min-width: 0;
+  height: 32px;
   display: flex;
   align-items: center;
   gap: var(--sp-sm);
-  padding: var(--sp-md) var(--sp-md) var(--sp-sm);
+  padding: 0 var(--sp-sm);
+  border: none;
+  border-radius: var(--rad-sm);
+  background: none;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: var(--fs-md);
+  font-weight: 500;
+  text-align: left;
+  cursor: default;
 }
 
-.sidebar-title {
-  font-size: 17px;
-  font-weight: 600;
+.sidebar-new:hover {
+  background: var(--hover-fill);
 }
 
-.sidebar-header .icon-btn {
-  margin-left: auto;
+.sidebar-new-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.search {
+/* The shortcut beside a button: shown on hover and focus only, so the row
+   reads as one word at rest. */
+.sidebar-kbd {
+  font-family: inherit;
+  font-size: var(--fs-xs);
+  color: var(--text-tertiary);
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.sidebar-new:hover .sidebar-kbd,
+.sidebar-new:focus-visible .sidebar-kbd {
+  opacity: 1;
+}
+
+.sidebar-icon-btn {
+  appearance: none;
+  position: relative;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: var(--rad-sm);
+  background: none;
+  color: var(--text-secondary);
+  cursor: default;
+}
+
+.sidebar-icon-btn:hover {
+  background: var(--hover-fill);
+  color: var(--text-primary);
+}
+
+/* "Something in here is on" (remote access): a small accent dot. */
+.sidebar-icon-btn--dot::after {
+  content: '';
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.sidebar-search {
   display: flex;
   align-items: center;
-  gap: var(--sp-xs);
-  margin: 0 var(--sp-md) var(--sp-sm);
-  padding: 5px var(--sp-sm);
+  gap: var(--sp-sm);
+  height: 32px;
+  margin: 0 var(--sp-sm) var(--sp-xs);
+  padding: 0 var(--sp-sm);
   border-radius: var(--rad-sm);
-  background: color-mix(in srgb, var(--text-secondary) 12%, transparent);
-  color: var(--text-secondary);
+  color: var(--text-tertiary);
 }
 
-.search input {
+.sidebar-search:hover,
+.sidebar-search:focus-within {
+  background: var(--hover-fill);
+}
+
+.sidebar-search input {
   flex: 1;
   min-width: 0;
   border: none;
   background: none;
   outline: none;
   font: inherit;
-  font-size: 13px;
+  font-size: var(--fs-md);
   color: var(--text-primary);
 }
 
-.search input::placeholder {
+.sidebar-search input::placeholder {
   color: var(--text-secondary);
 }
 
-.search .icon-btn {
-  padding: 1px;
+.sidebar-search-clear {
+  appearance: none;
+  display: inline-flex;
+  padding: 2px;
+  border: none;
+  background: none;
+  color: var(--text-tertiary);
+  cursor: default;
+}
+
+.sidebar-search-clear:hover {
+  color: var(--text-secondary);
 }
 
 .chat-list {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: var(--sp-sm);
+  padding: var(--sp-xs) var(--sp-sm) var(--sp-md);
   display: flex;
   flex-direction: column;
-  gap: var(--sp-xs);
+  gap: var(--sp-md);
+}
+
+/* A thin, quiet scrollbar with no arrow buttons: the platform default is a
+   slab of grey beside rows this light. (::-webkit-scrollbar rather than
+   scrollbar-width, which on Linux still draws the arrows.) */
+.chat-list::-webkit-scrollbar {
+  width: 10px;
+}
+
+.chat-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.chat-list::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text-tertiary) 40%, transparent) padding-box;
+}
+
+.chat-list::-webkit-scrollbar-thumb:hover {
+  background-color: color-mix(in srgb, var(--text-tertiary) 70%, transparent);
+}
+
+.sidebar-empty {
+  padding: var(--sp-xl) var(--sp-md);
+  font-size: var(--fs-md);
+  color: var(--text-tertiary);
+  text-align: center;
 }
 
 .section {
@@ -334,10 +449,12 @@
 .section-header {
   display: flex;
   align-items: center;
-  gap: var(--sp-xs);
-  padding: 4px var(--sp-sm);
+  height: 26px;
+  padding: 0 var(--sp-2xs) 0 var(--sp-sm);
 }
 
+/* The group caption: the project's name, small and muted. The chevron and the
+   + only appear when the caption is pointed at. */
 .section-toggle {
   appearance: none;
   background: none;
@@ -348,25 +465,41 @@
   min-width: 0;
   display: flex;
   align-items: center;
-  gap: var(--sp-xs);
-  color: var(--text-secondary);
+  gap: 5px;
+  color: var(--text-tertiary);
   cursor: default;
+}
+
+.section-toggle:hover:not(:disabled) {
+  color: var(--text-secondary);
 }
 
 .section-chevron {
   flex: none;
-  color: color-mix(in srgb, var(--text-secondary) 70%, transparent);
-  transition: transform 120ms ease;
   display: inline-flex;
+  opacity: 0;
+  transition:
+    transform 120ms ease,
+    opacity 120ms ease;
 }
 
 .section-chevron--open {
   transform: rotate(90deg);
 }
 
+.section-header:hover .section-chevron,
+.section-toggle:focus-visible .section-chevron {
+  opacity: 1;
+}
+
+/* A collapsed group must say so even when nothing is hovered. */
+.section-toggle[aria-expanded='false'] .section-chevron {
+  opacity: 1;
+}
+
 .section-name {
-  font-size: 12px;
-  font-weight: 600;
+  font-size: var(--fs-xs);
+  font-weight: 500;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -374,87 +507,275 @@
 
 .section-count {
   flex: none;
-  font-size: 10px;
-  color: color-mix(in srgb, var(--text-secondary) 70%, transparent);
+  font-size: var(--fs-xs);
+  color: var(--text-tertiary);
+}
+
+.section-add {
+  appearance: none;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: var(--rad-xs);
+  background: none;
+  color: var(--text-secondary);
+  cursor: default;
+  opacity: 0;
+}
+
+.section-header:hover .section-add,
+.section-add:focus-visible {
+  opacity: 1;
+}
+
+.section-add:hover {
+  background: var(--hover-fill);
+  color: var(--text-primary);
 }
 
 .chat-row {
+  position: relative;
   display: flex;
   align-items: center;
   gap: var(--sp-sm);
-  padding: var(--sp-sm);
-  margin-left: var(--sp-md);
-  border-radius: var(--rad-sm);
+  min-height: 32px;
+  padding: 0 var(--sp-2xs) 0 var(--sp-sm);
+  border-radius: var(--rad-xs);
+  color: var(--text-secondary);
 }
 
-.chat-row--selected {
-  background: color-mix(in srgb, var(--accent) 14%, transparent);
+.chat-row:hover {
+  background: var(--hover-fill);
+  color: var(--text-primary);
 }
 
-.chat-row-status {
-  flex: none;
-  width: 12px;
-  height: 12px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+.chat-row:has(.chat-row-open:focus-visible) {
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent) 55%, transparent);
 }
 
-.chat-row-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--accent);
+.chat-row--selected,
+.chat-row--selected:hover {
+  background: var(--selected-fill);
+  color: var(--text-primary);
 }
 
-.chat-row-text {
+/* Finished while you were away: the title comes forward with the dot. */
+.chat-row--unread {
+  color: var(--text-primary);
+}
+
+.chat-row-text,
+.chat-row-open {
+  flex: 1;
   min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 1px;
+  padding: 6px 0;
 }
 
-.chat-row-title-line {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  min-width: 0;
+/* The title is the row's button; its ::after covers the row so the whole
+   row is the click target, while the "…" button stays on top of it. */
+.chat-row-open {
+  appearance: none;
+  border: none;
+  background: none;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: default;
+  outline: none;
+}
+
+.chat-row-open::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
 }
 
 .chat-row-title {
-  font-size: 13px;
-  font-weight: 500;
+  max-width: 100%;
+  font-size: var(--fs-md);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.chat-row--selected .chat-row-title,
+.chat-row--unread .chat-row-title {
+  font-weight: 500;
+}
+
+.chat-row-subtitle {
+  font-size: var(--fs-xs);
+  color: var(--text-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-row-trail {
+  flex: none;
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-xs);
+  min-width: 28px;
+  height: 28px;
+  justify-content: flex-end;
 }
 
 .chat-row-pin {
   flex: none;
-  color: var(--accent);
   display: inline-flex;
+  color: var(--text-tertiary);
 }
 
-.chat-row-subtitle {
-  font-size: 10px;
-  color: color-mix(in srgb, var(--text-secondary) 75%, transparent);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.chat-row-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding-right: 6px;
 }
 
-.no-matches {
-  font-size: 12px;
+.chat-row-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.chat-row-time {
+  font-size: var(--fs-xs);
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The "…" button takes the time's place on hover and keyboard focus. It is
+   transparent rather than display:none at rest, so it stays in the tab order
+   and the accessibility tree; it just doesn't take clicks until shown. */
+.chat-row-more {
+  appearance: none;
+  position: absolute;
+  z-index: 1;
+  right: 0;
+  top: 2px;
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: var(--rad-xs);
+  background: none;
   color: var(--text-secondary);
-  text-align: center;
-  padding: var(--sp-lg) 0;
+  cursor: default;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.chat-row-more:hover {
+  background: var(--hover-fill);
+  color: var(--text-primary);
+}
+
+.chat-row-more:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  outline-offset: -2px;
+}
+
+.chat-row:hover .chat-row-more,
+.chat-row:focus-within .chat-row-more {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.chat-row:hover .chat-row-status,
+.chat-row:focus-within .chat-row-status {
+  visibility: hidden;
+}
+
+.inline-rename {
+  width: 100%;
+  min-width: 0;
+  margin: -3px 0;
+  padding: 2px 6px;
+  font: inherit;
+  font-size: var(--fs-md);
+  color: var(--text-primary);
+  background: var(--surface-raised);
+  border: 1px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  border-radius: var(--rad-xs);
+  outline: none;
+  user-select: text;
+}
+
+.chat-row .inline-rename {
+  margin-left: -7px;
 }
 
 .sidebar-footer {
   display: flex;
   align-items: center;
+  gap: var(--sp-2xs);
+  padding: var(--sp-sm);
+  border-top: 1px solid var(--hairline);
+}
+
+.account-row {
+  appearance: none;
+  flex: 1;
+  min-width: 0;
+  height: 36px;
+  display: flex;
+  align-items: center;
   gap: var(--sp-sm);
-  padding: var(--sp-sm) var(--sp-md);
+  padding: 0 var(--sp-xs);
+  border: none;
+  border-radius: var(--rad-sm);
+  background: none;
+  font: inherit;
+  color: var(--text-primary);
+  text-align: left;
+  cursor: default;
+}
+
+.account-row:hover {
+  background: var(--hover-fill);
+}
+
+.account-avatar {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--accent-contrast);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+
+.account-avatar--empty {
+  background: var(--hover-fill);
+  color: var(--text-secondary);
+}
+
+.account-email {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--fs-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* The update prompt sits directly above the footer and is the only tinted
@@ -464,7 +785,7 @@
   display: flex;
   align-items: center;
   gap: var(--sp-sm);
-  margin: var(--sp-sm) var(--sp-md) 0;
+  margin: 0 var(--sp-sm) var(--sp-sm);
   padding: 6px 8px 6px 10px;
   border-radius: var(--rad-sm);
   background: color-mix(in srgb, var(--accent) 14%, transparent);
@@ -500,29 +821,51 @@
   white-space: nowrap;
 }
 
-.footer-status {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
+/* The drag handle: an invisible strip over the sidebar's right border that
+   shows a hairline in the accent while it is hovered or dragged. */
+.sidebar-resizer {
+  position: absolute;
+  z-index: 5;
+  top: 0;
+  right: -3px;
+  width: 6px;
+  height: 100%;
+  cursor: col-resize;
+  outline: none;
 }
 
-.footer-model {
-  font-size: 11px;
-  font-weight: 500;
-  color: var(--text-secondary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.sidebar-resizer::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 2px;
+  width: 2px;
+  background: transparent;
+  transition: background 120ms ease 80ms;
 }
 
-.footer-cli {
-  font-size: 10px;
-  color: color-mix(in srgb, var(--text-secondary) 75%, transparent);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.sidebar-resizer:hover::after,
+.sidebar-resizer:focus-visible::after,
+.is-resizing-sidebar .sidebar-resizer::after {
+  background: color-mix(in srgb, var(--accent) 60%, transparent);
+}
+
+/* While dragging: the cursor holds everywhere, and nothing gets selected. */
+.is-resizing-sidebar {
+  cursor: col-resize;
+}
+
+.is-resizing-sidebar * {
+  cursor: col-resize !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-kbd,
+  .section-chevron,
+  .sidebar-resizer::after {
+    transition: none;
+  }
 }
 
 /* ------------------------------------------------------------ context menu */
@@ -530,14 +873,15 @@
 .ctx-menu {
   position: fixed;
   z-index: 100;
-  min-width: 160px;
-  padding: 4px;
+  min-width: 180px;
+  padding: var(--sp-xs);
   background: var(--surface-raised);
   border: 1px solid var(--hairline);
-  border-radius: var(--rad-sm);
+  border-radius: var(--rad-md);
   box-shadow: var(--shadow-md);
   display: flex;
   flex-direction: column;
+  gap: 1px;
 }
 
 .ctx-item {
@@ -545,137 +889,442 @@
   background: none;
   border: none;
   font: inherit;
-  font-size: 13px;
+  font-size: var(--fs-md);
   color: var(--text-primary);
   text-align: left;
-  padding: 4px 10px;
-  border-radius: 5px;
+  padding: 6px 10px;
+  border-radius: var(--rad-xs);
   cursor: default;
+  outline: none;
 }
 
-.ctx-item:hover {
-  background: var(--accent);
-  color: var(--accent-contrast);
+.ctx-item:hover,
+.ctx-item:focus-visible {
+  background: var(--hover-fill);
+}
+
+.ctx-item:disabled {
+  color: var(--text-tertiary);
+  background: none;
 }
 
 .ctx-item--destructive {
-  color: var(--diff-removed);
+  color: var(--danger);
 }
 
-.ctx-item--destructive:hover {
-  background: var(--diff-removed);
+/* Second step of a two-step action: filled, so "this time it happens" is
+   unmistakable. */
+.ctx-item--armed,
+.ctx-item--armed:hover,
+.ctx-item--armed:focus-visible {
+  background: var(--danger);
   color: var(--accent-contrast);
 }
 
 .ctx-separator {
   height: 1px;
-  margin: 4px 8px;
+  margin: var(--sp-xs) var(--sp-sm);
   background: var(--hairline);
 }
 
-/* --------------------------------------------------------- project picker */
+/* -------------------------------------------------------- new session view */
 
-.picker {
+/* The main column with no session selected: greeting, composer and the
+   folder chip, centred a little above the middle like the Claude Code tab. */
+.new-session {
   flex: 1;
-  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--canvas);
+}
+
+.new-session-bar {
+  flex: none;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  padding: 0 var(--sp-sm);
+}
+
+.new-session-body {
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: var(--sp-xl);
-  padding: calc(var(--sp-xl) * 2);
-}
-
-.picker-copy {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: var(--sp-sm);
-}
-
-.picker-headline {
-  font-size: 24px;
-  font-weight: 600;
-  margin: 0;
-}
-
-.picker-sub {
-  font-size: 13px;
-  line-height: 1.5;
-  color: var(--text-secondary);
-  text-align: center;
-}
-
-.picker-buttons {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
   gap: var(--sp-md);
+  padding: 0 var(--sp-xl) 12vh;
 }
 
-.picker-buttons .btn--prominent {
-  min-width: 240px;
+.new-session-greeting {
+  margin: 0 0 var(--sp-sm);
+  font-size: 28px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  color: var(--text-primary);
 }
 
-.recent {
+.new-session-composer {
   width: 100%;
-  max-width: 420px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+  max-width: 680px;
 }
 
-.recent-caption {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--text-secondary);
-  padding: 0 10px 4px;
+/* The composer brings its own gutter for the chat column; here the column
+   is already centred, so the card sits flush. */
+.new-session-composer .composer-outer {
+  padding: 0;
 }
 
-.recent-row {
-  appearance: none;
-  background: none;
-  border: none;
-  font: inherit;
-  color: inherit;
-  text-align: left;
+.new-session-meta {
   width: 100%;
+  max-width: 680px;
   display: flex;
   align-items: center;
   gap: var(--sp-sm);
-  padding: 7px 10px;
+  margin-top: calc(var(--sp-xs) * -1);
+}
+
+.project-chip {
+  appearance: none;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 var(--sp-sm);
+  border: none;
   border-radius: var(--rad-sm);
+  background: none;
+  font: inherit;
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
   cursor: default;
 }
 
-.recent-row:hover {
-  background: color-mix(in srgb, var(--text-secondary) 10%, transparent);
+.project-chip:hover,
+.project-chip[aria-expanded='true'] {
+  background: var(--hover-fill);
+  color: var(--text-primary);
 }
 
-.recent-row .recent-icon {
-  flex: none;
-  color: var(--text-secondary);
-  display: inline-flex;
+.project-chip-caption {
+  color: var(--text-tertiary);
 }
 
-.recent-name {
-  flex: none;
-  font-size: 13px;
+.project-chip-name {
+  max-width: 280px;
   font-weight: 500;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.recent-path {
+.project-chip--missing .project-chip-name {
+  color: var(--danger);
+  text-decoration: line-through;
+}
+
+.project-menu {
+  top: calc(100% + 4px);
+  left: 0;
+  right: auto;
+  width: 340px;
+  padding: var(--sp-xs);
+  gap: 1px;
+}
+
+.project-menu-caption {
+  padding: 4px 10px 2px;
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  color: var(--text-tertiary);
+}
+
+.project-menu-row {
+  display: flex;
+  align-items: center;
+  border-radius: var(--rad-xs);
+}
+
+.project-menu-row:hover {
+  background: var(--hover-fill);
+}
+
+.project-menu-choose {
+  appearance: none;
   flex: 1;
   min-width: 0;
-  font-size: 11px;
-  color: color-mix(in srgb, var(--text-secondary) 75%, transparent);
-  text-align: right;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-sm);
+  padding: 6px 8px;
+  border: none;
+  border-radius: var(--rad-xs);
+  background: none;
+  font: inherit;
+  color: var(--text-primary);
+  text-align: left;
+  cursor: default;
 }
 
-.version-caption {
-  font-size: 11px;
-  color: color-mix(in srgb, var(--text-secondary) 75%, transparent);
+.project-menu-choose:focus-visible {
+  outline: none;
+  background: var(--hover-fill);
+}
+
+.project-menu-pick:hover {
+  background: var(--hover-fill);
+}
+
+.project-menu-check {
+  flex: none;
+  width: 14px;
+  display: inline-flex;
+  justify-content: center;
+  color: var(--text-secondary);
+}
+
+.project-menu-text {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.project-menu-name {
+  font-size: var(--fs-md);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-menu-path {
+  font-size: var(--fs-xs);
+  color: var(--text-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  /* Head truncation: the folder's own name is the part worth keeping. */
+  direction: rtl;
+  unicode-bidi: plaintext;
+  text-align: left;
+}
+
+.project-menu-row--missing .project-menu-name {
+  color: var(--text-tertiary);
+}
+
+.project-menu-row--missing .project-menu-path {
+  color: var(--danger);
+  direction: ltr;
+}
+
+.project-menu-remove {
+  appearance: none;
+  flex: none;
+  width: 26px;
+  height: 26px;
+  margin-right: 2px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: var(--rad-xs);
+  background: none;
+  color: var(--text-tertiary);
+  cursor: default;
+  opacity: 0;
+}
+
+.project-menu-row:hover .project-menu-remove,
+.project-menu-remove:focus-visible {
+  opacity: 1;
+}
+
+.project-menu-remove:hover {
+  color: var(--text-secondary);
+}
+
+.project-menu-separator {
+  height: 1px;
+  margin: var(--sp-xs) var(--sp-sm);
+  background: var(--hairline);
+}
+
+/* "This folder is everything you own" / "this folder is gone". Inline under
+   the composer, never a modal: it informs the next step, it doesn't block
+   the window. */
+.new-session-notice {
+  width: 100%;
+  max-width: 680px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-sm);
+  padding: 10px 12px;
+  border-radius: var(--rad-md);
+  font-size: var(--fs-md);
+  line-height: 1.45;
+  color: var(--text-primary);
+}
+
+.new-session-notice > svg {
+  flex: none;
+}
+
+.new-session-notice-text {
+  flex: 1;
+  min-width: 240px;
+}
+
+.new-session-notice--warning {
+  background: color-mix(in srgb, var(--warning) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--warning) 35%, transparent);
+}
+
+.new-session-notice--warning > svg {
+  color: var(--warning);
+}
+
+.new-session-notice--danger {
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent);
+}
+
+.new-session-notice--danger > svg {
+  color: var(--danger);
+}
+
+/* Send was pressed before the notice was answered: one small shake toward
+   it, the way a macOS sheet refuses a click outside itself. */
+.new-session-notice--nudge {
+  animation: notice-nudge 360ms ease;
+}
+
+@keyframes notice-nudge {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  25% {
+    transform: translateX(-5px);
+  }
+  50% {
+    transform: translateX(4px);
+  }
+  75% {
+    transform: translateX(-2px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .new-session-notice--nudge {
+    animation: none;
+  }
+}
+
+/* ---------------------------------------------------------- quick switcher */
+
+.switcher-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  /* Lighter than a modal's scrim: this is a glance, not a task. */
+  background: color-mix(in srgb, var(--scrim) 45%, transparent);
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding-top: 12vh;
+}
+
+.switcher {
+  width: min(560px, calc(100vw - 48px));
+  max-height: 60vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-raised);
+  border: 1px solid var(--hairline);
+  border-radius: var(--rad-md);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+}
+
+.switcher-search {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-sm);
+  height: 48px;
+  padding: 0 var(--sp-lg);
+  border-bottom: 1px solid var(--hairline);
+  color: var(--text-tertiary);
+}
+
+.switcher-search input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: none;
+  outline: none;
+  font: inherit;
+  font-size: var(--fs-body);
+  color: var(--text-primary);
+}
+
+.switcher-search input::placeholder {
+  color: var(--text-tertiary);
+}
+
+.switcher-list {
+  overflow-y: auto;
+  padding: var(--sp-xs);
+}
+
+.switcher-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-md);
+  padding: 8px 12px;
+  border-radius: var(--rad-xs);
+  color: var(--text-primary);
+  cursor: default;
+}
+
+.switcher-row--active {
+  background: var(--selected-fill);
+}
+
+.switcher-title {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--fs-md);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.switcher-project,
+.switcher-time {
+  flex: none;
+  font-size: var(--fs-xs);
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
+
+.switcher-time {
+  min-width: 36px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.switcher-empty {
+  padding: var(--sp-lg);
+  font-size: var(--fs-md);
+  color: var(--text-tertiary);
+  text-align: center;
 }
 
 /* -------------------------------------------------------------- onboarding */

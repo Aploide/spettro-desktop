@@ -35,6 +35,9 @@ export type IconName =
   | 'arrow.triangle.branch'
   | 'arrow.counterclockwise'
   | 'sidebar.right'
+  | 'sidebar.left'
+  | 'ellipsis'
+  | 'square.and.pencil'
   | 'folder'
   | 'folder.fill'
   | 'folder.badge.plus'
@@ -183,6 +186,27 @@ const STROKE_ICONS: Record<string, ReactNode> = {
     <>
       <rect x="1.5" y="2.5" width="13" height="11" rx="1.5" />
       <path d="M10.3 2.5v11" />
+    </>
+  ),
+  'sidebar.left': (
+    <>
+      <rect x="1.5" y="2.5" width="13" height="11" rx="1.5" />
+      <path d="M5.7 2.5v11" />
+    </>
+  ),
+  // Dots are filled discs, so they stay round at any stroke weight.
+  ellipsis: (
+    <>
+      <circle cx="3.5" cy="8" r="1.15" fill="currentColor" stroke="none" />
+      <circle cx="8" cy="8" r="1.15" fill="currentColor" stroke="none" />
+      <circle cx="12.5" cy="8" r="1.15" fill="currentColor" stroke="none" />
+    </>
+  ),
+  // New session: a page with a pen over its corner.
+  'square.and.pencil': (
+    <>
+      <path d="M13 9v3.5a1 1 0 0 1-1 1H3.5a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1H7" />
+      <path d="M12.1 1.9a1.2 1.2 0 0 1 1.7 1.7L8.4 9l-2.3.6.6-2.3z" />
     </>
   ),
   // ---- shell + provider glyphs (formerly shell/icons.tsx, providers/icons.tsx)

@@ -85,6 +85,8 @@ export interface ChatSummary {
   isBusy: boolean
   messageCount: number
   preview: string
+  /** A turn finished while another chat was selected; cleared on open. */
+  unread: boolean
 }
 
 /** Full detail the renderer holds for an open chat. */
@@ -214,5 +216,11 @@ export interface AppStateDTO {
    *  the renderer never has to guess at the home directory. */
   defaultProjectPath: string
   recentProjects: string[]
+  /** The subset of recentProjects that no longer exists as a folder, so the
+   *  folder menu can grey them out instead of failing on click. */
+  missingProjects: string[]
+  /** The user's home folder. Starting a session there (or at /) hands the
+   *  agent everything the user owns, which the new-session view warns about. */
+  homePath: string
   appearance: Appearance
 }

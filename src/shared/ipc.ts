@@ -72,6 +72,10 @@ export interface RendererApi {
   installCLI(): Promise<void>
   useExplicitCLIPath(path: string): Promise<void>
   chooseProject(path: string): Promise<void>
+  /** Sets the folder the next new session works in (and adds it to the
+   *  recents) without creating a chat. */
+  rememberProject(path: string): Promise<void>
+  removeRecentProject(path: string): Promise<void>
   /** Opens a native folder picker; resolves to the chosen path or null. */
   pickFolder(): Promise<string | null>
   /** Opens a native file picker for the CLI binary (NSOpenPanel port);
@@ -87,6 +91,8 @@ export interface RendererApi {
   closeChat(chatId: string): Promise<void>
   togglePin(chatId: string): Promise<void>
   toggleArchive(chatId: string): Promise<void>
+  /** Blank titles are ignored. */
+  renameChat(chatId: string, title: string): Promise<void>
   selectSession(chatId: string | null): Promise<void>
 
   // Prompting

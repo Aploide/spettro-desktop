@@ -1,11 +1,17 @@
-// Port of Platforms/macOS/Views/ChatHeaderView.swift (doc 22): chat title and
-// project on the left; plan chip, git stat chip, and context-window ring on
-// the right.
+// The chat's slim (44px) title bar, after ChatHeaderView.swift (doc 22) and
+// the Claude Code tab: the session title, which you click to rename in place,
+// a muted `project › branch` breadcrumb, and on the right the uncommitted-change
+// chip, the context-window ring and the terminal toggle. While the sidebar is
+// collapsed its reopen button leads the bar, where the sidebar's own was.
 
 import { useEffect, useRef, useState } from 'react'
-import type { ACPPlanEntry, ACPUsage } from '@shared/acp'
+import type { ACPUsage } from '@shared/acp'
 import type { ChatDetail, GitStat } from '@shared/model'
 import { call } from '@renderer/state/store'
+import { toggleSidebar, toggleTerminal, useShell } from '@renderer/state/shell'
+import { Icon } from '@renderer/design/icons'
+import InlineRename from '@renderer/views/shell/InlineRename'
+import { withShortcut } from '@renderer/views/shell/util'
 import { DiffStatLabel } from './transcript/ToolCallView'
 
 /** `projectURL.lastPathComponent` — works for both / and \ separators. */
@@ -14,27 +20,83 @@ export function projectName(projectPath: string): string {
   return parts[parts.length - 1] || projectPath
 }
 
+/** Ctrl+` everywhere, macOS included — it is the terminal toggle people
+ *  already know from their editor. */
+export const TERMINAL_SHORTCUT = 'Ctrl+`'
+
 export default function ChatHeader({ chat }: { chat: ChatDetail }): JSX.Element {
   const git = useGitStat(chat.projectPath, chat.isBusy)
   const name = projectName(chat.projectPath)
+  const [renaming, setRenaming] = useState(false)
+  const terminalVisible = useShell((s) => s.terminalVisible)
+
   return (
-    <div className="chat-header">
+    <header className="chat-header">
+      <SidebarReopenButton />
       <div className="chat-header-titles">
-        <div className="chat-header-title">{chat.title}</div>
-        <div className="chat-header-project">
-          <FolderIcon />
-          <span className="chat-header-project-name">
-            {git.branch ? `${name} · ${git.branch}` : name}
-          </span>
-        </div>
+        {renaming ? (
+          <InlineRename
+            chatId={chat.id}
+            title={chat.title}
+            className="chat-header-rename"
+            onDone={() => setRenaming(false)}
+          />
+        ) : (
+          <button
+            type="button"
+            className="chat-header-title"
+            title="Rename session"
+            onClick={() => setRenaming(true)}
+          >
+            {chat.title}
+          </button>
+        )}
+        <span className="chat-header-crumb" title={chat.projectPath}>
+          <span className="chat-header-crumb-part">{name}</span>
+          {git.branch && (
+            <>
+              <span className="chat-header-crumb-sep" aria-hidden>
+                ›
+              </span>
+              <span className="chat-header-crumb-part">{git.branch}</span>
+            </>
+          )}
+        </span>
       </div>
       <div className="chat-header-spacer" />
       <div className="chat-header-chips">
-        {chat.plan.length > 0 && <PlanChip entries={chat.plan} />}
         {git.files.length > 0 && <GitStatChip git={git} projectPath={chat.projectPath} />}
         {chat.usage && <ContextMeter usage={chat.usage} />}
+        <button
+          type="button"
+          className={'header-btn' + (terminalVisible ? ' header-btn--on' : '')}
+          title={`${terminalVisible ? 'Hide terminal' : 'Show terminal'} (${TERMINAL_SHORTCUT})`}
+          aria-label="Terminal"
+          aria-pressed={terminalVisible}
+          onClick={toggleTerminal}
+        >
+          <Icon name="terminal" size={15} />
+        </button>
       </div>
-    </div>
+    </header>
+  )
+}
+
+/** Leads a title bar while the sidebar is collapsed — the way back is where
+ *  the sidebar's own hide button was. Renders nothing otherwise. */
+export function SidebarReopenButton(): JSX.Element | null {
+  const collapsed = useShell((s) => s.sidebarCollapsed)
+  if (!collapsed) return null
+  return (
+    <button
+      type="button"
+      className="header-btn"
+      title={withShortcut('Show sidebar', 'B')}
+      aria-label="Show sidebar"
+      onClick={toggleSidebar}
+    >
+      <Icon name="sidebar.left" size={15} />
+    </button>
   )
 }
 
@@ -61,53 +123,6 @@ export function useDismiss(open: boolean, onClose: () => void): React.RefObject<
     }
   }, [open, onClose])
   return ref
-}
-
-// ---------------------------------------------------------------------------
-// Plan chip
-// ---------------------------------------------------------------------------
-
-function PlanChip({ entries }: { entries: ACPPlanEntry[] }): JSX.Element {
-  const [open, setOpen] = useState(false)
-  const ref = useDismiss(open, () => setOpen(false))
-  const completed = entries.filter((e) => e.status === 'completed').length
-
-  return (
-    <div className="chip-wrap" ref={ref}>
-      <button
-        type="button"
-        className="chip"
-        title="Agent plan"
-        onClick={() => setOpen((o) => !o)}
-      >
-        <ChecklistIcon />
-        <span className="chip-label mono-digits">
-          {completed}/{entries.length}
-        </span>
-      </button>
-      {open && (
-        <div className="popover popover--plan">
-          <div className="popover-heading">Plan</div>
-          {entries.map((entry, i) => (
-            <div className="plan-row" key={i}>
-              <span
-                className={
-                  'plan-row-icon' + (entry.status === 'completed' ? ' plan-row-icon--done' : '')
-                }
-              >
-                <PlanStatusIcon status={entry.status} />
-              </span>
-              <span
-                className={'plan-row-text' + (entry.status === 'completed' ? ' plan-row-text--done' : '')}
-              >
-                {entry.content}
-              </span>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  )
 }
 
 // ---------------------------------------------------------------------------
@@ -265,72 +280,4 @@ export function formatTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`
   return `${n}`
-}
-
-// ---------------------------------------------------------------------------
-// Icons (SF Symbol stand-ins)
-// ---------------------------------------------------------------------------
-
-function FolderIcon(): JSX.Element {
-  return (
-    <svg width="9" height="9" viewBox="0 0 16 16" fill="none" aria-hidden>
-      <path
-        d="M1.5 3.5A1.5 1.5 0 0 1 3 2h3l1.5 2H13a1.5 1.5 0 0 1 1.5 1.5v6A1.5 1.5 0 0 1 13 13H3a1.5 1.5 0 0 1-1.5-1.5v-8Z"
-        stroke="currentColor"
-        strokeWidth="1.4"
-      />
-    </svg>
-  )
-}
-
-function ChecklistIcon(): JSX.Element {
-  return (
-    <svg width="11" height="11" viewBox="0 0 16 16" fill="none" aria-hidden>
-      <path d="M2 4.5 3.3 6 6 3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M8.5 4.5H14M8.5 11.5H14" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-      <path d="M2 11.5 3.3 13 6 10" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  )
-}
-
-function PlanStatusIcon({ status }: { status: string }): JSX.Element {
-  if (status === 'completed') {
-    // checkmark.circle.fill
-    return (
-      <svg width="11" height="11" viewBox="0 0 16 16" aria-hidden>
-        <circle cx="8" cy="8" r="7" fill="currentColor" />
-        <path
-          d="m5 8.2 2 2.1 4-4.6"
-          stroke="var(--canvas)"
-          strokeWidth="1.6"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          fill="none"
-        />
-      </svg>
-    )
-  }
-  if (status === 'in_progress') {
-    // circle.dotted.circle
-    return (
-      <svg width="11" height="11" viewBox="0 0 16 16" fill="none" aria-hidden>
-        <circle
-          cx="8"
-          cy="8"
-          r="7"
-          stroke="currentColor"
-          strokeWidth="1.3"
-          strokeDasharray="2 2.4"
-          strokeLinecap="round"
-        />
-        <circle cx="8" cy="8" r="3.4" stroke="currentColor" strokeWidth="1.3" />
-      </svg>
-    )
-  }
-  // circle
-  return (
-    <svg width="11" height="11" viewBox="0 0 16 16" fill="none" aria-hidden>
-      <circle cx="8" cy="8" r="7" stroke="currentColor" strokeWidth="1.3" />
-    </svg>
-  )
 }

@@ -1,0 +1,119 @@
+// Ctrl/Cmd+K: jump to any session by typing part of its title or folder.
+// A small floating list near the top of the window — the type-ahead from
+// Spotlight and the Claude app — that filters as you type; ↑/↓ choose,
+// Enter opens, Escape (or a click outside) closes without doing anything.
+
+import { useEffect, useMemo, useRef, useState } from 'react'
+import type { ChatSummary } from '@shared/model'
+import { call, useApp } from '@renderer/state/store'
+import { MagnifyIcon } from './icons'
+import { groupSessions } from './sessionGroups'
+import { basename, relativeTime } from './util'
+
+/** Most matches worth showing; past this, typing more is faster than reading. */
+const LIMIT = 12
+
+export default function QuickSwitcher({ onClose }: { onClose: () => void }): JSX.Element {
+  const app = useApp()
+  const [query, setQuery] = useState('')
+  const [index, setIndex] = useState(0)
+  const inputRef = useRef<HTMLInputElement>(null)
+  const listRef = useRef<HTMLDivElement>(null)
+
+  // Same order as the sidebar, archived last: what you see there is what
+  // comes up here.
+  const results = useMemo((): ChatSummary[] => {
+    const { groups, archived } = groupSessions(app?.sessions ?? [], query)
+    return [...groups.flatMap((g) => g.sessions), ...archived].slice(0, LIMIT)
+  }, [app?.sessions, query])
+
+  useEffect(() => {
+    inputRef.current?.focus()
+  }, [])
+
+  useEffect(() => {
+    setIndex(0)
+  }, [query])
+
+  useEffect(() => {
+    listRef.current
+      ?.querySelector<HTMLElement>(`[data-index="${index}"]`)
+      ?.scrollIntoView?.({ block: 'nearest' })
+  }, [index])
+
+  const open = (session: ChatSummary | undefined): void => {
+    if (!session) return
+    void call('openChat', session.id)
+    onClose()
+  }
+
+  const onKeyDown = (e: React.KeyboardEvent): void => {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault()
+      if (results.length === 0) return
+      const delta = e.key === 'ArrowDown' ? 1 : -1
+      setIndex((i) => (i + delta + results.length) % results.length)
+    } else if (e.key === 'Enter') {
+      e.preventDefault()
+      open(results[index])
+    } else if (e.key === 'Escape') {
+      e.preventDefault()
+      e.stopPropagation()
+      onClose()
+    }
+  }
+
+  return (
+    <div className="switcher-backdrop" role="presentation" onMouseDown={onClose}>
+      <div
+        className="switcher"
+        role="dialog"
+        aria-label="Switch session"
+        onMouseDown={(e) => e.stopPropagation()}
+        onKeyDown={onKeyDown}
+      >
+        <div className="switcher-search">
+          <MagnifyIcon size={14} />
+          <input
+            ref={inputRef}
+            type="text"
+            placeholder="Switch to a session…"
+            aria-label="Search sessions"
+            role="combobox"
+            aria-expanded="true"
+            aria-controls="switcher-list"
+            aria-activedescendant={results[index] ? `switcher-${results[index].id}` : undefined}
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+        </div>
+        <div className="switcher-list" id="switcher-list" role="listbox" ref={listRef}>
+          {results.length === 0 && (
+            <div className="switcher-empty">
+              {(app?.sessions.length ?? 0) === 0 ? 'No sessions yet' : 'No sessions match'}
+            </div>
+          )}
+          {results.map((s, i) => (
+            <div
+              key={s.id}
+              id={`switcher-${s.id}`}
+              data-index={i}
+              role="option"
+              aria-selected={i === index}
+              className={'switcher-row' + (i === index ? ' switcher-row--active' : '')}
+              onMouseMove={() => setIndex(i)}
+              onClick={() => open(s)}
+            >
+              <span className="switcher-title">{s.title}</span>
+              <span className="switcher-project">
+                {basename(s.projectPath)}
+                {s.isArchived ? ' · Archived' : ''}
+              </span>
+              <span className="switcher-time">{relativeTime(s.updatedAt)}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}

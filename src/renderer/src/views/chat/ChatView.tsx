@@ -15,6 +15,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { JSX } from 'react'
 import { call, ensureChatLoaded, useChat } from '@renderer/state/store'
+import { setTerminalVisible, useShell } from '@renderer/state/shell'
 import TerminalDrawer from '@renderer/views/terminal/TerminalDrawer'
 import { TranscriptRowView } from './transcript/TranscriptItemView'
 import { activeRuns, groupTranscript } from './transcript/orchestration'
@@ -22,12 +23,9 @@ import { RunTicker } from './transcript/RunTicker'
 import { Icon } from './transcript/ToolCallView'
 import OrchestrationPanel from './OrchestrationPanel'
 import ChatHeader, { projectName } from './ChatHeader'
-import AppIcon from '@renderer/views/shell/AppIcon'
-import Composer from './Composer'
+import Composer, { type PromptSeed } from './Composer'
+import StarterPrompts from './StarterPrompts'
 import './chat.css'
-
-/** UserDefaults key `spettro.terminalDrawerVisible` — global, not per project. */
-const TERMINAL_VISIBLE_KEY = 'spettro.terminalDrawerVisible'
 
 /** UserDefaults key `spettro.orchestrationPanelVisible` — global, like the
  *  terminal drawer. Unlike the drawer it defaults to *shown*: the panel costs
@@ -47,10 +45,9 @@ export default function ChatView({ chatId }: { chatId: string }): JSX.Element {
   const scrollTowardLatestRef = useRef(false)
   const touchYRef = useRef<number | null>(null)
   const [showJumpToLatest, setShowJumpToLatest] = useState(false)
-  const [promptSeed, setPromptSeed] = useState('')
-  const [terminalVisible, setTerminalVisible] = useState(
-    () => localStorage.getItem(TERMINAL_VISIBLE_KEY) === '1'
-  )
+  const [promptSeed, setPromptSeed] = useState<PromptSeed | null>(null)
+  // Global (Ctrl+` and the header toggle both flip it), not per chat.
+  const terminalVisible = useShell((s) => s.terminalVisible)
   const [panelVisible, setPanelVisible] = useState(
     () => localStorage.getItem(PANEL_VISIBLE_KEY) !== '0'
   )
@@ -59,10 +56,6 @@ export default function ChatView({ chatId }: { chatId: string }): JSX.Element {
     void ensureChatLoaded(chatId)
     void call('openChat', chatId)
   }, [chatId])
-
-  useEffect(() => {
-    localStorage.setItem(TERMINAL_VISIBLE_KEY, terminalVisible ? '1' : '0')
-  }, [terminalVisible])
 
   useEffect(() => {
     localStorage.setItem(PANEL_VISIBLE_KEY, panelVisible ? '1' : '0')
@@ -182,7 +175,10 @@ export default function ChatView({ chatId }: { chatId: string }): JSX.Element {
         >
           <div className="chat-transcript-inner">
             {chat.items.length === 0 && (
-              <WelcomeBanner projectPath={chat.projectPath} onPrompt={setPromptSeed} />
+              <WelcomeBanner
+                projectPath={chat.projectPath}
+                onPrompt={(text) => setPromptSeed({ text, nonce: Date.now() })}
+              />
             )}
             {rows.map((row) => (
               <TranscriptRowView row={row} key={row.id} />
@@ -222,12 +218,7 @@ export default function ChatView({ chatId }: { chatId: string }): JSX.Element {
 
       <div className="chat-divider" />
 
-      <Composer
-        chat={chat}
-        terminalVisible={terminalVisible}
-        onToggleTerminal={() => setTerminalVisible((v) => !v)}
-        promptSeed={promptSeed}
-      />
+      <Composer chat={chat} promptSeed={promptSeed} />
 
       <TerminalDrawer
         projectPath={chat.projectPath}
@@ -263,7 +254,8 @@ function ReopenPanelChip({ count, onShow }: { count: number; onShow: () => void 
   )
 }
 
-/** Empty-state banner shown until the first prompt is sent (doc 22). */
+/** Empty-state banner shown until the first prompt is sent (doc 22): a
+ *  greeting, the folder this session works in, and a few ways to start. */
 function WelcomeBanner({
   projectPath,
   onPrompt
@@ -273,20 +265,9 @@ function WelcomeBanner({
 }): JSX.Element {
   return (
     <div className="chat-welcome">
-      <AppIcon size={104} />
-      <div className="chat-welcome-title">How can I help?</div>
+      <div className="chat-welcome-title">What should we build?</div>
       <div className="chat-welcome-sub">Working in {projectName(projectPath)}</div>
-      <div className="chat-welcome-prompts" aria-label="Suggested prompts">
-        <button type="button" onClick={() => onPrompt('Explain this project in simple terms')}>
-          Explain this project
-        </button>
-        <button type="button" onClick={() => onPrompt('Help me find and fix a problem')}>
-          Fix a problem
-        </button>
-        <button type="button" onClick={() => onPrompt('Help me add a new feature')}>
-          Add a feature
-        </button>
-      </div>
+      <StarterPrompts onPrompt={onPrompt} />
     </div>
   )
 }

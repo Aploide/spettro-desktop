@@ -68,6 +68,10 @@ export class ChatSession {
   usage: ACPUsage | null = null
   /** The agent's current plan (task list), when it publishes one. */
   plan: ACPPlanEntry[] = []
+  /** A turn finished while the user was looking at another chat. Drives the
+   *  sidebar's "finished while you were away" dot; cleared the moment the
+   *  chat is opened. Live-only: a relaunch starts with nothing unread. */
+  unread = false
 
   /** Changes the user made while this chat had no live ACP session yet;
    *  AppModel replays them onto the session as soon as one attaches. */
@@ -181,7 +185,8 @@ export class ChatSession {
       isArchived: this.isArchived,
       isBusy: this.isBusy,
       messageCount: this.items.length,
-      preview: this.previewText()
+      preview: this.previewText(),
+      unread: this.unread
     }
   }
 
@@ -262,6 +267,17 @@ export class ChatSession {
   setUsage(usage: ACPUsage | null): void {
     this.usage = usage
     this.emitMeta({ usage })
+  }
+
+  /** A user-chosen title. Blank input is refused rather than stored, so a
+   *  chat can never end up nameless in the sidebar. Returns whether the title
+   *  changed. */
+  rename(title: string): boolean {
+    const next = title.replace(/\s+/g, ' ').trim().slice(0, 120)
+    if (next === '' || next === this.title) return false
+    this.title = next
+    this.emitMeta({ title: next })
+    return true
   }
 
   setPinned(value: boolean): void {

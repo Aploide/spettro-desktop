@@ -362,6 +362,13 @@ describe('sessions saved by an older build', () => {
     expect(toolAt(s).locations).toEqual([{ path: '/p/a.go' }])
   })
 
+  it('drop a malformed item instead of failing the whole load', () => {
+    const stored = legacy()
+    stored.items.push({ kind: 'message' } as never, null as never, { kind: 'tool' } as never)
+    const s = ChatSession.restore(stored)
+    expect(s.items).toHaveLength(2)
+  })
+
   it('lose a steering state no turn is left to resolve', () => {
     const s = ChatSession.restore(legacy())
     const item = s.items[1]

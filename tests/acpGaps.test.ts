@@ -438,6 +438,51 @@ describe('sending', () => {
     expect(session.isBusy).toBe(false)
   })
 
+  it('leaves the running turn alone when a mid-turn send is answered on its own', async () => {
+    liveModel()
+    const session = await liveChat()
+    const turn = deferred<JSONValue>()
+    let prompts = 0
+    fake.handlers['session/prompt'] = () => {
+      prompts += 1
+      if (prompts === 1) return turn.promise
+      if (prompts === 2) {
+        // bridge.go Prompt: a slash command is answered at once, never
+        // steered, even while a turn runs.
+        fake.update('s1', agentChunk('Commands: /help /model …'))
+        return promptResult({ stopReason: 'end_turn' })
+      }
+      throw new Reply(rpcError('steering queue closed'))
+    }
+
+    model.send(session.id, 'refactor the parser', [])
+    await settle()
+    fake.update('s1', agentChunk('Reading the parser'))
+    fake.ask(20, 'session/request_permission', permissionFresh({ sessionId: 's1', n: 9, title: 'Run make', command: 'make' }))
+
+    model.send(session.id, '/help', [])
+    await settle()
+    // Not filed as the turn, and the turn's reply is still streaming.
+    expect(session.lastTurn).toBeNull()
+    const streaming = session.items.some(
+      (i) => i.kind === 'message' && i.message.role === 'assistant' && i.message.isStreaming
+    )
+    expect(streaming).toBe(true)
+
+    model.send(session.id, 'also keep the old API', [])
+    await settle()
+    // A failed steer says so, but the turn's own prompt stays answerable.
+    expect(notices(session)).toEqual(['steering queue closed'])
+    expect(shownPermissions()).toHaveLength(1)
+    expect(fake.sent.some((m) => m.id === 20 && m.method === undefined)).toBe(false)
+    expect(session.isBusy).toBe(true)
+
+    turn.resolve(promptResult({ stopReason: 'end_turn' }))
+    await settle()
+    expect(session.isBusy).toBe(false)
+    expect(session.lastTurn?.stopReason).toBe('end_turn')
+  })
+
   it('reads the turn’s usage and files it on the chat', async () => {
     liveModel()
     const session = await liveChat()

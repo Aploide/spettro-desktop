@@ -152,8 +152,11 @@ export class ChatSession {
     session.acpSessionId = stored.acpSessionId ?? null
     session.isPinned = stored.isPinned === true
     session.isArchived = stored.isArchived === true
-    session.items = Array.isArray(stored.items) ? structuredClone(stored.items) : []
-    for (const item of session.items) upgradeStoredItem(item)
+    // A malformed item is dropped rather than allowed to throw: one bad entry
+    // must not cost the user every saved chat at launch.
+    session.items = Array.isArray(stored.items)
+      ? structuredClone(stored.items).filter(upgradeStoredItem)
+      : []
     session.isEmpty = session.items.length === 0
     session.commands = commands
     if (typeof stored.sessionTokens === 'number' && Number.isFinite(stored.sessionTokens)) {
@@ -657,9 +660,12 @@ export class ChatSession {
 
 /** Brings an item saved by an older build up to the current shape, in place:
  *  tool locations were bare paths before line numbers were kept, and a
- *  steering state saved mid-turn means nothing once the turn is gone. */
-function upgradeStoredItem(item: TranscriptItem): void {
+ *  steering state saved mid-turn means nothing once the turn is gone. False
+ *  for an item too malformed to show. */
+function upgradeStoredItem(item: TranscriptItem): boolean {
+  if (typeof item !== 'object' || item === null) return false
   if (item.kind === 'tool') {
+    if (typeof item.tool !== 'object' || item.tool === null) return false
     const raw = Array.isArray(item.tool.locations) ? (item.tool.locations as unknown[]) : []
     item.tool.locations = raw
       .map((loc): ACPToolLocation | null => {
@@ -669,11 +675,15 @@ function upgradeStoredItem(item: TranscriptItem): void {
         return null
       })
       .filter((loc): loc is ACPToolLocation => loc !== null)
-    return
+    return true
+  }
+  if (item.kind !== 'message' || typeof item.message !== 'object' || item.message === null) {
+    return false
   }
   if (item.message.steering !== undefined && item.message.steering !== 'delivered') {
     delete item.message.steering
   }
+  return true
 }
 
 /** The full ACP rawInput re-encoded as JSON — the reliable argument source

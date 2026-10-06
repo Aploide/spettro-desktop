@@ -1061,6 +1061,13 @@ export class AppModel extends EventEmitter {
     if (!reachedAgent && failure === null) {
       // Nothing was sent: ensureLiveSession has already said why in the chat.
       this.turnOutcome.set(chatId, { stopReason: 'error', notice: null })
+    } else if (steerId !== null && !steered && left > 0) {
+      // Answered beside the turn it meant to steer, which is still running:
+      // a slash command the CLI handles at once (bridge.go Prompt answers
+      // those before it ever tries to steer), or a steer that failed. Ending
+      // the stream, filing a turn or withdrawing prompts here would all hit
+      // the running turn instead, so only a failure is worth a line.
+      if (failure !== null) session.appendNotice(failure, true)
     } else if (!(steered && result?.stopReason === 'end_turn')) {
       this.finishTurn(session, result, failure, Date.now() - startedAt)
     }

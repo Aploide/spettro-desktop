@@ -116,6 +116,12 @@ function isSharedConfig(id: string): boolean {
 /** How many past workflow runs the studio asks the CLI for. */
 const RECENT_WORKFLOW_RUNS = 20
 
+/** How long the sessions file may lag behind the chats (see persist). */
+const PERSIST_DELAY_MS = 1000
+
+/** The longest the main thread spends encoding stored JSON in one go. */
+const ENCODE_SLICE_MS = 6
+
 /** Fills in what a run's folder says about it (internal/agent workflow.go
  *  writes meta.json as the run starts, workflow_live_run.go result.json once
  *  it settles). The CLI runs on this machine, so the folder is readable here;
@@ -331,7 +337,7 @@ export class AppModel extends EventEmitter {
       providerSetupSkipped: this.prefs.providerSetupSkipped,
       notifyWhenDone: this.prefs.notifyWhenDone,
       approvedBroadFolders: this.prefs.approvedBroadFolders,
-      defaultConfigOptions: this.prefs.lastConfigOptions,
+      defaultConfigOptions: this.prefs.lastConfigOptionsReadonly,
       busyTasks: this.busyCount()
     }
   }
@@ -511,15 +517,58 @@ export class AppModel extends EventEmitter {
   private attachSessionCallbacks(session: ChatSession): void {
     session.onItem = (s, item) => this.pushEvent({ type: 'chat-item', chatId: s.id, item })
     session.onMeta = (s, meta) => this.pushEvent({ type: 'chat-meta', chatId: s.id, meta })
+    session.onConfigValue = (s, configId, value) =>
+      this.pushEvent({ type: 'chat-config-value', chatId: s.id, configId, value })
   }
 
+  /** Marks the sessions file out of date and says so in app-state. The
+   *  write itself follows within PERSIST_DELAY_MS, once for however many
+   *  changes landed meanwhile: one slider release alone persists once per
+   *  live chat (the CLI tells each of them), and rewriting every chat that
+   *  many times, on the thread that also presents the window, is what made
+   *  the app freeze. Quitting writes whatever is still pending
+   *  (flushPersistence). */
   private persist(): void {
-    // Sessions that have never received a prompt (and never failed to
-    // connect) are not conversations — don't store them.
-    this.store.save(
-      this.sessions.filter((s) => !s.isPristine && !s.isScratch).map((s) => s.snapshot())
-    )
+    this.persistDirty = true
+    if (!this.persistTimer) {
+      this.persistTimer = setTimeout(() => {
+        this.persistTimer = null
+        void this.writeSessions()
+      }, PERSIST_DELAY_MS)
+    }
     this.emitAppState()
+  }
+
+  private persistDirty = false
+  private persistTimer: NodeJS.Timeout | null = null
+
+  /** Sessions that have never received a prompt (and never failed to
+   *  connect) are not conversations — don't store them. */
+  private storedSessions(): ChatSession[] {
+    return this.sessions.filter((s) => !s.isPristine && !s.isScratch)
+  }
+
+  private async writeSessions(): Promise<void> {
+    this.persistDirty = false
+    // What has no stored JSON yet is encoded a slice at a time, the window
+    // getting the main thread back between slices; then the write itself
+    // is off the thread (SessionStore.saveParts).
+    for (const session of this.storedSessions()) {
+      while (!session.encodeStoredItems(performance.now() + ENCODE_SLICE_MS)) {
+        await new Promise((resolve) => setImmediate(resolve))
+      }
+    }
+    await this.store.saveParts(this.storedSessions().map((s) => s.persistParts()))
+  }
+
+  /** Writes any pending change to the sessions file now; resolves once it
+   *  is on disk. */
+  flushPersistence(): Promise<void> {
+    if (this.persistTimer) {
+      clearTimeout(this.persistTimer)
+      this.persistTimer = null
+    }
+    return this.persistDirty ? this.writeSessions() : Promise.resolve()
   }
 
   // -------------------------------------------------------------------------
@@ -2242,9 +2291,13 @@ export class AppModel extends EventEmitter {
     this.extensions.dispose()
     this.subscriptionStore.stop()
     this.updates.shutdown()
-    this.store.save(
-      this.sessions.filter((s) => !s.isPristine && !s.isScratch).map((s) => s.snapshot())
-    )
+    if (this.persistTimer) {
+      clearTimeout(this.persistTimer)
+      this.persistTimer = null
+    }
+    this.persistDirty = false
+    this.store.savePartsSync(this.storedSessions().map((s) => s.persistParts()))
+    this.prefs.flush()
   }
 }
 

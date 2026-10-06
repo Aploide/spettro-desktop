@@ -453,7 +453,9 @@ describe('AppModel sessions (rename, unread, recents)', () => {
 
     expect(model.getState().sessions.find((s) => s.id === 'a')?.title).toBe('Login bug')
     expect(remote).toHaveLength(1)
-    // A fresh model over the same folder is what a relaunch sees.
+    // A fresh model over the same folder is what a relaunch sees (quitting
+    // writes whatever is still pending).
+    await model.flushPersistence()
     expect(load(dir).getState().sessions.find((s) => s.id === 'a')?.title).toBe('Login bug')
     rmSync(dir, { recursive: true, force: true })
   })
@@ -636,6 +638,7 @@ describe('the commands cache', () => {
     expect(prefs.cachedCommands('/never-opened')).toEqual([{ name: 'help' }])
     // An empty announcement never wipes what was there.
     prefs.setCachedCommands('/a', [])
+    prefs.flush()
     expect(new Prefs(dir).cachedCommands('/a')).toEqual([{ name: 'help' }, { name: 'deploy' }])
     rmSync(dir, { recursive: true, force: true })
   })

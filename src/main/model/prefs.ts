@@ -40,6 +40,7 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'fs'
 import { dirname, join } from 'path'
 import type { ACPCommand, ACPConfigOption } from '../../shared/acp'
 import { DEFAULT_ACCENT, isAccent, isAppearance, type Accent, type Appearance } from '../../shared/model'
+import { sameJSON } from './sameJSON'
 
 interface PrefsData {
   explicitCLIPath: string
@@ -65,6 +66,9 @@ const MAX_CACHED_PROJECTS = 40
 
 /** Session ids remembered as the app's own; the oldest go first. */
 const MAX_KNOWN_SESSIONS = 2000
+
+/** How long a burst of option or command updates may wait to be written. */
+const SAVE_DELAY_MS = 1000
 
 function defaults(): PrefsData {
   return {
@@ -148,9 +152,16 @@ export class Prefs {
     }
   }
 
+  /** A write waiting for the end of a burst of changes (see saveSoon). */
+  private saveTimer: ReturnType<typeof setTimeout> | null = null
+
   /** Atomic (tmp + rename) whole-file rewrite; failures are silent, matching
    *  the fail-silent UserDefaults semantics of the macOS app. */
   private save(): void {
+    if (this.saveTimer) {
+      clearTimeout(this.saveTimer)
+      this.saveTimer = null
+    }
     try {
       mkdirSync(dirname(this.file), { recursive: true })
       const tmp = `${this.file}.tmp`
@@ -159,6 +170,21 @@ export class Prefs {
     } catch {
       // Unwritable prefs must never crash the app.
     }
+  }
+
+  /** save(), once, after the burst. For the keys the CLI rewrites in
+   *  bursts — the option set (with its model catalog) arrives with every
+   *  config reply and with every other live session's update, the commands
+   *  with every session that attaches — where a write each time would be
+   *  the whole file rewritten on the main thread several times a click. */
+  private saveSoon(): void {
+    if (this.saveTimer) return
+    this.saveTimer = setTimeout(() => this.save(), SAVE_DELAY_MS)
+  }
+
+  /** Writes a change still waiting (saveSoon) now — before quitting. */
+  flush(): void {
+    if (this.saveTimer) this.save()
   }
 
   get explicitCLIPath(): string {
@@ -188,8 +214,17 @@ export class Prefs {
   set lastConfigOptions(options: ACPConfigOption[]) {
     // Empty option sets are never persisted (rememberConfig semantics).
     if (options.length === 0) return
+    if (sameJSON(this.data.lastConfigOptions, options)) return
     this.data.lastConfigOptions = structuredClone(options)
-    this.save()
+    this.saveSoon()
+  }
+
+  /** The seed itself, uncopied, for reading only (an app-state snapshot,
+   *  sent on the spot): the getter's copy is for callers that change it.
+   *  The setter replaces the array rather than changing it, so a snapshot
+   *  holding this one never sees it move. */
+  get lastConfigOptionsReadonly(): ACPConfigOption[] {
+    return this.data.lastConfigOptions
   }
 
   get recentProjects(): string[] {
@@ -221,6 +256,17 @@ export class Prefs {
     // saveCache ignores empty lists, so a transient empty update can't wipe
     // the cache (appendix C).
     if (commands.length === 0) return
+    const known = this.data.cachedCommandsByProject
+    const order = Object.keys(known)
+    // Already the newest list, for this folder and as the fallback: nothing
+    // to write. (Every session attaching announces its commands.)
+    if (
+      order[order.length - 1] === projectPath &&
+      sameJSON(known[projectPath], commands) &&
+      sameJSON(known[ANY_PROJECT], commands)
+    ) {
+      return
+    }
     const byProject = { ...this.data.cachedCommandsByProject }
     // Re-inserted so the key order is oldest-written first.
     delete byProject[projectPath]
@@ -231,7 +277,7 @@ export class Prefs {
       delete byProject[stale]
     }
     this.data.cachedCommandsByProject = byProject
-    this.save()
+    this.saveSoon()
   }
 
   get appearance(): Appearance {

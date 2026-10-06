@@ -31,6 +31,7 @@ import type {
   TranscriptItem,
   TurnSummary
 } from '../../shared/model'
+import { sameJSON } from './sameJSON'
 
 /** The CLI's acknowledgement that a message sent mid-turn was queued for the
  *  running agent (bridge.go steerRunningTurn), and its report that the agent
@@ -121,6 +122,9 @@ export type ChatMetaPatch = Partial<
  *  nextToolCallID); see ChatSession.turnStart. */
 const PER_TURN_TOOL_ID = /^(call|perm|compact)-(\d+)$/
 
+const COMMA = Buffer.from(',')
+const ITEMS_END = Buffer.from(']}')
+
 export class ChatSession {
   readonly id: string
   readonly projectPath: string
@@ -186,6 +190,9 @@ export class ChatSession {
 
   onItem: ((session: ChatSession, item: TranscriptItem) => void) | null = null
   onMeta: ((session: ChatSession, meta: ChatMetaPatch) => void) | null = null
+  /** One option's value changed in place (applyLocalConfigValue). Without a
+   *  listener here the change goes out as the whole set, through onMeta. */
+  onConfigValue: ((session: ChatSession, configId: string, value: ConfigValue) => void) | null = null
 
   /**
    * A throwaway chat the studio runs a workflow in.
@@ -277,6 +284,59 @@ export class ChatSession {
     }
   }
 
+  /** This session as stored JSON (what snapshot() would serialise), in
+   *  UTF-8 pieces for SessionStore.saveParts. Each transcript item's JSON is
+   *  kept until the item changes — every change goes through emitItem — so
+   *  saving a long chat re-encodes only what moved since the last save. */
+  persistParts(): Buffer[] {
+    const head = JSON.stringify({
+      id: this.id,
+      acpSessionId: this.acpSessionId,
+      projectPath: this.projectPath,
+      title: this.title,
+      createdAt: this.createdAt,
+      updatedAt: this.updatedAt,
+      isPinned: this.isPinned,
+      isArchived: this.isArchived,
+      configOptions: this.configOptions,
+      pendingConfigChanges: this.pendingConfigChanges,
+      sessionTokens: this.sessionTokens
+    } satisfies Omit<StoredSession, 'items'>)
+    const parts: Buffer[] = [Buffer.from(`${head.slice(0, -1)},"items":[`, 'utf8')]
+    this.items.forEach((item, i) => {
+      let json = this.storedItems.get(item)
+      if (!json) {
+        json = Buffer.from(JSON.stringify(item), 'utf8')
+        this.storedItems.set(item, json)
+      }
+      if (i > 0) parts.push(COMMA)
+      parts.push(json)
+    })
+    parts.push(ITEMS_END)
+    return parts
+  }
+
+  /** Gives items with no stored JSON yet theirs, until `deadline`
+   *  (performance.now()); true once every item has it. The first save after
+   *  launch is every item of every chat: encoded in slices like this, it
+   *  never holds the main thread (and with it the window) in one piece. */
+  encodeStoredItems(deadline: number): boolean {
+    for (const item of this.items) {
+      if (this.storedItems.has(item)) continue
+      this.storedItems.set(item, Buffer.from(JSON.stringify(item), 'utf8'))
+      if (performance.now() >= deadline) return false
+    }
+    return true
+  }
+
+  /** Each item's stored JSON, dropped when the item changes (emitItem). */
+  private storedItems = new WeakMap<TranscriptItem, Buffer>()
+
+  /** The bubbles still streaming, oldest first. Only pushStreamingMessage
+   *  starts one (a restored item never is), so closing them is a walk over
+   *  these instead of the whole transcript on every answer chunk. */
+  private streaming = new Set<TranscriptItem>()
+
   /** When the conversation last moved: the newest message or tool call.
    *  Notices don't count — the app adds those on its own (e.g. "Couldn't
    *  restore this chat's earlier context" when a chat is merely opened), and
@@ -321,11 +381,14 @@ export class ChatSession {
       isArchived: this.isArchived,
       isBusy: this.isBusy,
       createdAt: this.createdAt,
-      items: structuredClone(this.items),
-      configOptions: structuredClone(this.configOptions),
-      commands: structuredClone(this.commands),
-      plan: structuredClone(this.plan),
-      usage: this.usage ? structuredClone(this.usage) : null,
+      // Not copied: every consumer serialises it on the spot (IPC, the
+      // remote wire), and a deep copy of a long transcript costs as much
+      // as sending it.
+      items: this.items,
+      configOptions: this.configOptions,
+      commands: this.commands,
+      plan: this.plan,
+      usage: this.usage,
       lastTurn: this.lastTurn ? { ...this.lastTurn } : null,
       sessionTokens: this.sessionTokens
     }
@@ -350,6 +413,7 @@ export class ChatSession {
   // -------------------------------------------------------------------------
 
   private emitItem(item: TranscriptItem): void {
+    this.storedItems.delete(item)
     this.onItem?.(this, item)
   }
 
@@ -376,8 +440,13 @@ export class ChatSession {
   }
 
   setConfigOptions(options: ACPConfigOption[]): void {
+    // The CLI answers every change, and tells every other live session too,
+    // with the whole option set — the model catalog included. When that is
+    // what this chat already shows (a slider stop applied optimistically,
+    // another chat's change already spread here), there is nothing to say.
+    const unchanged = sameJSON(this.configOptions, options)
     this.configOptions = options
-    this.emitMeta({ configOptions: options })
+    if (!unchanged) this.emitMeta({ configOptions: options })
   }
 
   setCommands(commands: ACPCommand[]): void {
@@ -440,7 +509,8 @@ export class ChatSession {
     } else {
       return
     }
-    this.emitMeta({ configOptions: this.configOptions })
+    if (this.onConfigValue) this.onConfigValue(this, id, value)
+    else this.emitMeta({ configOptions: this.configOptions })
   }
 
   /** The current value of every displayed option, used to reconcile a newly
@@ -667,6 +737,7 @@ export class ChatSession {
     if (role === 'assistant' && this.commandTurn) message.plain = true
     const item: TranscriptItem = { kind: 'message', message }
     this.items.push(item)
+    this.streaming.add(item)
     this.emitItem(item)
   }
 
@@ -842,7 +913,8 @@ export class ChatSession {
 
   /** Flips every streaming bubble — answer or reasoning — to finished. */
   private endOpenBubbles(): void {
-    for (const item of this.items) {
+    for (const item of this.streaming) {
+      this.streaming.delete(item)
       if (item.kind === 'message' && item.message.isStreaming) {
         item.message.isStreaming = false
         this.emitItem(item)
@@ -853,8 +925,11 @@ export class ChatSession {
   /** Flips every streaming reasoning bubble to finished, so a turn's
    *  reasoning phase closes the moment the first answer chunk arrives. */
   private endReasoningStream(): void {
-    for (const item of this.items) {
-      if (item.kind === 'message' && item.message.role === 'reasoning' && item.message.isStreaming) {
+    if (this.streaming.size === 0) return
+    for (const item of this.streaming) {
+      if (item.kind !== 'message' || item.message.role !== 'reasoning') continue
+      this.streaming.delete(item)
+      if (item.message.isStreaming) {
         item.message.isStreaming = false
         this.emitItem(item)
       }

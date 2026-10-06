@@ -105,7 +105,8 @@ export class AcpConnection {
   private child: ChildProcessWithoutNullStreams | null = null
   private running = false
   private spawned = false
-  private stdoutBuffer: Buffer = Buffer.alloc(0)
+  /** The pieces of a line still waiting for its newline (see ingest). */
+  private stdoutPending: Buffer[] = []
   private nextId = 1
   private readonly pending = new Map<number, PendingRequest>()
   /** Synthetic "type my own answer" option ids for questions delivered over
@@ -263,13 +264,23 @@ export class AcpConnection {
   /** Splits the incoming byte stream on newlines. Reads arrive in arbitrary
    *  chunks, so a partial line is held in the buffer until its newline lands. */
   private ingest(chunk: Buffer): void {
-    this.stdoutBuffer = Buffer.concat([this.stdoutBuffer, chunk])
+    // Only the new chunk is searched, and a partial line's pieces are joined
+    // once, when its newline lands: re-joining and re-scanning everything
+    // held on every 64 KB read made a long line (a session/load reply, an
+    // imported chat) quadratic in its length.
+    let start = 0
     let idx: number
-    while ((idx = this.stdoutBuffer.indexOf(0x0a)) !== -1) {
-      const line = this.stdoutBuffer.subarray(0, idx)
-      this.stdoutBuffer = this.stdoutBuffer.subarray(idx + 1)
+    while ((idx = chunk.indexOf(0x0a, start)) !== -1) {
+      let line = chunk.subarray(start, idx)
+      if (this.stdoutPending.length > 0) {
+        this.stdoutPending.push(line)
+        line = Buffer.concat(this.stdoutPending)
+        this.stdoutPending = []
+      }
+      start = idx + 1
       if (line.length > 0) this.handleLine(line.toString('utf8'))
     }
+    if (start < chunk.length) this.stdoutPending.push(chunk.subarray(start))
   }
 
   private handleLine(text: string): void {

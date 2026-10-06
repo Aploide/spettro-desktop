@@ -96,6 +96,17 @@ SCENES=(
   app:confirm-delete
   app:deleted-undo
   app:no-model
+  app:no-model-sent
+  app:no-model-connect
+  app:no-model-error
+  app:no-model-menu
+  app:no-model-signin
+  app:mode-menu
+  app:welcome-sent
+  app:welcome-new-project
+  app:welcome-more
+  app:gate-signin
+  app:gate-local
   app:error-toast
 )
 

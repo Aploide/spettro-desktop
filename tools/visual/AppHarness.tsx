@@ -19,7 +19,10 @@
 //                   updates|advanced|shortcuts|about> |
 //                 onboarding | installing | install-failed | gate | gate-keys |
 //                 failure | reconnecting | confirm-delete | deleted-undo |
-//                 no-model | error-toast
+//                 no-model | no-model-sent | no-model-connect |
+//                 no-model-error | no-model-menu | mode-menu | welcome-sent |
+//                 welcome-new-project | welcome-more | installing-slow |
+//                 gate-signin | gate-local | no-model-signin | error-toast
 
 import './appPrelude'
 import { createRoot } from 'react-dom/client'
@@ -44,6 +47,9 @@ import { EMPTY_COMPONENT_UPDATE, EMPTY_UPDATE_STATE, type UpdateState } from '@s
 import { showToast } from '@renderer/views/common/Toast'
 
 const MODE = new URLSearchParams(location.search).get('mode') ?? 'welcome'
+/** Nothing connected: `no-model` and its variants (a send held back, the
+ *  connect step it opens, the error an older send left in a chat). */
+const NO_MODEL = MODE.startsWith('no-model')
 
 const PROJECT = '/home/carlo/code/acme-web'
 const NOW = Date.now()
@@ -271,6 +277,16 @@ function transcript(mode: string): TranscriptItem[] {
         )
       )
       return items
+    case 'no-model-error':
+      // What a send with nothing connected used to leave behind: the
+      // humanized sentence, the CLI's words behind "Show details".
+      return [
+        say('user', 'Make a simple website for my bakery'),
+        say('notice', 'No model is connected. Connect a model in Settings › Models & Providers, then try again.', {
+          error: true,
+          detail: 'coding agent: agent call failed: no API endpoint configured for provider ""'
+        })
+      ]
     default:
       items.push(
         tool({
@@ -347,13 +363,21 @@ const MODEL_OPTION: ACPConfigOption = {
   }
 }
 
+/** Nothing connected: the CLI offers no model at all. */
+const NO_MODEL_OPTION: ACPConfigOption = {
+  ...MODEL_OPTION,
+  kind: { type: 'select', currentValue: '', flat: [], groups: [] }
+}
+
 const OPTIONS: ACPConfigOption[] = [
+  // The CLI's own descriptions (agents/*.go), which the app replaces with
+  // plain ones.
   select('mode', 'Mode', 'coding', [
-    { value: 'plan', name: 'Plan' },
-    { value: 'coding', name: 'Coding' },
-    { value: 'ask', name: 'Ask' }
+    { value: 'plan', name: 'Plan', description: 'Planning orchestrator (delegates all discovery to explore worker)' },
+    { value: 'coding', name: 'Coding', description: 'Coding orchestrator' },
+    { value: 'ask', name: 'Ask', description: 'Read-only orchestrator for Q&A' }
   ]),
-  MODEL_OPTION,
+  NO_MODEL ? NO_MODEL_OPTION : MODEL_OPTION,
   {
     ...select('permission', 'Permission', THINKING_PAUSED ? 'ask-first' : 'restricted', [
       { value: 'ask-first', name: 'Ask first', description: 'Prompt before running tools, edits, or commands' },
@@ -413,17 +437,33 @@ const CHAT: ChatDetail = {
   createdAt: NOW - 25 * MIN,
   items: transcript(MODE),
   configOptions: OPTIONS,
-  // A slice of what the CLI advertises (internal/acp/commands.go).
+  // What the CLI advertises, verbatim (internal/acp/commands.go
+  // acpAvailableCommands); the palette words it for people.
   commands: [
-    { name: 'help', description: 'Show available commands' },
-    { name: 'mode', description: 'Switch the agent mode', inputHint: '<plan|coding|ask>' },
-    { name: 'models', description: 'List and pick models' },
-    { name: 'thinking', description: 'Set the thinking level', inputHint: '<off|low|medium|high|x-high|max>' },
-    { name: 'ultra', description: 'Turn ultracode on or off', inputHint: '<on|off>' },
-    { name: 'compact', description: 'Summarise the conversation to free up context' },
-    { name: 'diff', description: 'Show the uncommitted changes' },
-    { name: 'memory', description: 'Show or edit what Spettro remembers' }
+    { name: 'help', description: 'show available commands' },
+    { name: 'mode', description: 'switch agent mode', inputHint: 'plan|coding|ask|...' },
+    { name: 'models', description: 'show or set the active model', inputHint: 'provider:model [api_key]' },
+    { name: 'permission', description: 'set permission level', inputHint: 'yolo|restricted|ask-first' },
+    { name: 'budget', description: 'set token budget per request', inputHint: '<n|0>' },
+    { name: 'thinking', description: 'set extended-thinking level', inputHint: 'off|low|medium|high|x-high|max' },
+    { name: 'goal', description: 'work autonomously toward an objective', inputHint: '<objective> | status' },
+    { name: 'loop', description: 'run a prompt on a recurring interval', inputHint: '<interval> <prompt> | stop | status' },
+    { name: 'memory', description: 'show, add to, or clear persistent memory', inputHint: '[show | add [user|project] <fact> | clear [user|project|all]]' },
+    { name: 'compact', description: 'summarize older history to free context', inputHint: '[auto <status|on|off>]' },
+    { name: 'clear', description: 'clear conversation history' },
+    { name: 'stats', description: 'show session token usage and prompt-cache metrics' },
+    { name: 'tasks', description: 'manage session tasks', inputHint: '[list|add|done|set|show|rm|clear]' },
+    { name: 'jobs', description: 'list or kill background shell jobs', inputHint: '[list] | kill <id>|all' },
+    { name: 'hooks', description: 'list effective runtime hooks' },
+    { name: 'diff', description: 'show diffs of files modified this session', inputHint: '[path ...]' },
+    { name: 'ultra', description: 'toggle ultra (ultracode: substantive tasks run as dynamic workflows)', inputHint: '[on|off]' },
+    { name: 'workflows', description: 'list, show, or run saved workflow templates', inputHint: '[list|show <name>|run <name> [json | task]|size [tier]|where]' },
+    { name: 'workflow-size', description: 'show or set the size tier workflow runs plan around', inputHint: '[small|medium|large|unbounded]' },
+    { name: 'plan', description: 'switch to plan mode', inputHint: '[task]' },
+    { name: 'permissions', description: 'show/set permission level and debug', inputHint: '[yolo|restricted|ask-first] | debug <on|off>' },
+    { name: 'skills', description: 'list Agent Skills and where each comes from' }
   ],
+
   // planEntriesFromTodos (content.go): dependency order, "(blocked)" folded
   // into the text of a pending task whose prerequisites aren't done.
   plan: BUSY
@@ -507,6 +547,8 @@ const MANY_SESSIONS: ChatSummary[] = [
 function sessionsFor(mode: string): ChatSummary[] {
   switch (mode) {
     case 'welcome-empty':
+    case 'welcome-sent':
+    case 'welcome-new-project':
       return []
     case 'chat-one':
       return [summary('c1', CHAT.title, PROJECT, 2)]
@@ -519,9 +561,12 @@ function sessionsFor(mode: string): ChatSummary[] {
   }
 }
 
+/** A first run, in the home folder: the new-session view warns about it.
+ *  `welcome-sent` is the same with a message sent before answering. */
+const FIRST_RUN = MODE === 'welcome-empty' || MODE === 'welcome-sent' || MODE === 'welcome-new-project'
 const SESSIONS = sessionsFor(MODE)
 const NO_SELECTION =
-  MODE === 'welcome' || MODE === 'welcome-empty' || MODE === 'welcome-folders' || MODE === 'no-model'
+  MODE.startsWith('welcome') || (NO_MODEL && MODE !== 'no-model-error')
 
 // --------------------------------------------------------------- extensions
 
@@ -599,9 +644,12 @@ function phaseFor(mode: string): Phase {
     case 'install-failed':
       return { kind: 'needsSetup' }
     case 'installing':
+    case 'installing-slow':
       return { kind: 'installing' }
     case 'gate':
     case 'gate-keys':
+    case 'gate-signin':
+    case 'gate-local':
       return { kind: 'needsProvider' }
     case 'failure':
       return {
@@ -617,6 +665,8 @@ function phaseFor(mode: string): Phase {
 
 function installFor(mode: string): InstallState {
   if (mode === 'installing') return { stage: 'downloading', failure: null }
+  // A download stuck at its first step, past the point of "a few seconds".
+  if (mode === 'installing-slow') return { stage: 'checking', failure: null }
   if (mode === 'install-failed') return { stage: 'failed', failure: { kind: 'failed' } }
   return { stage: 'idle', failure: null }
 }
@@ -690,6 +740,8 @@ const app: AppStateDTO = {
   installLog:
     MODE === 'installing'
       ? INSTALL_LOG
+      : MODE === 'installing-slow'
+        ? INSTALL_LOG.slice(0, 2)
       : MODE === 'install-failed'
         ? [...INSTALL_LOG.slice(0, 3), 'curl: (6) Could not resolve host: spettro.app', 'Installation did not complete.']
         : [],
@@ -704,24 +756,22 @@ const app: AppStateDTO = {
       : [],
   // Nothing can run a model in the no-model scene — not signed in either.
   subscription:
-    MODE === 'no-model' ? { plan: 'unknown', email: null } : { plan: 'pro', email: 'carlo@example.com' },
-  extensions: MODE === 'gate' || MODE === 'gate-keys' || MODE === 'no-model' ? GATE_EXTENSIONS : EXTENSIONS,
+    NO_MODEL ? { plan: 'unknown', email: null } : { plan: 'pro', email: 'carlo@example.com' },
+  extensions: MODE.startsWith('gate') || NO_MODEL ? GATE_EXTENSIONS : EXTENSIONS,
   update: MODE === 'settings-updates' ? UPDATES : { ...EMPTY_UPDATE_STATE, app: { ...EMPTY_COMPONENT_UPDATE, current: '0.1.7' } },
   remote: MODE.startsWith('settings') ? REMOTE : null,
   // A first run starts in the home folder, which is exactly the case the
   // new-session view warns about.
-  lastProjectPath: MODE === 'welcome-empty' ? null : PROJECT,
-  defaultProjectPath: MODE === 'welcome-empty' ? HOME : PROJECT,
-  recentProjects:
-    MODE === 'welcome-empty'
-      ? []
-      : [PROJECT, GATEWAY, DOTFILES, '/home/carlo/code/old-prototype'],
-  missingProjects: MODE === 'welcome-empty' ? [] : ['/home/carlo/code/old-prototype'],
+  lastProjectPath: FIRST_RUN ? null : PROJECT,
+  defaultProjectPath: FIRST_RUN ? HOME : PROJECT,
+  recentProjects: FIRST_RUN ? [] : [PROJECT, GATEWAY, DOTFILES, '/home/carlo/code/old-prototype'],
+  missingProjects: FIRST_RUN ? [] : ['/home/carlo/code/old-prototype'],
   homePath: HOME,
   appearance: 'system',
-  noModel: MODE === 'no-model',
-  providerSetupSkipped: MODE === 'no-model',
+  noModel: NO_MODEL,
+  providerSetupSkipped: NO_MODEL,
   notifyWhenDone: true,
+  approvedBroadFolders: [],
   defaultConfigOptions: OPTIONS,
   busyTasks: BUSY ? 1 : 0
 }
@@ -1051,6 +1101,11 @@ function pushEvents(): void {
     }, 900)
   }
   if (MODE === 'switcher') setTimeout(() => press('k'), 60)
+  // "New Project…" on the home-folder warning: the folder menu as a name.
+  if (MODE === 'welcome-new-project') setTimeout(() => click('.new-session-notice .btn:nth-of-type(2)'), 60)
+  // The sidebar footer's "…" with no session open: Workflows… disabled,
+  // saying why.
+  if (MODE === 'welcome-more') setTimeout(() => click('.sidebar-footer [aria-label="More"]'), 60)
   if (MODE === 'welcome-folders') setTimeout(() => click('[data-testid="project-chip"]'), 60)
   // The tool rows open the way a reader opens them: the folded reads, the
   // edit's diff and the command's output.
@@ -1089,6 +1144,33 @@ function pushEvents(): void {
     if (document.hasFocus() || waited > 2000) then()
     else setTimeout(() => focused(then, waited + 25), 25)
   }
+  // A message sent before the home-folder question is answered: held back,
+  // said in words where the eye is, the focus on the answer.
+  if (MODE === 'welcome-sent') {
+    focused(() => {
+      setTimeout(() => type('Make a simple website for my bakery'), 60)
+      setTimeout(() => key('Enter'), 200)
+    })
+  }
+  // The same with nothing connected: the message stays, the bar says why,
+  // and the connect step opens.
+  if (MODE === 'no-model-sent') {
+    focused(() => {
+      setTimeout(() => type('Make a simple website for my bakery'), 60)
+      setTimeout(() => key('Enter'), 200)
+    })
+  }
+  // Settings › Account › Sign In…: the sign-in sheet over Settings.
+  if (MODE === 'no-model-signin') {
+    setTimeout(() => press(','), 60)
+    setTimeout(() => click('[data-testid="settings-pane-account"]'), 140)
+    setTimeout(() => [...document.querySelectorAll<HTMLElement>('.btn')].find((b) => b.textContent === 'Sign In…')?.click(), 220)
+  }
+  // "Connect…" on the bar: Settings › Models, the chooser right there.
+  if (MODE === 'no-model-connect') setTimeout(() => click('.no-model-action'), 60)
+  // Setup's ways in, each in place of the chooser.
+  if (MODE === 'gate-signin') setTimeout(() => click('.setup-primary'), 60)
+  if (MODE === 'gate-local') setTimeout(() => [...document.querySelectorAll<HTMLElement>('.setup-alt')][1]?.click(), 60)
   if (MODE === 'guide') setTimeout(() => type('Also make ProfileForm await the save the same way.'), 60)
   if (MODE === 'slash') focused(() => setTimeout(() => type('/'), 60))
   if (MODE === 'mention') {
@@ -1102,6 +1184,8 @@ function pushEvents(): void {
       }, 420)
     })
   }
+  if (MODE === 'no-model-menu') setTimeout(() => click('[data-testid="model-button"]'), 60)
+  if (MODE === 'mode-menu') setTimeout(() => click('.config-chip--tinted'), 60)
   if (MODE === 'model-menu') setTimeout(() => click('[data-testid="model-button"]'), 60)
   if (MODE === 'session-settings') setTimeout(() => click('[data-testid="session-settings"]'), 60)
   if (MODE === 'thinking' || MODE === 'thinking-paused') {

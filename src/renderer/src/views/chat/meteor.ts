@@ -413,7 +413,16 @@ export function drawMeteor(
     for (const d of marks) bar.addColorStop(d / len, rgba(colorAt(d), alphaAt(d)))
     ctx.globalCompositeOperation = 'source-over'
     ctx.fillStyle = bar
-    ctx.fillRect(Math.min(barFrom, x), run.y - h / 2, len, h)
+    // Round at the head, as the bar's own ends are: a square front shows as
+    // a hard white edge across the bar where the corona is thinnest.
+    const r = h / 2
+    ctx.beginPath()
+    ctx.moveTo(barFrom, run.y - r)
+    ctx.lineTo(x, run.y - r)
+    ctx.arc(x, run.y, r, -Math.PI / 2, Math.PI / 2, dir < 0)
+    ctx.lineTo(barFrom, run.y + r)
+    ctx.closePath()
+    ctx.fill()
   }
 
   // The plasma over it: a tapered streak, wide and soft, then narrow and hot.
@@ -474,10 +483,11 @@ export function drawMeteor(
     const before = sparkAt(run, s, Math.max(0, age - 0.026))
     // Cooling: white → amber → red, and then out.
     let color = heatColor(palette, s.heat * (0.25 + 0.75 * left))
-    // Painted on a light ground, gold is barely darker than the paper: the
-    // same spark, a step toward ember, and a touch thicker.
-    if (!add) color = mix(color, palette.ember, 0.25 + 0.4 * (1 - left))
-    const width = s.size * (0.6 + 0.4 * left) * (add ? 1 : 1.3)
+    // Painted, a spark lands on the streak or the lit fill — the bar is its
+    // whole sky — and the light scheme's fire is a deep orange: a step toward
+    // the white-hot core reads on it where a step toward ember would vanish.
+    if (!add) color = mix(color, palette.core, 0.2 + 0.3 * left)
+    const width = s.size * (0.6 + 0.4 * left) * (add ? 1 : 1.15)
     if (add && left > 0.5) {
       // Light adds up: a faint disc under a hot spark reads as its glow.
       ctx.fillStyle = rgba(color, alpha * 0.22 * (left - 0.5) * 2)

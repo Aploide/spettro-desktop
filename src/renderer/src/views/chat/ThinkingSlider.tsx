@@ -643,6 +643,9 @@ function MeteorCanvas({
       paint(progress)
       return
     }
+    // The first frame now, before the browser paints: the thumb is already
+    // hidden, and a frame with neither it nor the head is a blink.
+    paint(0)
     let frame = 0
     let landed = false
     const start = performance.now()

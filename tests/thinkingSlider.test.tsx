@@ -300,6 +300,38 @@ describe('the meteor', () => {
     expect(meteor()?.parentElement?.classList.contains('thinking-bar')).toBe(true)
   })
 
+  it('draws its first frame before the browser paints, not a frame later', () => {
+    // The thumb is hidden the moment the flight starts; a first frame left
+    // to the next animation frame is a blink with neither thumb nor head.
+    const noop = (): void => {}
+    const gradient = { addColorStop: noop }
+    let drawn = 0
+    const ctx = new Proxy(
+      {},
+      {
+        get: (_, key) =>
+          key === 'createLinearGradient' || key === 'createRadialGradient'
+            ? () => gradient
+            : key === 'fill'
+              ? () => void drawn++
+              : noop,
+        set: () => true
+      }
+    )
+    const getContext = HTMLCanvasElement.prototype.getContext
+    HTMLCanvasElement.prototype.getContext = (() => ctx) as never
+    const raf = vi.spyOn(window, 'requestAnimationFrame').mockImplementation(() => 1)
+    try {
+      const { rerender } = render(<ThinkingSlider chat={chat(options({ thinking: 'high', ultra: false }))} />)
+      rerender(<ThinkingSlider chat={chat(options({ thinking: 'high', ultra: true }))} />)
+      expect(meteor()).not.toBeNull()
+      expect(drawn).toBeGreaterThan(0)
+    } finally {
+      raf.mockRestore()
+      HTMLCanvasElement.prototype.getContext = getContext
+    }
+  })
+
   it('leaves the stops ahead of the head unlit until the streak reaches them', () => {
     holding = true
     render(<ThinkingSlider chat={chat(options({ thinking: 'low', ultra: false }))} />)

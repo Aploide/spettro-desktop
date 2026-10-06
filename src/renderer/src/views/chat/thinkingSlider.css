@@ -227,8 +227,10 @@
   place-items: center;
   border-radius: 50%;
   background: var(--paper);
+  /* A whole pixel of rim: Monochrome's dark fill is near-white, the knob
+     white, and a hairline alone left the knob melting into it. */
   box-shadow:
-    0 0 0 0.5px color-mix(in srgb, var(--scrim) 72%, transparent),
+    0 0 0 1px color-mix(in srgb, var(--scrim) 72%, transparent),
     0 1px 2px color-mix(in srgb, var(--scrim) 72%, transparent),
     0 2px 6px color-mix(in srgb, var(--scrim) 64%, transparent);
   color: var(--text-secondary);
@@ -290,6 +292,10 @@
 
 .thinking-slider--flying .thinking-fill {
   background: var(--accent);
+  /* The thumb that covered its square end is gone: rounded like the bar's
+     own ends, it doesn't stand as a sliver of accent ahead of a head that
+     set out from behind it. */
+  border-radius: 0 var(--thinking-cap) var(--thinking-cap) 0;
 }
 
 .thinking-slider--flying .thinking-thumb {

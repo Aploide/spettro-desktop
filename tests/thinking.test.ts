@@ -168,6 +168,24 @@ describe('whether the model reasons', () => {
     expect(modelReasons([model], [{ provider: 'openai', name: 'gpt-mini', reasoning: true }])).toBe(true)
   })
 
+  it('counts local and Subscription models as thinking, as the CLI does', () => {
+    // provider/manager.go SupportsReasoning: their entries carry no reasoning
+    // flag, but the CLI sends them the level anyway.
+    const pick = (value: string): ACPConfigOption => ({
+      ...model,
+      kind: { type: 'select', currentValue: value, groups: [], flat: [] }
+    })
+    expect(
+      modelReasons(
+        [pick('http://localhost:1234:qwen3')],
+        [{ provider: 'http://localhost:1234', name: 'qwen3', reasoning: false, local: true }]
+      )
+    ).toBe(true)
+    expect(
+      modelReasons([pick('spettro:fast')], [{ provider: 'spettro', name: 'fast', reasoning: false }])
+    ).toBe(true)
+  })
+
   it('is unknown (so the slider stays usable) for a model the catalog lacks', () => {
     expect(modelReasons([model], [])).toBeNull()
   })

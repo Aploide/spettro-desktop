@@ -115,6 +115,19 @@ describe('thinking and Ultra', () => {
     fireEvent.click(screen.getByTestId('thinking-chip'))
     expect(screen.getByRole('slider').getAttribute('aria-valuetext')).toBe('High')
   })
+
+  it('hand the focus back to the chip when Escape closes the slider', () => {
+    // The slider takes the focus as it opens; closing must not strand a
+    // keyboard user on <body>.
+    render(<ConfigBar chat={chat([permission('restricted'), thinking('high'), ultra(false)])} />)
+    const chip = screen.getByTestId('thinking-chip')
+    fireEvent.click(chip)
+    const slider = screen.getByRole('slider')
+    slider.focus()
+    fireEvent.keyDown(slider, { key: 'Escape' })
+    expect(screen.queryByRole('slider')).toBeNull()
+    expect(document.activeElement).toBe(chip)
+  })
 })
 
 describe('the workflow size chip', () => {

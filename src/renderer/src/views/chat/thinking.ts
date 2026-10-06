@@ -188,18 +188,28 @@ export function previewState(state: ThinkingState, target: ThinkingStop): Thinki
   }
 }
 
+/** The Spettro Subscription's provider id (provider/manager.go). */
+const SUBSCRIPTION_PROVIDER = 'spettro'
+
 /**
  * Whether the session's model can think at all, from the `_spettro/models/list`
- * catalog (its `reasoning` capability). Null when the catalog doesn't know the
- * model — then the slider stays usable rather than guess.
+ * catalog. Null when the catalog doesn't know the model — then the slider
+ * stays usable rather than guess.
+ *
+ * The same rule the CLI applies before it sends a thinking level
+ * (provider/manager.go SupportsReasoning), not the bare `reasoning` flag: a
+ * local server's models and the Subscription's carry no flag, yet the CLI
+ * sends them the level all the same. Reading the flag alone would lock the
+ * slider for every one of them.
  */
 export function modelReasons(
   options: ACPConfigOption[],
-  models: { provider: string; name: string; reasoning: boolean }[]
+  models: { provider: string; name: string; reasoning: boolean; local?: boolean }[]
 ): boolean | null {
   const model = options.find((o) => o.id === 'model')
   const value = model?.kind.type === 'select' ? model.kind.currentValue : null
   if (!value) return null
   const entry = models.find((m) => `${m.provider}:${m.name}` === value)
-  return entry ? entry.reasoning : null
+  if (!entry) return null
+  return entry.reasoning || !!entry.local || entry.provider === SUBSCRIPTION_PROVIDER
 }

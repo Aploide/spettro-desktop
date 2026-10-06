@@ -173,6 +173,10 @@ export default function ThinkingSlider({
     if (next !== null) select(next)
   }
 
+  // The prompt's buttons go away once pressed; the slider keeps the focus
+  // rather than <body>.
+  const refocus = (): void => bodyRef.current?.focus()
+
   const showPaused = state.paused && shown === ultraIndex
   const caption = disabled
     ? `${modelName(chat) ?? 'This model'} doesn’t think before answering, so this has no effect`
@@ -290,7 +294,10 @@ export default function ThinkingSlider({
             <button
               type="button"
               className="thinking-prompt-btn"
-              onClick={() => void call('setBoolOption', chat.id, ULTRA_ID, false)}
+              onClick={() => {
+                refocus()
+                void call('setBoolOption', chat.id, ULTRA_ID, false)
+              }}
             >
               Turn off Ultra
             </button>
@@ -310,7 +317,10 @@ export default function ThinkingSlider({
               <button
                 type="button"
                 className="thinking-prompt-btn thinking-prompt-btn--primary"
-                onClick={() => void call('setSelectOption', chat.id, PERMISSION_ID, RESTRICTED)}
+                onClick={() => {
+                  refocus()
+                  void call('setSelectOption', chat.id, PERMISSION_ID, RESTRICTED)
+                }}
               >
                 Switch
               </button>
@@ -318,7 +328,10 @@ export default function ThinkingSlider({
             <button
               type="button"
               className="thinking-prompt-btn"
-              onClick={() => setDismissed(true)}
+              onClick={() => {
+                refocus()
+                setDismissed(true)
+              }}
             >
               Keep Ask first
             </button>
@@ -567,7 +580,18 @@ export function ThinkingChip({ chat }: { chat: ChatDetail }): JSX.Element | null
   const app = useApp()
   const [open, setOpen] = useState(false)
   const anchorRef = useRef<HTMLButtonElement>(null)
-  const close = useCallback(() => setOpen(false), [])
+  const dialogRef = useRef<HTMLDivElement>(null)
+  const close = useCallback(() => {
+    // The slider took focus when the popover opened; hand it back to the chip
+    // on the way out, or Escape strands a keyboard user on <body>. A click
+    // elsewhere closes from its pointerdown, and the mousedown after it still
+    // moves the focus to wherever the click landed.
+    const active = document.activeElement
+    if (active && active !== document.body && dialogRef.current?.contains(active)) {
+      anchorRef.current?.focus()
+    }
+    setOpen(false)
+  }, [])
   const state = thinkingState(chat.configOptions)
   if (!state) return null
 
@@ -616,7 +640,7 @@ export function ThinkingChip({ chat }: { chat: ChatDetail }): JSX.Element | null
         placement="up"
         className="thinking-popover"
       >
-        <div role="dialog" aria-label="Thinking">
+        <div role="dialog" aria-label="Thinking" ref={dialogRef}>
           <ThinkingSlider chat={chat} reasons={reasons} autoFocus />
         </div>
       </Popover>

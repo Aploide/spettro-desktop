@@ -156,15 +156,26 @@ const FENCED = /^(`{3,})([^\n`]*)\n([\s\S]*?)\n\1(?:\n\n([\s\S]+))?$/
  */
 export function permissionBody(request: ACPPermissionRequest): BodyBlock[] {
   const out: BodyBlock[] = []
+  const code = (lang: string, text: string): void => {
+    // A network approval's block is the runtime's "network <tool> <target>"
+    // (permission.go subjectOf); the headline already says what kind of
+    // access it is, so the target is all the card shows.
+    const network = lang === '' ? NETWORK.exec(text) : null
+    out.push({ type: 'code', lang, text: network ? network[1] : text })
+  }
+  const note = (text: string): void => {
+    const plain = plainNote(text, out)
+    if (plain !== '') out.push({ type: 'note', text: plain })
+  }
   for (const raw of request.content.texts) {
     const text = raw.replace(/\s+$/, '')
     if (text === '') continue
     const m = FENCED.exec(text)
     if (m) {
-      out.push({ type: 'code', lang: m[2].trim(), text: m[3] })
-      if (m[4]) out.push({ type: 'note', text: m[4].trim() })
+      code(m[2].trim(), m[3])
+      if (m[4]) note(m[4].trim())
     } else {
-      out.push({ type: 'note', text })
+      note(text)
     }
   }
   if (out.length === 0 && request.content.diffs.length === 0 && request.variant !== 'compact') {
@@ -172,6 +183,36 @@ export function permissionBody(request: ACPPermissionRequest): BodyBlock[] {
     if (command !== null) out.push({ type: 'code', lang: 'sh', text: command })
   }
   return out
+}
+
+const NETWORK = /^network [\w-]+ ([\s\S]+)$/
+
+/** The runtime's own reasons that only restate the card's headline
+ *  (llm_runtime_shell.go, llm_runtime_ext.go): in its words, jargon. */
+const RESTATED_REASONS = new Set([
+  'non-whitelisted command requires approval',
+  'file modification requires approval'
+])
+
+/**
+ * A reason note in the user's words: the runtime's stock reasons are
+ * dropped (the headline says it), and the "needs approval: <segments>" line
+ * approvalContent adds stays only when it names less than the whole command
+ * shown above — the part of a compound command that wasn't already allowed.
+ */
+function plainNote(text: string, before: BodyBlock[]): string {
+  const shown = new Set(before.filter((b) => b.type === 'code').map((b) => b.text.trim()))
+  return text
+    .split('\n')
+    .flatMap((line): string[] => {
+      const trimmed = line.trim()
+      if (RESTATED_REASONS.has(trimmed.toLowerCase())) return []
+      const needs = /^needs approval:\s*(.+)$/i.exec(trimmed)
+      if (needs) return shown.has(needs[1].trim()) ? [] : [`Needs your approval: ${needs[1].trim()}`]
+      return [line]
+    })
+    .join('\n')
+    .trim()
 }
 
 /** rawInput.command, when the request carries one. */

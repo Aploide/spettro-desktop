@@ -415,12 +415,17 @@
   flex: 1;
 }
 
+/* A button and, under it, the CLI's scope for "Always allow". The caption
+   hangs below without widening its column, so the three buttons keep one
+   even gap whether or not it is there; the row makes room for it. */
 .prompt-choice {
+  position: relative;
   display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 3px;
-  max-width: 220px;
+}
+
+.prompt-actions:has(.prompt-choice-caption) {
+  row-gap: 22px;
+  padding-bottom: 16px;
 }
 
 .prompt-btn {
@@ -485,10 +490,12 @@
 }
 
 .prompt-choice-caption {
-  max-width: 100%;
+  position: absolute;
+  top: calc(100% + 3px);
+  left: 2px;
+  max-width: 260px;
   font-size: var(--fs-xs);
   color: var(--text-tertiary);
-  text-align: center;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

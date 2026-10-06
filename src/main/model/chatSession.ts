@@ -63,7 +63,7 @@ export type ChatMetaPatch = Partial<
 
 /** Tool-call ids spettro numbers per turn (internal/acp/content.go
  *  nextToolCallID); see ChatSession.turnStart. */
-const PER_TURN_TOOL_ID = /^(call|perm|compact)-\d+$/
+const PER_TURN_TOOL_ID = /^(call|perm|compact)-(\d+)$/
 
 export class ChatSession {
   readonly id: string
@@ -121,6 +121,9 @@ export class ChatSession {
    */
   private turnStart = 0
   private turnIds = new Map<string, string>()
+  /** The highest number a per-turn id has started with since turnStart:
+   *  one turn's counter only goes up (see noteTurnSeq). */
+  private turnSeq = 0
 
   onItem: ((session: ChatSession, item: TranscriptItem) => void) | null = null
   onMeta: ((session: ChatSession, meta: ChatMetaPatch) => void) | null = null
@@ -607,6 +610,7 @@ export class ChatSession {
     const locations = event.locations.map((l) => ({ ...l }))
     const images = event.images.map((i) => ({ ...i }))
 
+    if (isStart) this.noteTurnSeq(event.toolCallId)
     const existing = this.turnTool(event.toolCallId)
     if (existing) {
       const tool = existing.tool
@@ -672,6 +676,25 @@ export class ChatSession {
   private beginTurn(): void {
     this.turnStart = this.items.length
     this.turnIds.clear()
+    this.turnSeq = 0
+  }
+
+  /**
+   * Starts a turn where the agent's numbering says one started without a
+   * message from here to mark it. Within a turn spettro's counter only goes
+   * up, shared by every prefix (call-3 follows perm-2), and each new call
+   * takes the next number; so a call starting at or below a number this
+   * turn already used belongs to a new turn. That happens when a steer
+   * reaches the CLI just after the turn it meant to steer ended: it runs as
+   * a turn of its own (AppModel.runTurn), and its call-1 must not land on
+   * the finished turn's call-1.
+   */
+  private noteTurnSeq(toolCallId: string): void {
+    const m = PER_TURN_TOOL_ID.exec(toolCallId)
+    if (!m) return
+    const seq = Number(m[2])
+    if (seq <= this.turnSeq) this.beginTurn()
+    this.turnSeq = seq
   }
 
   /** The card for `toolCallId` — this turn's only, for an id the agent

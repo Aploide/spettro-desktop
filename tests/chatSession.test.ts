@@ -141,6 +141,27 @@ describe('applyToolEvent', () => {
     expect(s.toolById('call-1')?.title).toBe('Run touch a.txt')
   })
 
+  it('gives a steer that ran as a turn of its own its own call-1', () => {
+    // The steer reached the CLI just after the turn ended, so the CLI ran it
+    // as a new turn, numbered from 1 again — with no non-steering message
+    // here to say a turn began.
+    const s = session()
+    s.appendUserMessage('ls')
+    s.applyToolEvent(toolEvent({ toolCallId: 'call-1', title: 'Run ls -la' }), true)
+    s.applyToolEvent(toolEvent({ toolCallId: 'call-1', status: 'completed' }), false)
+    s.appendUserMessage('then touch a.txt', [], 'sending')
+    s.applyToolEvent(toolEvent({ toolCallId: 'call-1', title: 'Run touch a.txt' }), true)
+    s.applyToolEvent(toolEvent({ toolCallId: 'call-1', status: 'failed' }), false)
+    s.applyToolEvent(toolEvent({ toolCallId: 'perm-2', title: 'Write b.txt' }), true)
+
+    const tools = s.items.filter((i) => i.kind === 'tool').map((i) => (i.kind === 'tool' ? i.tool : null))
+    expect(tools.map((t) => [t?.id, t?.title, t?.status])).toEqual([
+      ['call-1', 'Run ls -la', 'completed'],
+      ['call-1~2', 'Run touch a.txt', 'failed'],
+      ['perm-2', 'Write b.txt', 'in_progress']
+    ])
+  })
+
   it('still finds a workflow card from an earlier turn', () => {
     const s = session()
     s.appendUserMessage('run it')

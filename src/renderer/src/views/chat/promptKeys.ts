@@ -45,11 +45,12 @@ export function useActiveElement(): Element | null {
   return active
 }
 
-/** Something else is in front of the chat: a modal, a menu, a popover. Its
- *  keys are its own. */
+/** Something else is in front of the chat: a modal, a dialog (the image
+ *  viewer is one without aria-modal), a menu, a popover. Its keys are its
+ *  own. */
 function overlayOver(card: Element): boolean {
   const overlays = document.querySelectorAll(
-    '[aria-modal="true"], [role="menu"], [role="listbox"], .popover--portal'
+    '[aria-modal="true"], [role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"], .popover--portal'
   )
   return Array.from(overlays).some((o) => !o.contains(card))
 }

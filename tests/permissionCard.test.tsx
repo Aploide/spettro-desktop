@@ -138,6 +138,23 @@ describe('the approval card', () => {
     expect(hints).toContain('Press Tab to review')
   })
 
+  it('leaves the keys to a dialog open in front of it, modal or not', () => {
+    // The tool-image viewer is a role="dialog" without aria-modal.
+    const viewer = document.createElement('div')
+    viewer.setAttribute('role', 'dialog')
+    viewer.tabIndex = -1
+    document.body.appendChild(viewer)
+    render(<PermissionCard request={bash()} />)
+    arm()
+    act(() => viewer.focus())
+    press('1', viewer)
+    press('Escape', viewer)
+    expect(resolved()).toEqual([])
+    viewer.remove()
+    press('1')
+    expect(resolved()).toEqual([['p1', 'allow-once']])
+  })
+
   it('takes 1/2/3 in its own order and Esc as Deny', () => {
     render(<PermissionCard request={bash()} />)
     arm()
@@ -260,8 +277,34 @@ describe('the approval card', () => {
     expect(blocks).toEqual([
       { type: 'code', lang: 'sh', text: 'echo ```' },
       { type: 'note', text: '[truncated: 4 KB more]' },
-      { type: 'note', text: 'needs approval: rm -rf dist' }
+      { type: 'note', text: 'Needs your approval: rm -rf dist' }
     ])
+    // The runtime's stock reason restates the headline, and "needs
+    // approval" naming the whole command shown above repeats it: both go
+    // (the live `touch` approval read "non-whitelisted command requires
+    // approval / needs approval: touch review.txt").
+    expect(
+      permissionBody(
+        bash({
+          content: {
+            texts: [
+              '```sh\ntouch review.txt\n```',
+              'non-whitelisted command requires approval\nneeds approval: touch review.txt'
+            ],
+            diffs: []
+          }
+        })
+      )
+    ).toEqual([{ type: 'code', lang: 'sh', text: 'touch review.txt' }])
+    // A network approval shows its target, not the runtime's "network <tool>".
+    expect(
+      permissionBody(
+        bash({
+          toolKind: 'fetch',
+          content: { texts: ['```\nnetwork web-fetch https://registry.npmjs.org/react\n```'], diffs: [] }
+        })
+      )
+    ).toEqual([{ type: 'code', lang: '', text: 'https://registry.npmjs.org/react' }])
     // An older CLI sent only rawInput.
     expect(permissionBody(bash({ content: { texts: [], diffs: [] }, rawInput: { command: 'ls' } }))).toEqual([
       { type: 'code', lang: 'sh', text: 'ls' }

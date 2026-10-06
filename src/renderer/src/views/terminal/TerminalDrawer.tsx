@@ -57,7 +57,9 @@ function withAlpha(color: string, alphaHex: string): string {
   return /^#[0-9a-fA-F]{6}$/.test(color) ? color + alphaHex : color
 }
 
-/** xterm theme from the computed theme.css palette (read at mount). */
+/** xterm theme from the computed theme.css palette. Read at mount and again
+ *  whenever the colour scheme flips (see the effect below): xterm paints with
+ *  concrete colours, so it can't follow the CSS variables on its own. */
 function readXtermTheme(): {
   background: string
   foreground: string
@@ -66,9 +68,9 @@ function readXtermTheme(): {
   selectionBackground: string
 } {
   const style = getComputedStyle(document.documentElement)
-  const canvas = style.getPropertyValue('--canvas').trim() || '#0e0e0e'
-  const foreground = style.getPropertyValue('--text-primary').trim() || 'rgba(255,255,255,0.92)'
-  const accent = style.getPropertyValue('--accent').trim() || '#6073cc'
+  const canvas = style.getPropertyValue('--canvas').trim() || '#262624'
+  const foreground = style.getPropertyValue('--text-primary').trim() || '#f5f4ef'
+  const accent = style.getPropertyValue('--accent').trim() || '#d97757'
   return {
     background: canvas,
     foreground,
@@ -78,8 +80,14 @@ function readXtermTheme(): {
   }
 }
 
-const TERMINAL_FONT =
-  "'SF Mono', SFMono-Regular, ui-monospace, 'Cascadia Mono', 'Segoe UI Mono', 'JetBrains Mono', Menlo, Consolas, monospace"
+/** theme.css's --font-mono, resolved: xterm measures glyphs on a canvas and
+ *  needs the literal stack, not a var() reference. */
+function terminalFont(): string {
+  return (
+    getComputedStyle(document.documentElement).getPropertyValue('--font-mono').trim() ||
+    'ui-monospace, Menlo, Consolas, monospace'
+  )
+}
 
 export default function TerminalDrawer({
   projectPath,
@@ -221,6 +229,20 @@ export default function TerminalDrawer({
     })
   }, [])
 
+  // ---- live re-theme ------------------------------------------------------
+  // The appearance setting flips nativeTheme in main, which flips this media
+  // query; every open terminal (not just the visible one) is repainted so a
+  // hidden tab doesn't come back in the old scheme.
+  useEffect(() => {
+    const query = window.matchMedia('(prefers-color-scheme: dark)')
+    const onChange = (): void => {
+      const theme = readXtermTheme()
+      for (const session of sessions.current.values()) session.term.options.theme = theme
+    }
+    query.addEventListener('change', onChange)
+    return () => query.removeEventListener('change', onChange)
+  }, [])
+
   // ---- terminal-data / terminal-exit events (not routed via the store) ----
   useEffect(() => {
     return window.spettro.onEvent((event) => {
@@ -258,7 +280,7 @@ export default function TerminalDrawer({
       if (!el || sessions.current.has(tab.id)) return
       const term = new Terminal({
         theme: readXtermTheme(),
-        fontFamily: TERMINAL_FONT,
+        fontFamily: terminalFont(),
         fontSize: 12,
         cursorBlink: true,
         scrollback: 5000,

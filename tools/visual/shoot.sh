@@ -44,6 +44,15 @@ SCENES=(
   studio:empty
   studio:broken
   chrome
+  app:welcome
+  app:chat
+  app:permission-bash
+  app:permission-diff
+  app:question
+  app:settings
+  app:onboarding
+  app:gate
+  app:failure
 )
 
 THEMES="${SHOT_THEMES:-dark,light}"

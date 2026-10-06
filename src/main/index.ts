@@ -1,7 +1,7 @@
 // Main-process entry: window creation, model construction, IPC registration,
 // and event-push wiring (the port of SpettroApp.swift's app wiring).
 
-import { app, BrowserWindow, shell } from 'electron'
+import { app, BrowserWindow, nativeTheme, shell } from 'electron'
 import { existsSync } from 'fs'
 import { join } from 'path'
 import { EVENT_CHANNEL, type MainEvent } from '../shared/ipc'
@@ -27,6 +27,13 @@ function iconPath(): string {
   return join(__dirname, '../../build/icon.png')
 }
 
+/** The window's own fill, painted before the renderer's first frame. It must
+ *  be theme.css's --canvas for the active scheme, or the window flashes a
+ *  different colour while the page loads. */
+function windowBackground(): string {
+  return nativeTheme.shouldUseDarkColors ? '#262624' : '#faf9f5'
+}
+
 function createWindow(): void {
   mainWindow = new BrowserWindow({
     width: 1280,
@@ -37,7 +44,7 @@ function createWindow(): void {
     autoHideMenuBar: true,
     title: 'Spettro',
     icon: iconPath(),
-    backgroundColor: '#1b1b1f',
+    backgroundColor: windowBackground(),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: false
@@ -67,8 +74,6 @@ function pushToWindow(event: MainEvent): void {
 }
 
 app.whenReady().then(() => {
-  createWindow()
-
   const userDataDir = app.getPath('userData')
   model = new AppModel({
     userDataDir,
@@ -76,8 +81,23 @@ app.whenReady().then(() => {
     // A dev run has no installer to replace, and quitting is how the update
     // hands the machine over to the one it downloaded.
     isPackaged: app.isPackaged,
-    quit: () => app.quit()
+    quit: () => app.quit(),
+    applyAppearance: (mode) => {
+      nativeTheme.themeSource = mode
+    }
   })
+
+  // The stored appearance is applied before the window exists, so the first
+  // frame — the window background included — is already in the right scheme.
+  // From then on nativeTheme drives prefers-color-scheme in the renderer, and
+  // `updated` (a user choice, or the OS flipping under 'system') keeps the
+  // native background in step with the page.
+  nativeTheme.themeSource = model.appearance
+  nativeTheme.on('updated', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.setBackgroundColor(windowBackground())
+  })
+  createWindow()
+
   terminals = new TerminalManager(pushToWindow)
   remoteHost = new RemoteHost(buildRemoteBridge(model), {
     dataDir: userDataDir,

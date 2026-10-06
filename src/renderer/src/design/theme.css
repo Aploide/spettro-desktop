@@ -1,59 +1,185 @@
-/* Port of Spettro/Design/Theme.swift — spacing, radii, semantic colors.
-   Dark is the default appearance; light overrides via prefers-color-scheme.
-   All views reference ONLY these custom properties (never raw colors). */
+/* The design tokens — the one place a colour, size or font is decided.
+   Warm, Claude-style neutrals in both schemes, with a terracotta accent used
+   sparingly. Every view references ONLY these custom properties (never raw
+   colours); a component that needs a variant derives it with color-mix().
+
+   The scheme follows prefers-color-scheme. The in-app System/Light/Dark
+   setting works by setting nativeTheme.themeSource in main, which is what
+   drives that media query — so the visual harness (which flips the same
+   switch) and the app always agree, and there is no data-theme attribute to
+   keep in sync.
+
+   Layout: one scheme-independent block, then the dark palette (the default),
+   then the light palette. The two palette blocks must declare the same set of
+   tokens; tests/theme.test.ts holds them to that. */
 
 :root {
   /* Spacing */
+  --sp-2xs: 2px;
   --sp-xs: 4px;
   --sp-sm: 8px;
   --sp-md: 12px;
   --sp-lg: 16px;
   --sp-xl: 24px;
+  --sp-2xl: 32px;
 
-  /* Radii */
+  /* Radii: rows, buttons, cards, the composer, chat bubbles. */
+  --rad-xs: 6px;
   --rad-sm: 8px;
   --rad-md: 12px;
-  --rad-lg: 18px;
-  --rad-bubble: 16px;
+  --rad-lg: 20px;
+  --rad-bubble: 18px;
 
-  /* Dark appearance (default) */
-  --accent: #6073cc;
-  --agent-accent: #ad7bf9;
-  --diff-added: #40c977;
-  --diff-removed: #fa423e;
-  --canvas: #0e0e0e;
-  --surface-raised: #1c1c1c; /* white 0.11 */
-  --assistant-bubble: #212121; /* white 0.13 */
-  --user-bubble: var(--accent);
-  --hairline: rgba(255, 255, 255, 0.08);
-  --text-primary: rgba(255, 255, 255, 0.92);
-  --text-secondary: rgba(255, 255, 255, 0.55);
+  /* Fonts. System faces only: the CSP allows same-origin fonts, and nothing
+     is bundled. */
+  --font-sans: system-ui, -apple-system, 'Segoe UI', Roboto, 'Noto Sans', Ubuntu, Cantarell,
+    sans-serif;
+  --font-mono: 'SF Mono', SFMono-Regular, ui-monospace, 'Cascadia Mono', 'JetBrains Mono', Menlo,
+    Consolas, monospace;
+
+  /* Type scale */
+  --fs-xs: 11px;
+  --fs-sm: 12px;
+  --fs-md: 13px;
+  --fs-body: 15px;
+  --fs-lg: 17px;
+  --fs-xl: 24px;
+  --lh-body: 1.6;
+
+  /* The reading column's width. */
+  --measure: 760px;
 
   color-scheme: dark light;
 }
 
-@media (prefers-color-scheme: light) {
-  :root {
-    --accent: #526fff;
-    --canvas: #f9f9f7;
-    --surface-raised: #ffffff;
-    --assistant-bubble: #ffffff;
-    --hairline: rgba(0, 0, 0, 0.08);
-    --text-primary: rgba(0, 0, 0, 0.88);
-    --text-secondary: rgba(0, 0, 0, 0.55);
-  }
+/* ------------------------------------------------------------ dark palette */
+
+:root {
+  --canvas: #262624;
+  --sidebar-bg: #1f1e1d;
+  --surface-raised: #30302e;
+  --surface-sunken: #1f1e1d;
+  --user-bubble-bg: #141413;
+
+  --text-primary: #f5f4ef;
+  --text-secondary: #b7b5a9;
+  --text-tertiary: #8a887f;
+
+  --hairline: rgba(240, 238, 230, 0.12);
+  --hover-fill: rgba(240, 238, 230, 0.06);
+  --selected-fill: rgba(240, 238, 230, 0.1);
+  /* Behind a modal: dims the app without hiding where you were. */
+  --scrim: rgba(0, 0, 0, 0.5);
+
+  --accent: #d97757;
+  --accent-contrast: #ffffff;
+  --agent-accent: #b392f0;
+
+  --success: #5fb37a;
+  --danger: #e0645a;
+  --warning: #d9a03f;
+  /* Text on a filled warning surface — a fixed near-black that stays legible
+     on amber in either scheme. */
+  --warning-contrast: #1a1205;
+
+  --diff-added: var(--success);
+  --diff-removed: var(--danger);
+  --diff-added-bg: color-mix(in srgb, var(--success) 12%, transparent);
+  --diff-removed-bg: color-mix(in srgb, var(--danger) 12%, transparent);
+
+  /* Always white: QR codes must be dark-on-white to scan, whatever the theme. */
+  --paper: #ffffff;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 8px 28px rgba(0, 0, 0, 0.4), 0 1px 3px rgba(0, 0, 0, 0.3);
+  --shadow-lg: 0 24px 80px rgba(0, 0, 0, 0.55), 0 2px 8px rgba(0, 0, 0, 0.3);
+  --shadow-composer: 0 4px 24px rgba(0, 0, 0, 0.28), 0 1px 2px rgba(0, 0, 0, 0.2);
+
+  /* Agent-mode tints (modeColor() in theme.ts resolves names to these), and
+     the TUI's named colours they come from. */
+  --mode-plan: #c4a1f5;
+  --mode-coding: #5fc79a;
+  --mode-ask: #79aef0;
+  --mode-blue: #ab95f2;
+  --mode-green: #5fc79a;
+  --mode-cyan: #79aef0;
+  --mode-yellow: #d9a03f;
+  --mode-magenta: #d08ae8;
+  --mode-purple: #c4a1f5;
+  --mode-red: #e0645a;
+
+  /* Plan tiers (PlanBadge.swift), and the TUI's six-colour rainbow for MAX. */
+  --plan-muted: #9c9a92;
+  --plan-pro: #c4b5fd;
+  --plan-plus: #86efac;
+  --plan-rainbow: #ff6b6b, #ff9e4f, #ffd93d, #6bcb77, #4d96ff, #c77dff;
+
+  /* Aliases kept for one release so views not yet moved to the names above
+     keep rendering. */
+  --assistant-bubble: var(--surface-raised);
+  --user-bubble: var(--user-bubble-bg);
 }
 
-/* Mode tints (Theme.modeColor); resolved in JS via modeColor() below's
-   companion in theme.ts — these are the raw palette values. */
-:root {
-  --mode-blue: #a78bfa;
-  --mode-green: #34d399;
-  --mode-cyan: #60a5fa;
-  --mode-yellow: #f59e0b;
-  --mode-magenta: #c084fc;
-  --mode-purple: #bd93f9;
-  --mode-red: #ef4444;
+/* ----------------------------------------------------------- light palette */
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --canvas: #faf9f5;
+    --sidebar-bg: #f3f1ea;
+    --surface-raised: #ffffff;
+    --surface-sunken: #f0eee6;
+    --user-bubble-bg: #f0eee6;
+
+    --text-primary: #1f1e1d;
+    --text-secondary: #6b6a63;
+    --text-tertiary: #9c9a92;
+
+    --hairline: rgba(31, 30, 29, 0.12);
+    --hover-fill: rgba(31, 30, 29, 0.05);
+    --selected-fill: rgba(31, 30, 29, 0.08);
+    --scrim: rgba(31, 30, 29, 0.28);
+
+    --accent: #c96442;
+    --accent-contrast: #ffffff;
+    --agent-accent: #7c5cd6;
+
+    --success: #3f8f5a;
+    --danger: #c4453a;
+    --warning: #b7791f;
+    --warning-contrast: #1a1205;
+
+    --diff-added: var(--success);
+    --diff-removed: var(--danger);
+    --diff-added-bg: color-mix(in srgb, var(--success) 12%, transparent);
+    --diff-removed-bg: color-mix(in srgb, var(--danger) 12%, transparent);
+
+    --paper: #ffffff;
+
+    --shadow-sm: 0 1px 2px rgba(31, 30, 29, 0.06);
+    --shadow-md: 0 8px 24px rgba(31, 30, 29, 0.1), 0 1px 3px rgba(31, 30, 29, 0.06);
+    --shadow-lg: 0 24px 64px rgba(31, 30, 29, 0.18), 0 2px 8px rgba(31, 30, 29, 0.08);
+    --shadow-composer: 0 4px 20px rgba(31, 30, 29, 0.07), 0 1px 2px rgba(31, 30, 29, 0.05);
+
+    /* The dark set washes out on a warm white; same hues, deepened. */
+    --mode-plan: #8352d1;
+    --mode-coding: #2f8a5f;
+    --mode-ask: #2f6dbf;
+    --mode-blue: #6f55d0;
+    --mode-green: #2f8a5f;
+    --mode-cyan: #2f6dbf;
+    --mode-yellow: #b7791f;
+    --mode-magenta: #a3449c;
+    --mode-purple: #8352d1;
+    --mode-red: #c4453a;
+
+    --plan-muted: #8a887f;
+    --plan-pro: #7c3aed;
+    --plan-plus: #16a34a;
+    --plan-rainbow: #ff6b6b, #ff9e4f, #ffd93d, #6bcb77, #4d96ff, #c77dff;
+
+    --assistant-bubble: var(--surface-raised);
+    --user-bubble: var(--user-bubble-bg);
+  }
 }
 
 * {
@@ -70,16 +196,8 @@ body,
 body {
   background: var(--canvas);
   color: var(--text-primary);
-  font-family:
-    system-ui,
-    -apple-system,
-    'Segoe UI',
-    Roboto,
-    'Noto Sans',
-    Ubuntu,
-    Cantarell,
-    sans-serif;
-  font-size: 13px;
+  font-family: var(--font-sans);
+  font-size: var(--fs-md);
   -webkit-font-smoothing: antialiased;
   user-select: none;
 }
@@ -87,8 +205,7 @@ body {
 code,
 pre,
 .mono {
-  font-family: 'SF Mono', SFMono-Regular, ui-monospace, 'Cascadia Mono', 'Segoe UI Mono',
-    'JetBrains Mono', Menlo, Consolas, monospace;
+  font-family: var(--font-mono);
 }
 
 /* The soft card surface (CardBackground / .card() modifier). */

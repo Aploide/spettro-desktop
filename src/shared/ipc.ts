@@ -11,7 +11,7 @@ import type {
   ACPQuestionAnswer,
   ACPQuestionRequest
 } from './acp'
-import type { AppStateDTO, ChatDetail, GitStat, TranscriptItem } from './model'
+import type { Appearance, AppStateDTO, ChatDetail, GitStat, TranscriptItem } from './model'
 import type {
   ConnectResult,
   LocalProbeResult,
@@ -77,6 +77,9 @@ export interface RendererApi {
   /** Opens a native file picker for the CLI binary (NSOpenPanel port);
    *  resolves to the chosen path or null. */
   pickExecutable(): Promise<string | null>
+  /** System / Light / Dark. Persisted, and applied to the whole window
+   *  (and the terminal) live; the new value comes back in app-state. */
+  setAppearance(mode: Appearance): Promise<void>
 
   // Sessions
   newChat(projectPath?: string): Promise<string>

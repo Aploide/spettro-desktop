@@ -2,7 +2,8 @@
 
 Renders the orchestration views (workflow card, ultra swarm card, live panel)
 against fixtures shaped exactly like the Go CLI's ACP output, then screenshots
-them offscreen. Reviewing these views by reading the code does not work — what
+them offscreen. A second page mounts the whole app the same way (see "The app
+harness" below). Reviewing these views by reading the code does not work — what
 matters is what they look like when twenty rows land at once — and reaching
 the interesting states in the real app needs a provider and a ten-minute run.
 
@@ -25,3 +26,57 @@ Add a state you care about to `fixtures.ts` — especially an awkward one. The
 fixtures already cover the case that actually bit us: a finished workflow whose
 `argsJSON` the CLI overwrote with its finish payload, leaving the phase tree
 recoverable only from the rendered text.
+
+## The app harness
+
+`app.html` mounts the real `<App/>` — sidebar, chat, composer, sheets,
+settings, onboarding — with `window.spettro` stubbed by `AppHarness.tsx`:
+`call` answers from a canned table (`getState`, `getChat`, `gitStat`, …;
+anything else resolves `null`) and the events main would push (`app-state`,
+`chat-reset`, `permissions`, `questions`) go through the real store reducer.
+Pick the screen with `?mode=`:
+
+| mode | what it shows |
+| --- | --- |
+| `welcome` | ready, no chat selected |
+| `chat` | a finished turn: reasoning, read/search/edit/bash calls, a sub-agent, a markdown answer with a code block, a plan |
+| `busy` | the same turn still running |
+| `permission-bash`, `permission-diff` | the approval sheet for a command and for an edit |
+| `question` | the ask-user sheet |
+| `settings` | Settings, opened the way a user does (Ctrl+,) |
+| `onboarding`, `installing`, `install-failed` | first run without a CLI |
+| `gate` | the CLI is up but no model is connected |
+| `failure`, `reconnecting` | the agent died / is starting |
+
+`shoot.sh` shoots the main ones as `app:<mode>` scenes. They are taken at the
+real window's size (1280×840, `SHOT_APP_HEIGHT` to change) rather than as a
+tall page. One scene, one theme:
+
+```sh
+VISUAL_OUT=/tmp/sd-visual-dist npx vite build -c tools/visual/vite.config.ts
+SHOT_THEMES=dark node_modules/electron/dist/electron --no-sandbox \
+    tools/visual/capture.cjs /tmp/sd-visual-dist /tmp/out app:chat
+```
+
+## The live app
+
+`cdp-shot.cjs` screenshots the real window, against a real spettro, over the
+DevTools port — X11 tools can't see a Wayland client, the debug port always
+answers. Run the dev app with a throwaway profile and a debug port, then:
+
+```sh
+npx electron-vite dev --outDir out/live --entry out/live/main/index.js \
+    --remoteDebuggingPort 9333 -- --user-data-dir=/tmp/live-profile
+node tools/visual/cdp-shot.cjs 9333 /tmp/shot.png ["<JS to run first, e.g. a click>"]
+```
+
+Pass `--entry` whenever you pass `--outDir`: without it Electron starts
+`package.json`'s `main` (`out/main/index.js`) — whatever was built there last —
+while the renderer comes fresh from the dev server, so main-process changes
+silently aren't running. Keep the directory under `out/` (gitignored) so the
+bundle still resolves `node_modules`.
+
+The theme follows `nativeTheme.themeSource` in both places: the harness flips
+it per shot, and the app sets it from the System / Light / Dark setting
+(Settings › General), so `window.spettro.call('setAppearance', 'light')` in the
+live app's console flips everything, the terminal included.

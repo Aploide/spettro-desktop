@@ -125,8 +125,7 @@
 .swc-note {
   margin: 0;
   padding: 0 var(--sp-md) var(--sp-sm) 33px;
-  font-family: 'SF Mono', SFMono-Regular, ui-monospace, 'Cascadia Mono', 'Segoe UI Mono',
-    'JetBrains Mono', Menlo, Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 11.5px;
   line-height: 1.5;
   color: var(--text-secondary);
@@ -258,8 +257,7 @@
 .swc-ghost-item {
   flex: 1 1 auto;
   min-width: 0;
-  font-family: 'SF Mono', SFMono-Regular, ui-monospace, 'Cascadia Mono', 'Segoe UI Mono',
-    'JetBrains Mono', Menlo, Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 11.5px;
   color: var(--tr-tertiary);
   white-space: nowrap;

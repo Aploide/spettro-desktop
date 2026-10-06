@@ -31,6 +31,7 @@ import type {
 } from '../../shared/acp'
 import type { MainEvent } from '../../shared/ipc'
 import type {
+  Appearance,
   AppStateDTO,
   ChatDetail,
   CLIInfo,
@@ -39,6 +40,7 @@ import type {
   RemoteHostState,
   SubscriptionState
 } from '../../shared/model'
+import { isAppearance } from '../../shared/model'
 import type {
   ConnectResult,
   LocalProbeResult,
@@ -133,6 +135,9 @@ export class AppModel extends EventEmitter {
   private readonly prefs: Prefs
   private readonly subscriptionStore: SubscriptionStore
   private readonly appVersion: string
+  /** Hands an appearance change to the window layer (nativeTheme lives in
+   *  Electron, which this class deliberately doesn't import). */
+  private readonly applyAppearance: (mode: Appearance) => void
   private shuttingDown = false
 
   /** Account, providers, and models, all driven over the CLI's `_spettro/*`
@@ -153,10 +158,13 @@ export class AppModel extends EventEmitter {
     isPackaged?: boolean
     /** Quits the app once an update installer has been handed off. */
     quit?: () => void
+    /** Applies a changed appearance (main sets nativeTheme.themeSource). */
+    applyAppearance?: (mode: Appearance) => void
   }) {
     super()
     this.setMaxListeners(100)
     this.appVersion = opts.appVersion
+    this.applyAppearance = opts.applyAppearance ?? ((): void => undefined)
     // Built before the stores: getState() reads it, and a store that emitted
     // during its own construction would otherwise find it undefined.
     this.updates = new UpdateManager({
@@ -241,8 +249,22 @@ export class AppModel extends EventEmitter {
       remote: this.remote,
       lastProjectPath: this.prefs.lastProjectPath || null,
       defaultProjectPath: this.defaultProjectPath,
-      recentProjects: this.prefs.recentProjects
+      recentProjects: this.prefs.recentProjects,
+      appearance: this.prefs.appearance
     }
+  }
+
+  /** The persisted colour scheme. Read by main before the window exists, so
+   *  the first paint is already in the right scheme. */
+  get appearance(): Appearance {
+    return this.prefs.appearance
+  }
+
+  setAppearance(mode: Appearance): void {
+    if (!isAppearance(mode)) return
+    this.prefs.appearance = mode
+    this.applyAppearance(mode)
+    this.emitAppState()
   }
 
   getChatDetail(chatId: string): ChatDetail | null {

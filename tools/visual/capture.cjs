@@ -22,6 +22,9 @@ const WIDTH = 1280
 // Tall enough that every scene lands in one frame; the page is short enough
 // that a fixed height beats scroll-stitching.
 const HEIGHT = Number(process.env.SHOT_HEIGHT || 5200)
+// The app scenes are the window itself, so they are shot at the real
+// window's default size rather than as a tall page.
+const APP_HEIGHT = Number(process.env.SHOT_APP_HEIGHT || 840)
 
 // Destroying a shot's window leaves zero windows open, and Electron's default
 // window-all-closed handler quits the app on Linux and Windows. That ended the
@@ -89,19 +92,21 @@ function load(win, url) {
 
 async function shoot(theme) {
   nativeTheme.themeSource = theme
+  // A scene id prefixed "studio", "chrome" or "app" targets that harness page
+  // instead of the scene gallery; anything after a colon is its mode.
+  const studio = SCENE.startsWith('studio')
+  const chrome = SCENE.startsWith('chrome')
+  const appScene = SCENE.startsWith('app')
+  const height = appScene ? APP_HEIGHT : HEIGHT
   const win = new BrowserWindow({
     width: WIDTH,
-    height: HEIGHT,
+    height,
     show: false,
     useContentSize: true,
     webPreferences: { offscreen: true, backgroundThrottling: false }
   })
-  // A scene id prefixed "studio" targets the studio harness page instead of
-  // the scene gallery; anything after a colon is its mode.
-  const studio = SCENE.startsWith('studio')
-  const chrome = SCENE.startsWith('chrome')
-  const page = studio ? 'studio.html' : chrome ? 'chrome.html' : 'index.html'
-  const query = studio || chrome
+  const page = studio ? 'studio.html' : chrome ? 'chrome.html' : appScene ? 'app.html' : 'index.html'
+  const query = studio || chrome || appScene
     ? SCENE.includes(':')
       ? `?mode=${SCENE.split(':')[1]}`
       : ''
@@ -122,7 +127,9 @@ async function shoot(theme) {
   // again, which would have made the artifacts silently inconsistent with the
   // ones taken locally. Overriding the device metrics through the debugger
   // sets the viewport directly and is bounded by nothing.
-  await resizeViewport(win, Math.max(full, HEIGHT))
+  // The app fills its window by design (height: 100%), so its scroll height
+  // is the window's: it keeps the window size rather than growing a page.
+  await resizeViewport(win, appScene ? height : Math.max(full, height))
   const image = await win.webContents.capturePage()
   fs.mkdirSync(OUT, { recursive: true })
   // A scene id can carry a mode after a colon ("studio:broken"), and a colon

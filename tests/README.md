@@ -33,6 +33,7 @@ the things a screenshot renders perfectly while being wrong:
 | `setConfigValue.test.ts` | Telling an agent's refusal from a dead pipe. Getting it wrong is invisible until you look closely. |
 | `configBar.test.tsx` | That the Ultra chip *does nothing* when locked — a screenshot only shows that it looks locked. |
 | `workflowStudio.test.tsx` | That Run saves first, refuses to run a broken script, and that an old CLI says so instead of showing an empty project. |
+| `theme.test.ts` | That the light palette declares every token the dark one does (a missing one silently inherits the dark value), that view CSS uses tokens rather than hex, that `.icon-btn`/`.sheet-card` are defined once, and that a bad `appearance` on disk can't reach `nativeTheme`. |
 
 ## `wire.ts`
 

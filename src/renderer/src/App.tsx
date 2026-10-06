@@ -75,7 +75,7 @@ export default function App(): JSX.Element {
         }
       } else if (e.key === ',') {
         e.preventDefault()
-        setSettingsPane('account')
+        setSettingsPane('general')
       } else if (key === 'r' && e.shiftKey) {
         e.preventDefault()
         setRemoteOpen(true)
@@ -199,7 +199,7 @@ export default function App(): JSX.Element {
         return (
           <div className="split">
             <Sidebar
-              onOpenSettings={(pane) => setSettingsPane(pane ?? 'account')}
+              onOpenSettings={(pane) => setSettingsPane(pane ?? 'general')}
               onOpenRemote={() => setRemoteOpen(true)}
               onOpenWorkflows={() => selectedId && setWorkflowsChatId(selectedId)}
             />

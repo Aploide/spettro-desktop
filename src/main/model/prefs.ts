@@ -11,10 +11,13 @@
 //   recentProjects    — most-recent-first, deduped, capped at 10
 //   cachedCommands    — last available-commands list any agent advertised
 //                       (spettro.cachedCommands); empty updates never wipe it
+//   appearance        — 'system' | 'light' | 'dark'; main applies it to
+//                       nativeTheme.themeSource before the window exists
 
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'fs'
 import { dirname, join } from 'path'
 import type { ACPCommand, ACPConfigOption } from '../../shared/acp'
+import { isAppearance, type Appearance } from '../../shared/model'
 
 interface PrefsData {
   explicitCLIPath: string
@@ -22,6 +25,7 @@ interface PrefsData {
   lastConfigOptions: ACPConfigOption[]
   recentProjects: string[]
   cachedCommands: ACPCommand[]
+  appearance: Appearance
 }
 
 const DEFAULTS: PrefsData = {
@@ -29,7 +33,8 @@ const DEFAULTS: PrefsData = {
   lastProjectPath: '',
   lastConfigOptions: [],
   recentProjects: [],
-  cachedCommands: []
+  cachedCommands: [],
+  appearance: 'system'
 }
 
 function sanitize(raw: unknown): PrefsData {
@@ -38,7 +43,8 @@ function sanitize(raw: unknown): PrefsData {
     lastProjectPath: '',
     lastConfigOptions: [],
     recentProjects: [],
-    cachedCommands: []
+    cachedCommands: [],
+    appearance: 'system'
   }
   if (typeof raw !== 'object' || raw === null) return data
   const obj = raw as Record<string, unknown>
@@ -53,6 +59,7 @@ function sanitize(raw: unknown): PrefsData {
   if (Array.isArray(obj.cachedCommands)) {
     data.cachedCommands = obj.cachedCommands as ACPCommand[]
   }
+  if (isAppearance(obj.appearance)) data.appearance = obj.appearance
   return data
 }
 
@@ -137,6 +144,15 @@ export class Prefs {
     // the cache (appendix C).
     if (commands.length === 0) return
     this.data.cachedCommands = structuredClone(commands)
+    this.save()
+  }
+
+  get appearance(): Appearance {
+    return this.data.appearance
+  }
+
+  set appearance(value: Appearance) {
+    this.data.appearance = value
     this.save()
   }
 }

@@ -852,8 +852,10 @@ export function runTitle(run: OrchRun): string {
  * Per-member tint. The TUI looks the spec up in the agent manifest and uses
  * its declared colour; the renderer has no manifest, so it maps the spec id
  * itself through the same palette — "code" lands on the same green either way,
- * and anything unknown falls back to the accent rather than going untinted.
+ * and anything unknown falls back to the sub-agent colour rather than going
+ * untinted. (Not the accent: the warm accent sits next to the failure red, and
+ * a running member must never read as a failed one.)
  */
 export function memberTint(specId: string): string {
-  return modeColor(specId)
+  return modeColor(specId, 'var(--agent-accent)')
 }

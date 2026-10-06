@@ -24,7 +24,8 @@ export default defineConfig({
       input: {
         index: resolve(__dirname, 'index.html'),
         studio: resolve(__dirname, 'studio.html'),
-        chrome: resolve(__dirname, 'chrome.html')
+        chrome: resolve(__dirname, 'chrome.html'),
+        app: resolve(__dirname, 'app.html')
       }
     }
   }

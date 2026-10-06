@@ -246,7 +246,7 @@ export default function Composer({
         <div className="composer-options-row">
           <button
             type="button"
-            className="icon-btn"
+            className="composer-btn"
             title="Attach an image"
             onClick={() => fileInputRef.current?.click()}
           >
@@ -267,7 +267,7 @@ export default function Composer({
 
           <button
             type="button"
-            className={'icon-btn' + (terminalVisible ? ' icon-btn--accent' : '')}
+            className={'composer-btn' + (terminalVisible ? ' composer-btn--accent' : '')}
             title={terminalVisible ? 'Hide terminal' : 'Show terminal'}
             onClick={onToggleTerminal}
           >
@@ -277,7 +277,7 @@ export default function Composer({
           {chat.isBusy ? (
             <button
               type="button"
-              className="icon-btn"
+              className="composer-btn"
               title="Stop"
               onClick={() => void call('cancel', chat.id)}
             >
@@ -286,7 +286,7 @@ export default function Composer({
           ) : (
             <button
               type="button"
-              className={'icon-btn send-btn' + (canSend ? ' send-btn--active' : '')}
+              className={'composer-btn send-btn' + (canSend ? ' send-btn--active' : '')}
               title="Send"
               disabled={!canSend}
               onClick={send}

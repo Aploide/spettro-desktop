@@ -30,7 +30,7 @@
 .wfs-cwd {
   font-size: 11px;
   color: var(--text-secondary);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono);
   max-width: 46ch;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -140,7 +140,7 @@
 }
 
 .wfs-row-phases {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono);
   opacity: 0.75;
 }
 
@@ -278,7 +278,7 @@
 .wfs-btn--primary {
   background: var(--accent);
   border-color: transparent;
-  color: #fff;
+  color: var(--accent-contrast);
   font-weight: 600;
 }
 
@@ -301,7 +301,7 @@
   border-radius: var(--rad-md);
   background: var(--surface-raised);
   overflow: hidden;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   line-height: 1.6;
 }
@@ -442,7 +442,7 @@
 }
 
 .wfs-verdict-phases {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono);
   opacity: 0.8;
 }
 

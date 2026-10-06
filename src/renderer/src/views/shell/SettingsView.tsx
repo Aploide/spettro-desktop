@@ -19,6 +19,7 @@
 
 import { useEffect, useState } from 'react'
 import { EMPTY_EXTENSIONS, creditDetail, remainingFraction, shortHost } from '@shared/extensions'
+import type { Appearance } from '@shared/model'
 import { call, useApp } from '@renderer/state/store'
 import MemoryView from '@renderer/views/sheets/MemoryView'
 import ConnectProvidersView, {
@@ -33,9 +34,10 @@ import UpdatesPane from './UpdatesPane'
 import { defaultProjectPath } from './util'
 import '@renderer/design/form.css'
 
-export type SettingsPane = 'account' | 'agent' | 'providers' | 'memory' | 'updates'
+export type SettingsPane = 'general' | 'account' | 'agent' | 'providers' | 'memory' | 'updates'
 
 const PANES: { id: SettingsPane; label: string }[] = [
+  { id: 'general', label: 'General' },
   { id: 'account', label: 'Account' },
   { id: 'agent', label: 'Agent' },
   { id: 'providers', label: 'Providers' },
@@ -51,7 +53,7 @@ interface Props {
   onClose: () => void
 }
 
-export default function SettingsView({ initialPane = 'account', onClose }: Props): JSX.Element {
+export default function SettingsView({ initialPane = 'general', onClose }: Props): JSX.Element {
   const app = useApp()
   const [pane, setPane] = useState<SettingsPane>(initialPane)
   const [showSignIn, setShowSignIn] = useState(false)
@@ -102,6 +104,7 @@ export default function SettingsView({ initialPane = 'account', onClose }: Props
           <div className="divider" />
 
           <div className="settings-body">
+            {pane === 'general' && <GeneralPane />}
             {pane === 'account' && <AccountPane onSignIn={() => setShowSignIn(true)} />}
             {pane === 'agent' && <AgentPane />}
             {pane === 'providers' && (
@@ -146,6 +149,49 @@ export default function SettingsView({ initialPane = 'account', onClose }: Props
       {showConnect && <ConnectProvidersView onClose={() => setShowConnect(false)} />}
       {showModels && <ModelPickerView onClose={() => setShowModels(false)} />}
     </>
+  )
+}
+
+// ---------------------------------------------------------------- general
+
+const APPEARANCES: { id: Appearance; label: string }[] = [
+  { id: 'system', label: 'System' },
+  { id: 'light', label: 'Light' },
+  { id: 'dark', label: 'Dark' }
+]
+
+function GeneralPane(): JSX.Element {
+  const app = useApp()
+  const current = app?.appearance ?? 'system'
+  return (
+    <div className="form-scroll">
+      <section className="form-section">
+        <div className="form-section-title">Appearance</div>
+        <div className="form-card">
+          <div className="form-row">
+            <span className="form-label">Theme</span>
+            <span className="form-value">
+              <span className="segmented segmented--inline" role="radiogroup" aria-label="Theme">
+                {APPEARANCES.map((a) => (
+                  <button
+                    key={a.id}
+                    role="radio"
+                    aria-checked={current === a.id}
+                    className={current === a.id ? 'active' : ''}
+                    onClick={() => void call('setAppearance', a.id)}
+                  >
+                    {a.label}
+                  </button>
+                ))}
+              </span>
+            </span>
+          </div>
+        </div>
+        <div className="form-footer">
+          System follows your computer&rsquo;s light or dark setting.
+        </div>
+      </section>
+    </div>
   )
 }
 

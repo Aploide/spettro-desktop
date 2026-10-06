@@ -22,10 +22,9 @@
      never drift apart.
 
      It is deliberately NOT color-mix(--surface-raised, --canvas). "Raised" is
-     lighter than the canvas in dark (#1c1c1c over #0e0e0e) and lighter again
-     in light (#ffffff over #f9f9f7), so that mix steps the panel 14 → 20 in
-     dark and 249 → 252 in light: a plane in one scheme and nothing at all in
-     the other. Offsetting the canvas toward the TEXT colour inverts with the
+     lighter than the canvas in BOTH schemes, so that mix steps the panel a
+     visible amount in dark and next to nothing on the near-white light
+     canvas: a plane in one scheme and nothing at all in the other. Offsetting the canvas toward the TEXT colour inverts with the
      scheme instead — a shade lighter than the conversation in dark, a shade
      deeper in light — which is the same perceptual step (ΔL* ≈ 3) either way,
      and in both schemes lands the panel quieter than the bubbles beside it. */
@@ -373,8 +372,7 @@
 .orp-member-live {
   flex: 1 1 auto;
   min-width: 0;
-  font-family: 'SF Mono', SFMono-Regular, ui-monospace, 'Cascadia Mono', 'Segoe UI Mono',
-    'JetBrains Mono', Menlo, Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 10.5px;
   color: var(--tr-tertiary, var(--text-secondary));
   white-space: nowrap;

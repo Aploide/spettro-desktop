@@ -29,7 +29,7 @@
   position: fixed;
   inset: 0;
   z-index: 60;
-  background: rgba(0, 0, 0, 0.38);
+  background: var(--scrim);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -39,7 +39,7 @@
 /* A sheet presented from another sheet (Sign In over Settings). */
 .modal-backdrop--stacked {
   z-index: 70;
-  background: rgba(0, 0, 0, 0.28);
+  background: color-mix(in srgb, var(--scrim) 70%, transparent);
 }
 
 @keyframes modal-fade {
@@ -55,7 +55,7 @@
   background: var(--canvas);
   border: 1px solid var(--hairline);
   border-radius: var(--rad-md);
-  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.55);
+  box-shadow: var(--shadow-lg);
   max-width: calc(100vw - 48px);
   max-height: calc(100vh - 48px);
   animation: modal-rise 160ms ease-out;
@@ -319,6 +319,19 @@
   color: var(--mode-yellow);
 }
 
+/* A segmented control as a row's value (Theme: System / Light / Dark): sized
+   to its labels rather than stretched across the sheet like the pane
+   picker. */
+.form-scroll .segmented--inline {
+  width: auto;
+  flex: none;
+}
+
+.form-scroll .segmented--inline button {
+  flex: none;
+  padding: 3px 14px;
+}
+
 /* ---------------------------------------------------------- form fields */
 
 /* Companion to shell.css's mono `.text-input`, for prose-ish fields (search,
@@ -346,8 +359,7 @@
 }
 
 .input--mono {
-  font-family: 'SF Mono', SFMono-Regular, ui-monospace, 'Cascadia Mono', 'Segoe UI Mono',
-    'JetBrains Mono', Menlo, Consolas, monospace;
+  font-family: var(--font-mono);
 }
 
 .btn--small {
@@ -522,7 +534,7 @@
   font-weight: 600;
   letter-spacing: 0.02em;
   text-transform: uppercase;
-  color: #fff;
+  color: var(--accent-contrast);
   background: var(--accent);
 }
 

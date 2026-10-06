@@ -1,20 +1,6 @@
 /* Shell chrome — routing screens, sidebar, picker, onboarding, settings.
-   Companion to theme.css; every color goes through the theme tokens (plus the
-   plan-tier constants ported from PlanBadge.swift, declared below). */
-
-:root {
-  /* Plan tiers (PlanBadge.swift). Pastels tuned for dark; light overrides. */
-  --plan-muted: #9ca3af;
-  --plan-pro: #c4b5fd;
-  /* The TUI's six-color rainbow for the MAX badge. */
-  --plan-rainbow: #ff6b6b, #ff9e4f, #ffd93d, #6bcb77, #4d96ff, #c77dff;
-}
-
-@media (prefers-color-scheme: light) {
-  :root {
-    --plan-pro: #7c3aed;
-  }
-}
+   Companion to theme.css; every color goes through the theme tokens (the
+   plan-tier colours from PlanBadge.swift included). */
 
 /* ---------------------------------------------------------------- layout */
 
@@ -74,7 +60,7 @@
 .btn--prominent {
   background: var(--accent);
   border-color: transparent;
-  color: #fff;
+  color: var(--accent-contrast);
   font-weight: 500;
 }
 
@@ -123,8 +109,7 @@
 .text-input {
   flex: 1;
   min-width: 0;
-  font-family: 'SF Mono', SFMono-Regular, ui-monospace, 'Cascadia Mono', 'Segoe UI Mono',
-    'JetBrains Mono', Menlo, Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   color: var(--text-primary);
   background: color-mix(in srgb, var(--text-secondary) 10%, transparent);
@@ -195,13 +180,7 @@
 }
 
 .plan-badge--plus {
-  color: #86efac;
-}
-
-@media (prefers-color-scheme: light) {
-  .plan-badge--plus {
-    color: #16a34a;
-  }
+  color: var(--plan-plus);
 }
 
 .plan-badge--none {
@@ -287,7 +266,7 @@
   display: flex;
   flex-direction: column;
   border-right: 1px solid var(--hairline);
-  background: var(--canvas);
+  background: var(--sidebar-bg);
 }
 
 .sidebar-header {
@@ -556,7 +535,7 @@
   background: var(--surface-raised);
   border: 1px solid var(--hairline);
   border-radius: var(--rad-sm);
-  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.4);
+  box-shadow: var(--shadow-md);
   display: flex;
   flex-direction: column;
 }
@@ -576,7 +555,7 @@
 
 .ctx-item:hover {
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast);
 }
 
 .ctx-item--destructive {
@@ -585,7 +564,7 @@
 
 .ctx-item--destructive:hover {
   background: var(--diff-removed);
-  color: #fff;
+  color: var(--accent-contrast);
 }
 
 .ctx-separator {
@@ -799,8 +778,7 @@
 }
 
 .onb-hint {
-  font-family: 'SF Mono', SFMono-Regular, ui-monospace, 'Cascadia Mono', 'Segoe UI Mono',
-    'JetBrains Mono', Menlo, Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 10px;
   color: color-mix(in srgb, var(--text-secondary) 75%, transparent);
   text-align: center;
@@ -833,8 +811,7 @@
 }
 
 .log-line {
-  font-family: 'SF Mono', SFMono-Regular, ui-monospace, 'Cascadia Mono', 'Segoe UI Mono',
-    'JetBrains Mono', Menlo, Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 11px;
   color: var(--text-secondary);
   white-space: pre-wrap;
@@ -842,65 +819,7 @@
   user-select: text;
 }
 
-/* ------------------------------------------------------------------ sheets */
-
-.sheet-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 50;
-  background: rgba(0, 0, 0, 0.35);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  animation: sheet-fade 140ms ease-out;
-}
-
-@keyframes sheet-fade {
-  from {
-    opacity: 0;
-  }
-}
-
-.sheet-card {
-  background: var(--canvas);
-  border: 1px solid var(--hairline);
-  border-radius: var(--rad-md);
-  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.55);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  max-width: calc(100vw - 48px);
-  max-height: calc(100vh - 48px);
-  animation: sheet-rise 160ms ease-out;
-}
-
-@keyframes sheet-rise {
-  from {
-    transform: translateY(14px);
-    opacity: 0;
-  }
-}
-
-.settings-card {
-  width: 580px;
-  height: 520px;
-}
-
-.sheet-footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--sp-md);
-  padding: var(--sp-md);
-}
-
 /* ---------------------------------------------------------------- settings */
-
-.settings-tabs {
-  display: flex;
-  justify-content: center;
-  padding: var(--sp-lg) var(--sp-lg) var(--sp-md);
-}
 
 .segmented {
   display: flex;
@@ -940,15 +859,7 @@
 .segmented button.active {
   background: var(--surface-raised);
   color: var(--text-primary);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
-}
-
-.settings-pane {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
+  box-shadow: var(--shadow-sm);
 }
 
 .settings-version {
@@ -957,92 +868,9 @@
   user-select: text;
 }
 
-/* Grouped-form styling (Form + .formStyle(.grouped) port). */
-
-.form {
-  padding: var(--sp-lg);
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-lg);
-}
-
-.form-section-header {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-secondary);
-  padding: 0 2px 6px;
-}
-
-.form-card {
-  background: var(--surface-raised);
-  border: 1px solid var(--hairline);
-  border-radius: var(--rad-sm);
-}
-
-.form-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--sp-md);
-  padding: 9px var(--sp-md);
-  min-height: 20px;
-}
-
-.form-row + .form-row {
-  border-top: 1px solid var(--hairline);
-}
-
-.form-row--stack {
-  flex-direction: column;
-  align-items: stretch;
-  gap: var(--sp-sm);
-}
-
-.form-label {
-  flex: none;
-  font-size: 13px;
-}
-
-.form-value {
-  min-width: 0;
-  font-size: 13px;
-  color: var(--text-secondary);
-  text-align: right;
-  user-select: text;
-}
-
-.form-footer-caption {
-  font-size: 11px;
-  color: color-mix(in srgb, var(--text-secondary) 75%, transparent);
-  padding: 6px 2px 0;
-}
-
-.form-buttons {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-sm);
-}
-
-.managed-card {
-  padding: var(--sp-md);
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-sm);
-  font-size: 12px;
-  color: var(--text-secondary);
-  line-height: 1.5;
-}
-
-.managed-card code {
-  font-size: 11px;
-  color: var(--text-primary);
-  user-select: text;
-}
-
 /* Monospaced path, truncating from the head so the file name stays visible. */
 .path-value {
-  font-family: 'SF Mono', SFMono-Regular, ui-monospace, 'Cascadia Mono', 'Segoe UI Mono',
-    'JetBrains Mono', Menlo, Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 11px;
   /* `direction: rtl` is what moves the ellipsis to the head, but with
      `isolate` the path's leading "/" is a neutral character resolved against
@@ -1073,7 +901,7 @@
   padding: 7px 16px;
   font-size: 12px;
   color: var(--text-primary);
-  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.35);
+  box-shadow: var(--shadow-md);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

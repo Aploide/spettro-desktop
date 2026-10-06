@@ -43,6 +43,7 @@ export function registerIpc(
     installCLI: async () => model.installCLI(),
     useExplicitCLIPath: async (path) => model.useExplicitPath(path),
     chooseProject: async (path) => model.chooseProject(path),
+    setAppearance: async (mode) => model.setAppearance(mode),
     pickFolder: async () => {
       const win = getWindow()
       const options: Electron.OpenDialogOptions = {

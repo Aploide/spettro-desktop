@@ -184,6 +184,15 @@ export interface GitStat {
   files: { path: string; added: number; removed: number }[]
 }
 
+/** The app's colour scheme: follow the OS, or pin one. Persisted in prefs and
+ *  applied in main through nativeTheme.themeSource, which is what the
+ *  renderer's prefers-color-scheme media queries follow. */
+export type Appearance = 'system' | 'light' | 'dark'
+
+export function isAppearance(value: unknown): value is Appearance {
+  return value === 'system' || value === 'light' || value === 'dark'
+}
+
 export interface AppStateDTO {
   phase: Phase
   cli: CLIInfo | null
@@ -205,4 +214,5 @@ export interface AppStateDTO {
    *  the renderer never has to guess at the home directory. */
   defaultProjectPath: string
   recentProjects: string[]
+  appearance: Appearance
 }

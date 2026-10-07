@@ -51,6 +51,9 @@ const PAUSED_CAPTION = 'Ultra is saved, but workflows don’t run under Ask firs
 /** How long a move's preview outlives its calls when the options never come
  *  round to it (the CLI refused, and rolled the option back). */
 const SETTLE_MS = 1200
+/** How long a held key's repeats may pause before the stop they reached is
+ *  sent (repeats come every ~33 ms; the release sends it at once). */
+const HELD_KEY_MS = 150
 
 /** A press on the bar, and where it has been dragged. `at` is the stop under
  *  the pointer — the one a release selects, and what the words name. `rest`
@@ -114,6 +117,18 @@ export default function ThinkingSlider({
   // The rail's box for the press in progress: measured once, on the press,
   // rather than on every move.
   const railRect = useRef<DOMRect | null>(null)
+  // A held key's move, waiting for the repeats to stop.
+  const heldMove = useRef<{ timer: ReturnType<typeof setTimeout>; send: () => void } | null>(null)
+  useEffect(
+    () => () => {
+      // Closed mid-hold: where the key had got to still goes.
+      const waiting = heldMove.current
+      if (!waiting) return
+      clearTimeout(waiting.timer)
+      waiting.send()
+    },
+    []
+  )
 
   const state: ThinkingState | null = base && pending ? previewState(base, pending) : base
   const lit = !!state && state.ultraOn && !state.paused
@@ -203,15 +218,25 @@ export default function ThinkingSlider({
     !flight &&
     (idleTime !== undefined || (!reduced && visible))
 
-  const select = (i: number): void => {
+  const select = (i: number, held = false): void => {
     if (disabled || i < 0 || i > last || i === state.index) return
     setPending(stops[i])
     setSent(false)
-    void commit(stops[i]).then((settled) => {
-      // Only the last move in a burst lets the preview go, so the thumb never
-      // steps back through a stale value between two of them.
-      if (settled) setSent(true)
-    })
+    const stop = stops[i]
+    const send = (): void => {
+      heldMove.current = null
+      void commit(stop).then((settled) => {
+        // Only the last move in a burst lets the preview go, so the thumb
+        // never steps back through a stale value between two of them.
+        if (settled) setSent(true)
+      })
+    }
+    clearTimeout(heldMove.current?.timer)
+    // A key held down repeats some 30 times a second: the thumb follows each
+    // repeat, and the CLI hears where it stops (on the key's release, or
+    // once the repeats pause) rather than every stop on the way.
+    heldMove.current = held ? { timer: setTimeout(send, HELD_KEY_MS), send } : null
+    if (!held) send()
   }
 
   const indexAt = (clientX: number): number | null => {
@@ -272,7 +297,13 @@ export default function ThinkingSlider({
         return
     }
     e.preventDefault()
-    if (next !== null) select(next)
+    if (next !== null) select(next, e.repeat)
+  }
+  const onKeyUp = (): void => {
+    const waiting = heldMove.current
+    if (!waiting) return
+    clearTimeout(waiting.timer)
+    waiting.send()
   }
 
   // The prompt's buttons go away once pressed; the slider keeps the focus
@@ -332,6 +363,7 @@ export default function ThinkingSlider({
           setDrag(null)
         }}
         onKeyDown={onKeyDown}
+        onKeyUp={onKeyUp}
       >
         {/* The rail is the stops' line, Low to Ultra; the bar is drawn round
             it, half its height further at each end, so every stop sits

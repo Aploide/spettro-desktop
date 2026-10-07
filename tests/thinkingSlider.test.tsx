@@ -167,6 +167,41 @@ describe('the slider', () => {
     expect(slider().getAttribute('aria-valuetext')).toBe('Low')
   })
 
+  it('sends a held key’s stop once the repeats stop, not every stop on the way', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      render(<ThinkingSlider chat={chat(options({ thinking: 'low', ultra: false }))} />)
+      fireEvent.keyDown(slider(), { key: 'ArrowRight' })
+      await settle()
+      expect(calls).toEqual([['setSelectOption', ['chat-1', 'thinking', 'medium']]])
+      // Held: the thumb follows every repeat…
+      fireEvent.keyDown(slider(), { key: 'ArrowRight', repeat: true })
+      fireEvent.keyDown(slider(), { key: 'ArrowRight', repeat: true })
+      expect(slider().getAttribute('aria-valuetext')).toBe('Extra high')
+      await settle()
+      expect(calls).toHaveLength(1)
+      // …and the release sends where it stopped, once.
+      fireEvent.keyUp(slider(), { key: 'ArrowRight' })
+      await settle()
+      expect(calls).toEqual([
+        ['setSelectOption', ['chat-1', 'thinking', 'medium']],
+        ['setSelectOption', ['chat-1', 'thinking', 'x-high']]
+      ])
+      // A pause in the repeats sends it too.
+      calls.length = 0
+      fireEvent.keyDown(slider(), { key: 'ArrowLeft', repeat: true })
+      await settle()
+      expect(calls).toEqual([])
+      await act(async () => {
+        vi.advanceTimersByTime(200)
+      })
+      await settle()
+      expect(calls).toEqual([['setSelectOption', ['chat-1', 'thinking', 'high']]])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('goes nowhere further left from Off', async () => {
     render(<ThinkingSlider chat={chat(options({ thinking: 'off', ultra: false }))} />)
     press('ArrowLeft')

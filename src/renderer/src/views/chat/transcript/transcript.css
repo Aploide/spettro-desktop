@@ -1,53 +1,45 @@
 /* Transcript rendering styles — bubbles, reasoning, notices, tool rows,
-   sub-agent cards, diffs, markdown, run ticker. Ports the visuals of
-   TranscriptItemView.swift / ToolCallView.swift / MarkdownText.swift /
-   RunTicker.swift onto the theme.css token set. */
+   sub-agent cards, diffs, markdown, run ticker. Laid out after the Claude
+   Code tab: the user's words in a quiet bubble on the right, everything the
+   agent did as calm full-width lines on the left, and colour spent only on
+   what changed (diffs) and what needs the reader (a failure, an approval). */
 
 :root {
-  /* The raised dark panel behind code/output/diff blocks
-     (Color.black.opacity(0.35) dark / 0.04 light in the Swift views). */
-  --tr-panel: rgba(0, 0, 0, 0.35);
+  /* The recessed panel behind code/output/diff blocks — a step below
+     whatever it sits on, in either scheme. */
+  --tr-panel: var(--surface-sunken);
   /* Tertiary text (SwiftUI .tertiary). */
-  --tr-tertiary: color-mix(in srgb, var(--text-secondary) 72%, transparent);
-}
-
-@media (prefers-color-scheme: light) {
-  :root {
-    --tr-panel: rgba(0, 0, 0, 0.04);
-  }
+  --tr-tertiary: var(--text-tertiary);
 }
 
 /* ------------------------------------------------------------------------- */
-/* User bubble: accent-filled, right-aligned                                  */
+/* User bubble: a neutral surface, right-aligned                              */
 /* ------------------------------------------------------------------------- */
 
 .tr-user-row {
   display: flex;
   justify-content: flex-end;
-  padding-left: 60px; /* Spacer(minLength: 60) */
 }
 
 .tr-user-stack {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: flex-end;
   gap: var(--sp-xs);
+  max-width: 85%;
   min-width: 0;
 }
 
-/* The bubble is accent blue and its own surface, so it declares the palette
-   the activation glow (activation.css) should use on it: the default ramp
-   starts in violet, a near-neighbour of the bubble, which left the first half
-   of every lit phrase muddy. These are the same hues lifted clear of the blue
-   — bright enough to carry on their own, since nothing is painted behind the
-   phrase to help them. */
+/* The bubble is a quiet neutral a step off the canvas, so the activation
+   glow (activation.css) reads on it with the same ramp it uses in the
+   composer — no per-surface palette needed. */
 .tr-user-bubble {
-  --glow-ramp: #c4b5fd, #f0abfc, #e0f2fe, #67e8f9, #22d3ee;
-  background: var(--user-bubble);
-  color: #fff;
-  font-size: 14px;
-  line-height: 1.45;
-  padding: 10px var(--sp-md); /* sm + 2 vertical, md horizontal */
+  background: var(--user-bubble-bg);
+  color: var(--text-primary);
+  font-size: var(--fs-body);
+  line-height: 1.5;
+  padding: 10px var(--sp-lg);
   border-radius: var(--rad-bubble);
   user-select: text;
   white-space: pre-wrap;
@@ -56,14 +48,90 @@
 
 .tr-attachments {
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: var(--sp-xs);
 }
 
 .tr-attachment {
-  width: 120px;
-  height: 120px;
+  width: 64px;
+  height: 64px;
   object-fit: cover;
   border-radius: var(--rad-sm);
+  border: 1px solid var(--hairline);
+}
+
+/* A steer sent mid-turn: where it stands, said quietly under the bubble. */
+.tr-steering {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding-right: var(--sp-xs);
+  font-size: var(--fs-sm);
+  color: var(--text-tertiary);
+}
+
+.tr-steering--delivered {
+  color: var(--success);
+  animation: tr-fade-in 0.2s ease-out;
+}
+
+@keyframes tr-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* ------------------------------------------------------------------------- */
+/* Hover actions (Copy, Edit & resend)                                        */
+/* ------------------------------------------------------------------------- */
+
+.tr-actions {
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 0.12s ease-out;
+}
+
+/* A user message's actions sit to the left of its bubble, in the empty space
+   the right alignment leaves, so they never push the next row down. */
+.tr-actions--end {
+  position: absolute;
+  right: calc(100% + var(--sp-xs));
+  bottom: 2px;
+}
+
+.tr-user-row:hover .tr-actions,
+.tr-assistant:hover .tr-actions,
+.tr-actions:focus-within {
+  opacity: 1;
+}
+
+.tr-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  border-radius: var(--rad-xs);
+  background: none;
+  color: var(--text-tertiary);
+  cursor: pointer;
+}
+
+.tr-action:hover {
+  background: var(--hover-fill);
+  color: var(--text-primary);
+}
+
+.tr-action:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
 }
 
 /* ------------------------------------------------------------------------- */
@@ -75,9 +143,83 @@
   flex-direction: column;
   align-items: flex-start;
   gap: var(--sp-xs);
-  padding-top: 2px;
   width: 100%;
   min-width: 0;
+}
+
+/* A slash command's reply: the CLI lines its columns up with spaces. */
+.tr-plain {
+  margin: 0;
+  max-width: 100%;
+  overflow-x: auto;
+  font-family: var(--font-mono);
+  font-size: var(--fs-md);
+  line-height: 1.55;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+}
+
+/* /help's command list: the command as a mono chip, what it does in prose. */
+.tr-commands {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tr-commands-heading {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.tr-commands-list {
+  margin: 0;
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  column-gap: 14px;
+  row-gap: 6px;
+}
+
+/* Rows are wrappers for the pair; the grid lays out their children. */
+.tr-commands-row {
+  display: contents;
+}
+
+.tr-commands-list dt {
+  margin: 0;
+  max-width: 320px;
+}
+
+/* Inline, so a command too long for the column wraps as two chips rather
+   than becoming a grey block. */
+.tr-commands-list code {
+  display: inline;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+  padding: 1px 5px;
+  border-radius: 4px;
+  /* The same chip as inline code in an answer (.md-inline-code). */
+  background: color-mix(in srgb, var(--text-primary) 7%, transparent);
+  color: var(--text-primary);
+}
+
+.tr-commands-list dd {
+  margin: 0;
+  font-size: var(--fs-md);
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.tr-assistant > .md {
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+}
+
+.tr-assistant > .tr-actions {
+  margin: -2px 0 0 -6px;
 }
 
 .tr-dots {
@@ -112,15 +254,45 @@
   }
 }
 
+/* A light sweeping across live text ("Thinking…", the run ticker's verb):
+   motion that says "still going" without a spinner's urgency. */
+.tr-shimmer {
+  background: linear-gradient(
+      90deg,
+      var(--text-secondary) 0%,
+      var(--text-secondary) 40%,
+      var(--text-primary) 50%,
+      var(--text-secondary) 60%,
+      var(--text-secondary) 100%
+    )
+    0 0 / 250% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  /* 30 steps a second: a moving background under clipped text is repainted
+     on the main thread for every step, and every frame at 120 Hz cost more
+     than the rest of a running turn's page. */
+  animation: tr-shimmer 2s steps(60) infinite;
+}
+
+@keyframes tr-shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: 0 0;
+  }
+}
+
 /* ------------------------------------------------------------------------- */
-/* Reasoning: quiet collapsible disclosure                                    */
+/* Reasoning: one quiet line that opens to the thinking                       */
 /* ------------------------------------------------------------------------- */
 
 .tr-reasoning {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: var(--sp-xs);
+  gap: 6px;
   width: 100%;
 }
 
@@ -128,73 +300,155 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  min-height: 26px;
+  padding: 0 6px;
+  margin-left: -6px;
   background: none;
   border: none;
-  padding: 0;
-  margin: 0;
+  border-radius: var(--rad-xs);
   color: var(--text-secondary);
   font: inherit;
+  font-size: 13.5px;
   cursor: pointer;
   outline: none;
 }
 
-.tr-reasoning-label {
-  font-size: 11px;
-  font-weight: 500;
+.tr-reasoning-header:hover {
+  background: var(--hover-fill);
+  color: var(--text-primary);
+}
+
+.tr-reasoning-header:focus-visible {
+  outline: 2px solid var(--focus-ring);
 }
 
 .tr-reasoning-body {
   width: 100%;
-  font-size: 12.5px;
-  font-style: italic;
-  line-height: 1.5;
+  margin-left: 1px;
+  padding: 2px 0 2px var(--sp-md);
+  border-left: 2px solid var(--hairline);
+  font-size: 13.5px;
+  line-height: 1.6;
   color: var(--text-secondary);
-  padding: var(--sp-sm);
-  background: var(--surface-raised);
-  border: 1px solid var(--hairline);
-  border-radius: var(--rad-sm);
   user-select: text;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 
 /* ------------------------------------------------------------------------- */
-/* Notices: centered small banners; error variant red-tinted                  */
+/* Notices: a muted line; errors are a card with the way forward              */
 /* ------------------------------------------------------------------------- */
 
 .tr-notice {
   display: flex;
   align-items: center;
-  justify-content: center;
-  gap: var(--sp-sm);
-  margin: 0 auto;
-  max-width: 520px;
-  padding: var(--sp-sm) var(--sp-md);
-  background: var(--surface-raised);
-  border: 1px solid var(--hairline);
-  border-radius: var(--rad-sm);
-  font-size: 11px;
-  color: var(--text-secondary);
-  text-align: center;
+  gap: 6px;
+  min-height: 26px;
+  font-size: var(--fs-md);
+  color: var(--text-tertiary);
 }
 
-.tr-notice-icon {
-  display: inline-flex;
+.tr-notice svg {
   flex: none;
-  color: var(--text-secondary);
 }
 
 .tr-notice-text {
   user-select: text;
 }
 
-.tr-notice--error {
-  background: color-mix(in srgb, var(--diff-removed) 8%, var(--surface-raised));
-  border-color: color-mix(in srgb, var(--diff-removed) 35%, transparent);
+/* After /clear: a hairline across the column with the words in the middle. */
+.tr-cleared {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: var(--sp-md) 0;
+  font-size: var(--fs-sm);
+  color: var(--text-tertiary);
+  text-align: center;
 }
 
-.tr-notice--error .tr-notice-icon {
-  color: var(--diff-removed);
+.tr-cleared::before,
+.tr-cleared::after {
+  content: '';
+  flex: 1;
+  min-width: 24px;
+  height: 1px;
+  background: var(--hairline);
+}
+
+.tr-cleared-text {
+  user-select: text;
+}
+
+/* What came before it is still there to read, but Spettro no longer has it:
+   dimmed, and brought back while the pointer is on it. */
+.chat-transcript-inner > :has(~ .tr-cleared) {
+  opacity: 0.5;
+  transition: opacity 0.2s ease;
+}
+
+.chat-transcript-inner > :has(~ .tr-cleared):hover,
+.chat-transcript-inner > :has(~ .tr-cleared):focus-within {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-transcript-inner > :has(~ .tr-cleared) {
+    transition: none;
+  }
+}
+
+.tr-error {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px var(--sp-md);
+  border-radius: var(--rad-md);
+  border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent);
+  background: color-mix(in srgb, var(--danger) 8%, var(--canvas));
+  color: var(--text-primary);
+}
+
+.tr-error-icon {
+  display: inline-flex;
+  flex: none;
+  color: var(--danger);
+}
+
+.tr-error-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 13.5px;
+  line-height: 1.45;
+  user-select: text;
+  overflow-wrap: anywhere;
+}
+
+.tr-error-retry {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  height: 28px;
+  padding: 0 var(--sp-md);
+  border: 1px solid var(--hairline);
+  border-radius: var(--rad-sm);
+  background: var(--surface-raised);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: var(--fs-md);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.tr-error-retry:hover {
+  background: color-mix(in srgb, var(--surface-raised) 90%, var(--text-primary));
+}
+
+.tr-error-retry:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
 }
 
 /* ------------------------------------------------------------------------- */
@@ -202,64 +456,150 @@
 /* ------------------------------------------------------------------------- */
 
 .tr-tool {
-  border-radius: var(--rad-sm);
   width: 100%;
-}
-
-.tr-tool:hover,
-.tr-tool--expanded {
-  background: var(--surface-raised);
+  min-width: 0;
 }
 
 .tr-tool-header {
   display: flex;
   align-items: center;
   gap: var(--sp-sm);
-  width: 100%;
-  padding: 5px var(--sp-sm);
+  width: calc(100% + 12px);
+  min-height: 28px;
+  margin: 0 -6px;
+  padding: 3px 6px;
   background: none;
   border: none;
-  margin: 0;
+  border-radius: var(--rad-xs);
   font: inherit;
-  color: inherit;
+  font-size: 13.5px;
+  color: var(--text-primary);
   cursor: pointer;
   text-align: left;
   outline: none;
 }
 
-.tr-tool-icon {
-  display: inline-flex;
-  justify-content: center;
-  width: 16px;
-  flex: none;
-  color: var(--tr-tertiary);
+.tr-tool-header:hover {
+  background: var(--hover-fill);
+}
+
+.tr-tool-header:focus-visible {
+  outline: 2px solid var(--focus-ring);
 }
 
 .tr-tool-verb {
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--text-secondary);
-  white-space: nowrap;
   flex: none;
+  font-weight: 600;
+  white-space: nowrap;
 }
 
-.tr-tool-detailtext {
-  font-family: 'SF Mono', SFMono-Regular, ui-monospace, 'Cascadia Mono', 'Segoe UI Mono',
-    'JetBrains Mono', Menlo, Consolas, monospace;
-  font-size: 12px;
-  color: var(--tr-tertiary);
-  flex: 1 1 auto;
+.tr-tool-arg {
+  flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+
+.tr-tool-spacer {
+  flex: 1 1 auto;
+  min-width: var(--sp-sm);
+}
+
+.tr-tool-meta {
+  flex: none;
+  font-size: var(--fs-sm);
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.tr-tool-meta--failed {
+  color: var(--danger);
+}
+
+.tr-tool-meta--waiting {
+  color: var(--warning);
+  font-weight: 500;
+}
+
+/* The status mark: a 16px slot so verbs line up whatever the state. */
+.tr-glyph {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 16px;
+  height: 16px;
+}
+
+.tr-glyph::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  box-sizing: border-box;
+}
+
+.tr-glyph--pending::before {
+  border: 1.5px solid var(--text-tertiary);
+}
+
+.tr-glyph--running::before {
+  background: var(--accent);
+  animation: tr-glyph-pulse 1.4s ease-in-out infinite;
+}
+
+.tr-glyph--done::before {
+  background: var(--success);
+}
+
+.tr-glyph--awaiting::before {
+  background: var(--warning);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--warning) 22%, transparent);
+}
+
+.tr-glyph--failed {
+  color: var(--danger);
+}
+
+/* Denied by the user: a hollow ring struck through, in the muted ink. */
+.tr-glyph--denied::before {
+  border: 1.5px solid var(--text-tertiary);
+  background: linear-gradient(
+    135deg,
+    transparent 44%,
+    var(--text-tertiary) 44%,
+    var(--text-tertiary) 56%,
+    transparent 56%
+  );
+}
+
+.tr-glyph--failed::before {
+  content: none;
+}
+
+@keyframes tr-glyph-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.45;
+    transform: scale(0.8);
+  }
 }
 
 .tr-diffstat {
   display: inline-flex;
   gap: 5px;
   flex: none;
-  font-size: 11px;
+  font-size: var(--fs-sm);
   font-weight: 500;
   font-variant-numeric: tabular-nums;
 }
@@ -272,6 +612,7 @@
   color: var(--diff-removed);
 }
 
+/* Kept for the workflow card's member rows. */
 .tr-status-dot {
   width: 6px;
   height: 6px;
@@ -280,16 +621,10 @@
   background: color-mix(in srgb, var(--diff-added) 90%, transparent);
 }
 
-.tr-status-fail {
-  display: inline-flex;
-  flex: none;
-  color: var(--diff-removed);
-}
-
 .tr-chevron {
   display: inline-flex;
   flex: none;
-  color: color-mix(in srgb, var(--text-secondary) 45%, transparent);
+  color: var(--text-tertiary);
   transition: transform 0.15s ease-in-out;
 }
 
@@ -297,138 +632,343 @@
   transform: rotate(90deg);
 }
 
-.tr-tool-detail {
+/* What a call did, indented under a thin rule from the status dot. */
+.tr-tool-panel {
   display: flex;
   flex-direction: column;
   gap: var(--sp-sm);
-  margin: 0 var(--sp-sm) var(--sp-sm) 24px;
+  margin: 2px 0 var(--sp-sm) 7px;
+  padding-left: 14px;
+  border-left: 1px solid var(--hairline);
   min-width: 0;
 }
 
-.tr-tool-output {
-  margin: 0;
-  max-height: 260px;
-  overflow: auto;
-  padding: var(--sp-sm);
-  background: var(--tr-panel);
+.tr-group-rows {
+  gap: 0;
+}
+
+.tr-locations {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px var(--sp-md);
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  color: var(--text-tertiary);
+}
+
+.tr-location {
+  user-select: text;
+  overflow-wrap: anywhere;
+}
+
+.tr-location-line {
+  color: var(--text-secondary);
+}
+
+.tr-output {
+  min-width: 0;
+  border: 1px solid var(--hairline);
   border-radius: var(--rad-sm);
-  font-size: 11.5px;
+  background: var(--tr-panel);
+  overflow: hidden;
+}
+
+.tr-output-command {
+  display: flex;
+  gap: var(--sp-sm);
+  padding: 7px 10px;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-primary);
+  user-select: text;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.tr-output-command + .tr-output-text {
+  border-top: 1px solid var(--hairline);
+}
+
+.tr-output-prompt {
+  flex: none;
+  color: var(--text-tertiary);
+  user-select: none;
+}
+
+.tr-output-text {
+  margin: 0;
+  padding: 7px 10px;
+  overflow-x: auto;
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
   line-height: 1.5;
   color: var(--text-secondary);
   user-select: text;
   white-space: pre;
 }
 
+.tr-output > .tr-more {
+  border-top: 1px solid var(--hairline);
+  width: 100%;
+  border-radius: 0;
+  text-align: left;
+}
+
+.tr-more {
+  align-self: flex-start;
+  padding: 5px 10px;
+  border: none;
+  border-radius: var(--rad-xs);
+  background: none;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: var(--fs-sm);
+  cursor: pointer;
+}
+
+.tr-more:hover {
+  background: var(--hover-fill);
+  color: var(--text-primary);
+}
+
+/* Images a tool returned: thumbnails that open full size. */
+.tr-thumbs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-sm);
+}
+
+.tr-thumb {
+  width: 88px;
+  height: 88px;
+  padding: 0;
+  border: 1px solid var(--hairline);
+  border-radius: var(--rad-sm);
+  overflow: hidden;
+  background: var(--tr-panel);
+  cursor: zoom-in;
+}
+
+.tr-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.tr-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--sp-2xl);
+  background: color-mix(in srgb, black 72%, transparent);
+  cursor: zoom-out;
+  outline: none;
+  animation: tr-fade-in 0.15s ease-out;
+}
+
+.tr-lightbox img {
+  max-width: 100%;
+  max-height: 100%;
+  border-radius: var(--rad-sm);
+  box-shadow: var(--shadow-md);
+}
+
 /* ------------------------------------------------------------------------- */
-/* Diff view                                                                  */
+/* Diff view: a unified diff with old and new line numbers                    */
 /* ------------------------------------------------------------------------- */
 
 .tr-diff {
   display: flex;
   flex-direction: column;
-  gap: 4px;
   min-width: 0;
+  border: 1px solid var(--hairline);
+  border-radius: var(--rad-sm);
+  overflow: hidden;
+  background: var(--surface-raised);
 }
 
 .tr-diff-head {
   display: flex;
   align-items: center;
-  gap: 6px;
-}
-
-.tr-diff-icon {
-  display: inline-flex;
-  color: var(--tr-tertiary);
+  gap: var(--sp-sm);
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--hairline);
+  background: var(--tr-panel);
 }
 
 .tr-diff-path {
-  font-family: 'SF Mono', SFMono-Regular, ui-monospace, 'Cascadia Mono', 'Segoe UI Mono',
-    'JetBrains Mono', Menlo, Consolas, monospace;
-  font-size: 11px;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
   font-weight: 500;
-  color: var(--text-secondary);
+  color: var(--text-primary);
 }
 
-.tr-diff-lines {
+.tr-diff-tag {
+  flex: none;
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  padding: 1px 6px;
+  border-radius: 999px;
+  color: var(--success);
+  background: var(--diff-added-bg);
+}
+
+.tr-diff-head .tr-diffstat {
+  margin-left: auto;
+}
+
+.tr-diff-body {
   overflow-x: auto;
-  background: var(--tr-panel);
-  border-radius: var(--rad-sm);
-  scrollbar-width: none;
+}
+
+/* As wide as the longest line or the panel, whichever is more, so a line's
+   tint runs the full width even when the panel scrolls sideways. */
+.tr-diff-rows {
+  width: max-content;
+  min-width: 100%;
+  padding: 4px 0;
 }
 
 .tr-diff-line {
   display: flex;
-  min-width: max-content;
-  padding: 0.5px 0;
-  font-family: 'SF Mono', SFMono-Regular, ui-monospace, 'Cascadia Mono', 'Segoe UI Mono',
-    'JetBrains Mono', Menlo, Consolas, monospace;
-  font-size: 11.5px;
-  line-height: 1.45;
-  user-select: text;
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  line-height: 1.6;
   white-space: pre;
 }
 
 .tr-diff-line--added {
-  background: color-mix(in srgb, var(--diff-added) 10%, transparent);
+  background: var(--diff-added-bg);
 }
 
 .tr-diff-line--removed {
-  background: color-mix(in srgb, var(--diff-removed) 10%, transparent);
+  background: var(--diff-removed-bg);
 }
 
-.tr-diff-prefix {
-  display: inline-block;
-  width: 16px;
+.tr-diff-no {
   flex: none;
+  width: 38px;
+  padding-right: 8px;
+  text-align: right;
+  font-size: var(--fs-xs);
+  color: var(--text-tertiary);
+  user-select: none;
+  font-variant-numeric: tabular-nums;
+}
+
+.tr-diff-sign {
+  flex: none;
+  width: 18px;
   text-align: center;
+  color: var(--text-tertiary);
   user-select: none;
 }
 
-.tr-diff-line--added .tr-diff-prefix {
+.tr-diff-line--added .tr-diff-sign {
   color: var(--diff-added);
 }
 
-.tr-diff-line--removed .tr-diff-prefix {
+.tr-diff-line--removed .tr-diff-sign {
   color: var(--diff-removed);
 }
 
-.tr-diff-text {
-  color: color-mix(in srgb, var(--text-primary) 85%, transparent);
-  padding-right: var(--sp-sm);
+/* Read aloud, never drawn: what the sign and colour say to the eye. */
+.tr-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
-.tr-diff-more {
-  font-family: ui-monospace, Menlo, Consolas, monospace;
-  font-size: 10.5px;
-  color: var(--tr-tertiary);
-  padding: 2px 0 2px 16px;
+.tr-diff-text {
+  padding-right: var(--sp-md);
+  color: var(--text-primary);
+  user-select: text;
+}
+
+.tr-diff-line--context .tr-diff-text {
+  color: var(--text-secondary);
+}
+
+.tr-diff-eof {
+  font-family: var(--font-sans);
+  font-style: italic;
+  color: var(--text-tertiary);
+}
+
+.tr-hunk-gap {
+  margin: 4px 0;
+  padding: 2px 10px 2px 94px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--text-tertiary);
+  background: var(--tr-panel);
+  white-space: pre;
+}
+
+.tr-diff-empty {
+  padding: 6px 10px;
+  font-size: var(--fs-sm);
+  color: var(--text-tertiary);
+}
+
+.tr-diff > .tr-more {
+  width: 100%;
+  border-top: 1px solid var(--hairline);
+  border-radius: 0;
+  text-align: left;
 }
 
 /* ------------------------------------------------------------------------- */
 /* Sub-agent card                                                             */
 /* ------------------------------------------------------------------------- */
 
+/* Neutral, with one thin rail in the agent colour: another agent at work is
+   worth marking, not worth a coloured slab. */
 .tr-agent {
+  position: relative;
   width: 100%;
+  min-width: 0;
   border-radius: var(--rad-md);
-  background: color-mix(in srgb, var(--agent-accent) 7%, transparent);
-  border: 1px solid color-mix(in srgb, var(--agent-accent) 25%, transparent);
+  border: 1px solid var(--hairline);
+  background: var(--surface-raised);
 }
 
-@media (prefers-color-scheme: light) {
-  .tr-agent {
-    background: color-mix(in srgb, var(--agent-accent) 5%, transparent);
-  }
+/* The rail is its own straight bar, inset from the corners: an inset shadow
+   would follow the radius and curve like a bracket. */
+.tr-agent::before {
+  content: '';
+  position: absolute;
+  left: -1px;
+  top: 10px;
+  bottom: 10px;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--agent-accent);
+  pointer-events: none;
 }
 
 .tr-agent-header {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: var(--sp-sm);
   width: 100%;
-  padding: var(--sp-sm) var(--sp-md);
+  padding: 8px var(--sp-md) 8px 10px;
   background: none;
   border: none;
+  border-radius: var(--rad-md);
   margin: 0;
   font: inherit;
   color: inherit;
@@ -437,10 +977,16 @@
   outline: none;
 }
 
-.tr-agent-icon {
-  display: inline-flex;
-  flex: none;
-  color: var(--agent-accent);
+.tr-agent-header:focus-visible {
+  outline: 2px solid var(--focus-ring);
+}
+
+.tr-agent-header > .tr-glyph {
+  margin-top: 2px;
+}
+
+.tr-agent-header > .tr-chevron {
+  margin-top: 6px;
 }
 
 .tr-agent-main {
@@ -453,48 +999,63 @@
 
 .tr-agent-titlerow {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   gap: 6px;
+  min-width: 0;
+  font-size: 13.5px;
+  line-height: 20px;
+}
+
+.tr-agent-kind {
+  font-weight: 600;
+}
+
+.tr-agent-sep {
+  color: var(--text-tertiary);
 }
 
 .tr-agent-name {
-  font-size: 12.5px;
-  font-weight: 600;
-}
-
-.tr-agent-badge {
-  font-size: 9.5px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.4px;
-  padding: 1.5px 5px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--agent-accent) 18%, transparent);
-  color: var(--agent-accent);
-}
-
-.tr-agent-working {
-  font-size: 11px;
   color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tr-agent-count {
+  margin-left: auto;
+  padding-left: var(--sp-sm);
+  flex: none;
+  font-size: var(--fs-sm);
+  color: var(--text-tertiary);
 }
 
 .tr-agent-task {
-  font-size: 11.5px;
-  line-height: 1.4;
+  font-size: var(--fs-md);
+  line-height: 1.45;
   color: var(--text-secondary);
   user-select: text;
 }
 
 .tr-agent-task--clamped {
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
   overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tr-agent-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-sm);
+  padding: var(--sp-xs) var(--sp-md) var(--sp-md) 34px;
 }
 
 .tr-agent-summary {
+  padding-top: var(--sp-sm);
   border-top: 1px solid var(--hairline);
-  padding: var(--sp-md);
+}
+
+.tr-agent-tools + .tr-agent-summary {
+  margin-top: var(--sp-xs);
 }
 
 /* ------------------------------------------------------------------------- */
@@ -509,7 +1070,7 @@
   width: 100%;
   min-width: 0;
   font-size: 14px;
-  line-height: 1.5;
+  line-height: 1.55;
   user-select: text;
 }
 
@@ -528,15 +1089,17 @@
 }
 
 .md h1 {
-  font-size: 1.5em;
+  font-size: 1.45em;
+  line-height: 1.3;
 }
 
 .md h2 {
-  font-size: 1.3em;
+  font-size: 1.25em;
+  line-height: 1.35;
 }
 
 .md h3 {
-  font-size: 1.15em;
+  font-size: 1.1em;
 }
 
 .md h4,
@@ -564,7 +1127,7 @@
 }
 
 .md-blockquote {
-  border-left: 3px solid var(--hairline);
+  border-left: 2px solid var(--hairline);
   padding-left: var(--sp-md);
   color: var(--text-secondary);
   display: flex;
@@ -578,7 +1141,7 @@
 }
 
 .md-link {
-  color: var(--accent);
+  color: var(--accent-text);
   text-decoration: none;
 }
 
@@ -587,10 +1150,11 @@
 }
 
 .md-inline-code {
-  font-size: 0.88em;
-  background: color-mix(in srgb, var(--text-primary) 8%, transparent);
+  font-family: var(--font-mono);
+  font-size: 0.86em;
+  background: color-mix(in srgb, var(--text-primary) 7%, transparent);
   border-radius: 4px;
-  padding: 1px 4px;
+  padding: 1px 5px;
 }
 
 .md-img-alt {
@@ -617,16 +1181,17 @@
 .md-table th,
 .md-table td {
   border: 1px solid var(--hairline);
-  padding: 4px 10px;
+  padding: 5px 10px;
   text-align: left;
 }
 
 .md-table th {
   font-weight: 600;
-  background: var(--surface-raised);
+  background: var(--tr-panel);
 }
 
-/* Code blocks: language tag + copy button above the code, raised surface. */
+/* Code blocks: the language and a Copy button over the code, sunk a step
+   below the page. */
 
 .md-codeblock {
   background: var(--tr-panel);
@@ -640,37 +1205,46 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 5px var(--sp-sm);
-  border-bottom: 1px solid var(--hairline);
+  padding: 4px 4px 0 12px;
 }
 
 .md-codeblock-lang {
-  font-size: 10px;
-  font-weight: 500;
-  color: var(--tr-tertiary);
+  font-size: var(--fs-sm);
+  color: var(--text-tertiary);
 }
 
 .md-copy {
   display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 8px;
   background: none;
   border: none;
-  padding: 2px;
-  margin: 0;
+  border-radius: var(--rad-xs);
   color: var(--text-secondary);
+  font: inherit;
+  font-size: var(--fs-sm);
   cursor: pointer;
   outline: none;
 }
 
 .md-copy:hover {
+  background: var(--hover-fill);
   color: var(--text-primary);
+}
+
+.md-copy:focus-visible {
+  outline: 2px solid var(--focus-ring);
 }
 
 .md-codeblock-body {
   margin: 0;
-  padding: var(--sp-sm);
+  padding: 6px 12px 10px;
   overflow-x: auto;
-  font-size: 0.9em;
-  line-height: 1.5;
+  font-family: var(--font-mono);
+  font-size: var(--fs-md);
+  line-height: 1.55;
 }
 
 /* ------------------------------------------------------------------------- */
@@ -681,8 +1255,13 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 11px;
-  color: var(--text-secondary);
+  min-height: 26px;
+  font-size: var(--fs-md);
+  color: var(--text-tertiary);
+}
+
+.tk-phase {
+  font-weight: 500;
 }
 
 .tk-num {
@@ -693,7 +1272,7 @@
   position: relative;
   display: inline-block;
   flex: none;
-  color: var(--accent);
+  color: var(--accent-text);
   animation: tr-spin 0.4s steps(8) infinite;
 }
 
@@ -707,4 +1286,55 @@
   to {
     transform: rotate(360deg);
   }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tr-shimmer {
+    animation: none;
+    background: none;
+    color: var(--text-secondary);
+  }
+
+  .tr-glyph--running::before {
+    animation: none;
+  }
+
+  .tr-actions,
+  .tr-steering--delivered,
+  .tr-lightbox {
+    transition: none;
+    animation: none;
+  }
+}
+
+/* An error notice's sentence, with the error as it arrived folded under it. */
+.tr-error-body {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.tr-error-details .disclosure-toggle {
+  font-size: var(--fs-xs);
+}
+
+.tr-error-raw {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+/* With the details open the card is several lines tall: the icon and Try
+   again stay with the sentence instead of floating to the middle. */
+.tr-error:has(.disclosure--open) {
+  align-items: flex-start;
+}
+
+.tr-error:has(.disclosure--open) .tr-error-icon {
+  margin-top: 2px;
 }

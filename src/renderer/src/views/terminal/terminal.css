@@ -78,10 +78,10 @@
   flex-shrink: 0;
 }
 .terminal-tab--selected {
-  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  background: var(--selected-fill);
 }
 .terminal-tab:not(.terminal-tab--selected):hover {
-  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  background: var(--hover-fill);
 }
 
 .terminal-tab__glyph {
@@ -132,7 +132,7 @@
   flex-shrink: 0;
 }
 .terminal-drawer__iconbtn:hover {
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  background: var(--hover-fill);
 }
 
 /* ---- terminal body ---------------------------------------------------- */
@@ -164,6 +164,13 @@
 }
 .terminal-slot__host .xterm {
   height: 100%;
+}
+
+/* xterm's viewport sits behind the text layer, so the pointer is never over
+   it and the app-wide "thumb while hovered" rule wouldn't fire: show it while
+   the pointer is anywhere over the terminal instead. */
+.terminal-slot__host .xterm:hover .xterm-viewport::-webkit-scrollbar-thumb {
+  background-color: color-mix(in srgb, var(--text-tertiary) 40%, transparent);
 }
 
 /* Subtle exited state shown briefly before the tab closes. */
@@ -207,5 +214,5 @@
   cursor: pointer;
 }
 .terminal-drawer__newbtn:hover {
-  background: color-mix(in srgb, var(--accent) 14%, var(--surface-raised));
+  background: color-mix(in srgb, var(--text-primary) 6%, var(--surface-raised));
 }

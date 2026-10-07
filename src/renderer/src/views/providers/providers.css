@@ -54,7 +54,7 @@
 }
 
 .prov-icon--accent {
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .prov-icon--connected {
@@ -100,7 +100,7 @@
   font-size: 9px;
   font-weight: 600;
   letter-spacing: 0.02em;
-  color: var(--accent);
+  color: var(--accent-text);
   background: color-mix(in srgb, var(--accent) 15%, transparent);
   border-radius: 999px;
   padding: 1px 5px;
@@ -292,7 +292,7 @@
   gap: 3px;
   font-size: 10px;
   font-weight: 600;
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .model-chips {
@@ -316,4 +316,143 @@
 .model-chip--ctx {
   font-variant-numeric: tabular-nums;
   color: var(--text-primary);
+}
+
+/* Opened from a chat, a row chooses its model. */
+.form-card .model-row--choosable {
+  cursor: pointer;
+  border-radius: var(--rad-xs);
+}
+
+.form-card .model-row--choosable:hover {
+  background: var(--hover-fill);
+}
+
+.form-card .model-row--choosable:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+/* "Use a model on this computer": what the scan found. */
+.local-found {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-sm);
+}
+
+.local-status {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-sm);
+  padding: var(--sp-md);
+  font-size: var(--fs-md);
+  color: var(--text-secondary);
+  background: var(--surface-raised);
+  border: 1px solid var(--hairline);
+  border-radius: var(--rad-sm);
+}
+
+.local-status--empty span:nth-child(2) {
+  flex: 1;
+  line-height: 1.45;
+}
+
+.local-status-icon {
+  display: inline-flex;
+  flex: none;
+  color: var(--text-tertiary);
+}
+
+.local-server {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-md);
+  padding: var(--sp-md);
+  background: var(--surface-raised);
+  border: 1px solid var(--hairline);
+  border-radius: var(--rad-sm);
+}
+
+.local-server-icon {
+  display: inline-flex;
+  flex: none;
+  color: var(--warning);
+}
+
+.local-server-icon--ok {
+  color: var(--success);
+}
+
+.local-server-texts {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.local-server-name {
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+
+.local-server-count {
+  font-weight: 400;
+  color: var(--text-secondary);
+}
+
+.local-server-sub {
+  font-size: var(--fs-sm);
+  line-height: 1.45;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.local-custom-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* Sized to what it holds: the scan's answer is one or three rows. */
+.modal-panel--local {
+  height: auto;
+  min-height: 0;
+}
+
+.local {
+  text-align: left;
+}
+
+.local-footer {
+  justify-content: flex-end;
+}
+
+/* No server yet: where to get one, under the empty state. */
+.local-get {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--sp-xs) var(--sp-md);
+  padding: 0 var(--sp-xs);
+  font-size: var(--fs-md);
+  color: var(--text-secondary);
+}
+
+/* In place of the connect chooser, like the API-key list: the setup's
+   centred title, the server list left-aligned under it. */
+.local--inline {
+  flex: none;
+  width: 100%;
+  padding: 0;
+  text-align: center;
+  gap: var(--sp-md);
+  align-items: center;
+}
+
+.local-inline-body {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-lg);
+  text-align: left;
 }

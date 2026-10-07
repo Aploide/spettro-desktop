@@ -18,7 +18,15 @@ interface Panel {
   pty: IPty
   projectPath: string
   alive: boolean
+  /** The shell's own process name ("bash", "powershell.exe"). */
+  shellName: string
+  /** Output held back while a batch window is open (see create). */
+  pendingOutput: string
+  outputTimer: ReturnType<typeof setTimeout> | null
 }
+
+/** The longest pty output waits to be batched into one message. */
+const OUTPUT_BATCH_MS = 8
 
 export class TerminalManager {
   private readonly panels = new Map<string, Panel>()
@@ -55,18 +63,56 @@ export class TerminalManager {
       env
     })
 
-    const panel: Panel = { pty, projectPath, alive: true }
+    const panel: Panel = {
+      pty,
+      projectPath,
+      alive: true,
+      shellName: shell.split(/[\\/]/).pop() ?? shell,
+      pendingOutput: '',
+      outputTimer: null
+    }
     this.panels.set(id, panel)
 
+    // Output goes to the window at most once per OUTPUT_BATCH_MS. A busy
+    // command makes the pty deliver hundreds of small chunks a second, and
+    // each one as its own message is a bridge copy and an xterm write; the
+    // first chunk after a quiet spell still goes at once, so an echoed
+    // keystroke is never held back.
     pty.onData((data) => {
+      if (panel.outputTimer) {
+        panel.pendingOutput += data
+        return
+      }
       this.push({ type: 'terminal-data', termId: id, data })
+      this.holdOutput(id, panel)
     })
     pty.onExit(({ exitCode }) => {
+      this.flushOutput(id, panel)
       panel.alive = false
       this.push({ type: 'terminal-exit', termId: id, exitCode })
     })
 
     return id
+  }
+
+  /** Opens a batch window: output arriving in it waits for its end. */
+  private holdOutput(id: string, panel: Panel): void {
+    panel.outputTimer = setTimeout(() => {
+      panel.outputTimer = null
+      // Something arrived meanwhile: send it, and batch whatever follows.
+      if (panel.pendingOutput !== '' && this.flushOutput(id, panel)) this.holdOutput(id, panel)
+    }, OUTPUT_BATCH_MS)
+  }
+
+  /** Sends any held-back output now; true when there was some. */
+  private flushOutput(id: string, panel: Panel): boolean {
+    if (panel.outputTimer) clearTimeout(panel.outputTimer)
+    panel.outputTimer = null
+    if (panel.pendingOutput === '') return false
+    const data = panel.pendingOutput
+    panel.pendingOutput = ''
+    this.push({ type: 'terminal-data', termId: id, data })
+    return true
   }
 
   write(id: string, data: string): void {
@@ -90,6 +136,8 @@ export class TerminalManager {
     const panel = this.panels.get(id)
     if (!panel) return
     this.panels.delete(id)
+    if (panel.outputTimer) clearTimeout(panel.outputTimer)
+    panel.outputTimer = null
     if (panel.alive) {
       panel.alive = false
       try {
@@ -98,6 +146,27 @@ export class TerminalManager {
         // Already gone.
       }
     }
+  }
+
+  /** Whether something other than the shell itself is in the foreground
+   *  (node-pty names the foreground process) — closing the tab would kill
+   *  it, which deserves a question first. */
+  hasProcess(id: string): boolean {
+    const panel = this.panels.get(id)
+    if (!panel || !panel.alive) return false
+    try {
+      const running = (panel.pty.process ?? '').split(/[\\/]/).pop() ?? ''
+      return running !== '' && running !== panel.shellName
+    } catch {
+      return false
+    }
+  }
+
+  /** Tabs with a command running in them, across every project. */
+  runningCount(): number {
+    let count = 0
+    for (const id of this.panels.keys()) if (this.hasProcess(id)) count += 1
+    return count
   }
 
   /** termIds scoped to one project — per-project tabs, doc 17. */

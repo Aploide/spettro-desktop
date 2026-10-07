@@ -10,9 +10,10 @@
 // elements by hand, never through dangerouslySetInnerHTML, so raw HTML in
 // the source is inert (rendered as plain text).
 
-import { Fragment, memo, useMemo, useRef, useState } from 'react'
+import { Fragment, memo, useMemo } from 'react'
 import type { JSX, ReactNode } from 'react'
 import { Lexer, type Token, type Tokens } from 'marked'
+import { CopyButton } from './TranscriptActions'
 import './transcript.css'
 
 export function MarkdownText({ source }: { source: string }): JSX.Element {
@@ -278,66 +279,16 @@ function renderInlineToken(t: Token): ReactNode {
 // ---------------------------------------------------------------------------
 
 function CodeBlock({ lang, code }: { lang?: string; code: string }): JSX.Element {
-  const [copied, setCopied] = useState(false)
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
-
   const label = lang && lang.trim() !== '' ? lang.trim().split(/\s+/)[0] : 'code'
-
-  const copy = (): void => {
-    void navigator.clipboard.writeText(code)
-    setCopied(true)
-    if (timer.current) clearTimeout(timer.current)
-    timer.current = setTimeout(() => setCopied(false), 1200)
-  }
-
   return (
     <div className="md-codeblock">
       <div className="md-codeblock-head">
         <span className="md-codeblock-lang">{label}</span>
-        <button className="md-copy" type="button" title="Copy code" onClick={copy}>
-          {copied ? <CheckIcon /> : <CopyIcon />}
-        </button>
+        <CopyButton text={code} label="Copy" className="md-copy" />
       </div>
       <pre className="md-codeblock-body">
         <code>{code}</code>
       </pre>
     </div>
-  )
-}
-
-function CopyIcon(): JSX.Element {
-  return (
-    <svg
-      width="10"
-      height="10"
-      viewBox="0 0 16 16"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <rect x="5.5" y="1.5" width="8" height="10" rx="1.5" />
-      <path d="M10.5 14.5h-7a1 1 0 0 1-1-1v-9" />
-    </svg>
-  )
-}
-
-function CheckIcon(): JSX.Element {
-  return (
-    <svg
-      width="10"
-      height="10"
-      viewBox="0 0 16 16"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <path d="M3 8.5l3.2 3.2L13 4.5" />
-    </svg>
   )
 }

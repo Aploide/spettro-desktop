@@ -6,6 +6,9 @@ import type {
   ACPCommand,
   ACPConfigOption,
   ACPPlanEntry,
+  ACPStopReason,
+  ACPToolImage,
+  ACPToolLocation,
   ACPToolStatus,
   ACPUsage,
   JSONValue
@@ -28,16 +31,48 @@ export interface ImageAttachmentDTO {
 
 export type ChatRole = 'user' | 'assistant' | 'reasoning' | 'notice'
 
+/** Where a message sent while the agent was working stands. Such a message
+ *  steers the running turn instead of starting one: `sending` until the CLI
+ *  acknowledges it, `queued` until the agent reaches its next step and reads
+ *  it, then `delivered`. */
+export type SteeringState = 'sending' | 'queued' | 'delivered'
+
 export interface ChatMessage {
   id: string
   role: ChatRole
   /** Only meaningful when role === 'notice'. */
   noticeIsError?: boolean
+  /** Only on error notices: this error is how a turn ended, so "Try again"
+   *  (resending the prompt) is the answer to it. A failed settings change is
+   *  an error too, but resending the last prompt would not fix it. */
+  endsTurn?: boolean
   text: string
+  /** Only on error notices: the error exactly as it arrived, shown behind
+   *  "Show details" — `text` is the sentence a person can act on. */
+  detail?: string
   attachments: ImageAttachmentDTO[]
   isStreaming: boolean
   /** ms since epoch */
   timestamp: number
+  /** Only on user messages sent mid-turn. */
+  steering?: SteeringState
+  /** Assistant only: the CLI's own reply to one of its slash commands
+   *  (/help, /ultra, /models…) — column-aligned plain text, which markdown
+   *  would fold into one paragraph — shown as written. */
+  plain?: boolean
+  /** Notice only: `/clear` emptied the agent's memory here. Drawn as a
+   *  divider, with everything above it dimmed: the transcript still shows
+   *  those messages, but Spettro no longer remembers them. */
+  contextCleared?: boolean
+  /** User messages only: the project files @-mentioned in it (relative
+   *  paths), so Try again and Edit & resend send them as files again rather
+   *  than as the bare text "@src/x.ts". */
+  mentions?: string[]
+  /** Reasoning only: when its first and latest chunks arrived (ms since
+   *  epoch), so a finished one can say "Thought for 12s". Absent on
+   *  reasoning saved before they were kept. */
+  startedAt?: number
+  endedAt?: number
 }
 
 export interface ToolDiff {
@@ -54,9 +89,24 @@ export interface ToolCallItem {
   status: ACPToolStatus
   output: string
   diffs: ToolDiff[]
-  locations: string[]
+  /** Files the call touches. Sessions saved before line numbers were kept
+   *  stored bare paths; ChatSession.restore upgrades them. */
+  locations: ACPToolLocation[]
+  /** Images the tool returned (screenshots, viewed images), at most four. */
+  images?: ACPToolImage[]
+  /** The tool's own result text (`rawOutput.output`), which `output` — the
+   *  card's display excerpt — may have clipped. */
+  rawOutput?: string
+  /** The user turned it down in an approval card. The CLI then fails the
+   *  call, but that failure is the user's answer, not an error: the row says
+   *  "denied", calmly, rather than "failed" in red. */
+  denied?: boolean
   /** The full ACP rawInput re-encoded as JSON — the reliable argument source. */
   argsJSON?: string
+  /** A workflow card's structured state (`_meta["spettro.app/workflow"]`),
+   *  replaced whole by every update that carries one. Absent on every other
+   *  call, and on workflow cards from a CLI that predates it. */
+  workflow?: JSONValue
   timestamp: number
 }
 
@@ -85,6 +135,28 @@ export interface ChatSummary {
   isBusy: boolean
   messageCount: number
   preview: string
+  /** A turn finished while another chat was selected; cleared on open. */
+  unread: boolean
+}
+
+/** How the most recent turn ended and what it cost. Token fields are 0 when
+ *  the agent reported no accounting. */
+export interface TurnSummary {
+  stopReason: ACPStopReason | 'error'
+  inputTokens: number
+  outputTokens: number
+  cachedReadTokens: number
+  totalTokens: number
+  durationMs: number
+}
+
+/** A conversation the CLI has on disk that no chat here is linked to — one
+ *  started in the terminal, say — offered for import. */
+export interface CLISessionEntry {
+  sessionId: string
+  title: string | null
+  /** ms since epoch, when the CLI reported one. */
+  updatedAt: number | null
 }
 
 /** Full detail the renderer holds for an open chat. */
@@ -102,6 +174,10 @@ export interface ChatDetail {
   commands: ACPCommand[]
   plan: ACPPlanEntry[]
   usage: ACPUsage | null
+  /** Live-only: null until a turn finishes in this run of the app. */
+  lastTurn: TurnSummary | null
+  /** Every turn's tokens added up, across relaunches. */
+  sessionTokens: number
 }
 
 /** On-disk snapshot (sessions.json). Matches the remote-protocol StoredSession
@@ -118,6 +194,8 @@ export interface StoredSession {
   items: TranscriptItem[]
   configOptions: ACPConfigOption[]
   pendingConfigChanges: Record<string, JSONValue>
+  /** Absent in sessions saved before it was tracked. */
+  sessionTokens?: number
 }
 
 // ---------------------------------------------------------------------------
@@ -163,8 +241,13 @@ export interface RemoteHostState {
   pairingOpen: boolean
   /** spettro-pair:// URL while a pairing window is open. */
   pairingURL: string | null
-  /** QR code for pairingURL as a data: URL (SVG/PNG). */
+  /** QR code for pairingURL as a data: URL (SVG/PNG). Null when it couldn't
+   *  be drawn — the pairing link is still offered to copy. */
   pairingQR: string | null
+  /** When the open code stops working (ms since epoch). */
+  pairingExpiresAt: number | null
+  /** The last code ran out on its own (not closed with Done). */
+  pairingExpired: boolean
   devices: PairedDeviceDTO[]
   connectedDeviceIds: string[]
 }
@@ -184,13 +267,59 @@ export interface GitStat {
   files: { path: string; added: number; removed: number }[]
 }
 
+/** The app's colour scheme: follow the OS, or pin one. Persisted in prefs and
+ *  applied in main through nativeTheme.themeSource, which is what the
+ *  renderer's prefers-color-scheme media queries follow. */
+export type Appearance = 'system' | 'light' | 'dark'
+
+export function isAppearance(value: unknown): value is Appearance {
+  return value === 'system' || value === 'light' || value === 'dark'
+}
+
+/** The app's one accent colour: a soft lilac, or none at all (Monochrome, where
+ *  the accent is the ink colour). Persisted in prefs and applied as
+ *  `data-accent` on <html>, which theme.css keys its accent tokens on. The
+ *  neutrals, the semantic colours and Ultra's fire are the same in both. */
+export type Accent = 'lilac' | 'mono'
+
+export const DEFAULT_ACCENT: Accent = 'lilac'
+
+export function isAccent(value: unknown): value is Accent {
+  return value === 'lilac' || value === 'mono'
+}
+
+/** Where a CLI install stands, as setup draws it: a determinate bar over
+ *  the installer's phases, then done — or why it failed. A cancelled install
+ *  goes back to idle; that is not a failure to explain. */
+export type InstallStage = 'idle' | 'checking' | 'downloading' | 'verifying' | 'installing' | 'done' | 'failed'
+
+export type InstallFailureReason =
+  | { kind: 'missing-tool'; tool: string }
+  | { kind: 'timeout' }
+  | { kind: 'launch' }
+  | { kind: 'failed' }
+
+export interface InstallState {
+  stage: InstallStage
+  failure: InstallFailureReason | null
+}
+
 export interface AppStateDTO {
   phase: Phase
+  /** 'reconnecting' while the engine restarts underneath a shell that is
+   *  already on screen (a crash, Restart engine, a CLI update): the window
+   *  keeps everything it shows — drafts, scroll, terminals — and only Send
+   *  waits. Phases before the shell first appeared still use `phase`. */
+  connection: 'ok' | 'reconnecting'
   cli: CLIInfo | null
   agentVersion: string | null
   selectedSessionId: string | null
   sessions: ChatSummary[]
+  /** A one-off message for the user. Shown once per `bannerNonce`, so the
+   *  same message twice (the same bad path, picked again) shows twice. */
   banner: string | null
+  bannerNonce: number
+  install: InstallState
   installLog: string[]
   agentLog: string[]
   subscription: SubscriptionState
@@ -205,4 +334,30 @@ export interface AppStateDTO {
    *  the renderer never has to guess at the home directory. */
   defaultProjectPath: string
   recentProjects: string[]
+  /** Recent and session folders that no longer exist, so the folder menu
+   *  can grey them out and the new-session view can refuse to start in one
+   *  instead of failing on the first message. */
+  missingProjects: string[]
+  /** The user's home folder. Starting a session there (or at /) hands the
+   *  agent everything the user owns, which the new-session view warns about. */
+  homePath: string
+  appearance: Appearance
+  accent: Accent
+  /** Nothing can run a prompt: no provider, no local server, not signed in
+   *  — known for certain, never guessed (an unloaded list is not "none"). */
+  noModel: boolean
+  /** "Continue without" on the setup's connect step, remembered. */
+  providerSetupSkipped: boolean
+  notifyWhenDone: boolean
+  /** Broad folders (home, /) the user has said "Continue" for. */
+  approvedBroadFolders: string[]
+  /** The options new sessions start with (the last set any session had):
+   *  what Settings shows as the defaults, e.g. the permission level. */
+  defaultConfigOptions: ACPConfigOption[]
+  /** Chats with a turn running — what quitting or updating would stop. */
+  busyTasks: number
 }
+
+/** The folder in the home folder where "New project folder…" makes
+ *  projects (main/model/projectFolder.ts). */
+export const PROJECTS_FOLDER = 'Spettro Projects'

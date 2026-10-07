@@ -8,7 +8,9 @@ import { join } from 'path'
 import { EVENT_CHANNEL, INVOKE_CHANNEL, type MainEvent, type RendererApi } from '../shared/ipc'
 import type { AppModel } from './model/appModel'
 import { gitStat } from './model/gitStat'
+import { listProjectFiles } from './model/projectFiles'
 import { loadMemory, saveMemory } from './model/memoryStore'
+import { RendererEventQueue } from './rendererEvents'
 import type { RemoteHost } from './remote/host'
 import type { TerminalManager } from './terminal/panels'
 
@@ -26,6 +28,24 @@ export function registerIpc(
 ): IpcHandle {
   const termIds = new Set<string>()
 
+  // The model's events, coalesced per frame and trimmed to what the renderer
+  // holds (rendererEvents.ts). A page (re)load — or a new window — starts
+  // with an empty store, so what it held is forgotten then.
+  let watched: Electron.WebContents | null = null
+  const currentWindow = (): BrowserWindow | null => {
+    const win = getWindow()
+    if (!win || win.isDestroyed()) return null
+    if (win.webContents !== watched) {
+      watched = win.webContents
+      queue.reset()
+      win.webContents.on('did-start-loading', () => queue.reset())
+    }
+    return win
+  }
+  const queue = new RendererEventQueue((event) => {
+    currentWindow()?.webContents.send(EVENT_CHANNEL, event)
+  })
+
   /** Keep AppStateDTO.remote in sync after direct remote-host calls; the
    *  host also pushes through onStateChanged, but a synchronous refresh
    *  makes the invoke's own app-state echo immediate. */
@@ -36,13 +56,28 @@ export function registerIpc(
   const api: RendererApi = {
     // -- Bootstrap / state --------------------------------------------------
     getState: async () => model.getState(),
-    getChat: async (chatId) => model.getChatDetail(chatId),
+    getChat: async (chatId) => {
+      currentWindow()
+      const chat = model.getChatDetail(chatId)
+      // Whatever is queued goes first: the detail returned is newer.
+      if (chat) queue.markLoaded(chatId)
+      return chat
+    },
 
     // -- Lifecycle ----------------------------------------------------------
     retryBootstrap: async () => model.retryBootstrap(),
     installCLI: async () => model.installCLI(),
+    cancelInstall: async () => model.cancelInstall(),
     useExplicitCLIPath: async (path) => model.useExplicitPath(path),
     chooseProject: async (path) => model.chooseProject(path),
+    rememberProject: async (path) => model.rememberProject(path),
+    removeRecentProject: async (path) => model.removeRecentProject(path),
+    approveBroadFolder: async (path) => model.approveBroadFolder(path),
+    createProjectFolder: async (name) => model.createProjectFolder(name),
+    setAppearance: async (mode) => model.setAppearance(mode),
+    setAccent: async (accent) => model.setAccent(accent),
+    setNotifyWhenDone: async (on) => model.setNotifyWhenDone(on),
+    setDefaultOption: (configId, value) => model.setDefaultOption(configId, value),
     pickFolder: async () => {
       const win = getWindow()
       const options: Electron.OpenDialogOptions = {
@@ -85,11 +120,16 @@ export function registerIpc(
     closeChat: async (chatId) => model.closeChat(chatId),
     togglePin: async (chatId) => model.togglePin(chatId),
     toggleArchive: async (chatId) => model.toggleArchive(chatId),
+    renameChat: async (chatId, title) => model.renameChat(chatId, title),
     selectSession: async (chatId) => model.selectSession(chatId),
+    listCLISessions: (projectPath) => model.listCLISessions(projectPath),
+    importCLISession: (sessionId, projectPath) => model.importCLISession(sessionId, projectPath),
 
     // -- Prompting ----------------------------------------------------------
-    send: async (chatId, text, attachments) => model.send(chatId, text, attachments, null),
+    send: async (chatId, text, attachments, mentions) =>
+      model.send(chatId, text, attachments, null, Array.isArray(mentions) ? mentions : []),
     cancel: async (chatId) => model.cancel(chatId),
+    retryLast: async (chatId) => model.retryLast(chatId),
 
     // -- Config -------------------------------------------------------------
     setSelectOption: (chatId, configId, value) => model.setConfigValue(chatId, configId, value),
@@ -119,6 +159,7 @@ export function registerIpc(
       terminals.dispose(termId)
     },
     terminalList: async (projectPath) => terminals.list(projectPath),
+    terminalHasProcess: async (termId) => terminals.hasProcess(termId),
 
     // -- Remote host --------------------------------------------------------
     remoteSetEnabled: async (enabled) => {
@@ -175,8 +216,8 @@ export function registerIpc(
     // Results land in AppStateDTO.update (the manager pushes app-state as it
     // downloads and installs), so these resolve with nothing.
     checkForUpdates: () => model.checkForUpdates(),
-    installAppUpdate: () => model.installAppUpdate(),
-    installCLIUpdate: () => model.installCLIUpdate(),
+    installAppUpdate: (whenIdle) => model.installAppUpdate(whenIdle === true),
+    installCLIUpdate: (whenIdle) => model.installCLIUpdate(whenIdle === true),
 
     // -- Misc ---------------------------------------------------------------
     openExternal: async (url) => {
@@ -185,7 +226,8 @@ export function registerIpc(
     showItemInFolder: async (path) => {
       shell.showItemInFolder(path)
     },
-    gitStat: (projectPath) => gitStat(projectPath)
+    gitStat: (projectPath) => gitStat(projectPath),
+    listProjectFiles: (projectPath) => listProjectFiles(projectPath)
   }
 
   ipcMain.handle(INVOKE_CHANNEL, (_event, method: string, ...args: unknown[]) => {
@@ -197,16 +239,16 @@ export function registerIpc(
   })
 
   const onEvent = (event: MainEvent): void => {
-    const win = getWindow()
-    if (win && !win.isDestroyed()) {
-      win.webContents.send(EVENT_CHANNEL, event)
-    }
+    // Noticing a new window or a reload before queueing, so an event for the
+    // new page isn't dropped as one for the old.
+    if (currentWindow()) queue.push(event)
   }
   model.on('event', onEvent)
 
   return {
     shutdown: () => {
       model.off('event', onEvent)
+      queue.dispose()
       ipcMain.removeHandler(INVOKE_CHANNEL)
       for (const id of termIds) {
         try {

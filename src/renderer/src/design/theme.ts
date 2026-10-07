@@ -1,37 +1,37 @@
 // JS-side helpers for the design system (companion to theme.css).
 // Port of Theme.modeColor from Theme.swift.
 
-const ACCENT = 'var(--accent)'
+/** The accent as text (darker than the fill on light), since a mode tint is
+ *  mostly a chip's label colour. */
+const ACCENT = 'var(--accent-text)'
 
 /** Per-agent-mode tint, matching modeColor() in the TUI's styles.go. Accepts a
- *  manifest color name ("green", "cyan", …) or a mode id ("plan", "coding"). */
-export function modeColor(name: string): string {
+ *  manifest color name ("green", "cyan", …) or a mode id ("plan", "coding").
+ *  Returns a `var(--mode-*)` reference rather than a colour, so the value
+ *  follows the scheme: theme.css holds a tuned light and dark value for each,
+ *  and an inline style built from this re-tints itself on a theme switch.
+ *  Anything unrecognised gets `fallback`. */
+export function modeColor(name: string, fallback: string = ACCENT): string {
   switch (name.toLowerCase()) {
     case 'blue':
-      return '#a78bfa'
     case 'green':
-      return '#34d399'
     case 'cyan':
-      return '#60a5fa'
     case 'yellow':
-      return '#f59e0b'
     case 'magenta':
-      return '#c084fc'
     case 'purple':
-      return '#bd93f9'
     case 'red':
-      return '#ef4444'
+      return `var(--mode-${name.toLowerCase()})`
     case 'plan':
-      return '#bd93f9'
+      return 'var(--mode-plan)'
     case 'planning':
-      return '#a78bfa'
+      return 'var(--mode-blue)'
     case 'coding':
     case 'code':
-      return '#34d399'
+      return 'var(--mode-coding)'
     case 'chat':
     case 'ask':
-      return '#60a5fa'
+      return 'var(--mode-ask)'
     default:
-      return ACCENT
+      return fallback
   }
 }

@@ -22,6 +22,14 @@ const WIDTH = 1280
 // Tall enough that every scene lands in one frame; the page is short enough
 // that a fixed height beats scroll-stitching.
 const HEIGHT = Number(process.env.SHOT_HEIGHT || 5200)
+// The app scenes are the window itself, so they are shot at the real
+// window's default size rather than as a tall page.
+const APP_HEIGHT = Number(process.env.SHOT_APP_HEIGHT || 840)
+// The accent every page is shot in (lilac | mono; accentPrelude.ts reads it
+// from the URL). Unset leaves the page in the default, and the file names as
+// they always were; set, the accent goes into the name too
+// (app-chat-mono-dark.png), so one output folder can hold both.
+const ACCENT = process.env.SHOT_ACCENT || ''
 
 // Destroying a shot's window leaves zero windows open, and Electron's default
 // window-all-closed handler quits the app on Linux and Windows. That ended the
@@ -32,7 +40,10 @@ app.on('window-all-closed', () => {})
 
 app.disableHardwareAcceleration()
 app.commandLine.appendSwitch('disable-gpu')
-app.commandLine.appendSwitch('force-device-scale-factor', '1')
+// SHOT_SCALE renders at a higher pixel density, for looking closely at
+// something small (the thinking slider's meteor is a few pixels tall).
+const SCALE = Number(process.env.SHOT_SCALE || 1)
+app.commandLine.appendSwitch('force-device-scale-factor', String(SCALE))
 
 /**
  * Loads a page and waits for it to actually finish.
@@ -57,7 +68,7 @@ async function resizeViewport(win, height) {
     await contents.debugger.sendCommand('Emulation.setDeviceMetricsOverride', {
       width: WIDTH,
       height,
-      deviceScaleFactor: 1,
+      deviceScaleFactor: SCALE,
       mobile: false
     })
     // One frame for the new metrics to be laid out and painted.
@@ -89,27 +100,45 @@ function load(win, url) {
 
 async function shoot(theme) {
   nativeTheme.themeSource = theme
+  // A scene id prefixed "studio", "chrome" or "app" targets that harness page
+  // instead of the scene gallery; anything after a colon is its mode.
+  const studio = SCENE.startsWith('studio')
+  const chrome = SCENE.startsWith('chrome')
+  const appScene = SCENE.startsWith('app')
+  const height = appScene ? APP_HEIGHT : HEIGHT
   const win = new BrowserWindow({
     width: WIDTH,
-    height: HEIGHT,
+    height,
     show: false,
     useContentSize: true,
     webPreferences: { offscreen: true, backgroundThrottling: false }
   })
-  // A scene id prefixed "studio" targets the studio harness page instead of
-  // the scene gallery; anything after a colon is its mode.
-  const studio = SCENE.startsWith('studio')
-  const chrome = SCENE.startsWith('chrome')
-  const page = studio ? 'studio.html' : chrome ? 'chrome.html' : 'index.html'
-  const query = studio || chrome
+  const page = studio ? 'studio.html' : chrome ? 'chrome.html' : appScene ? 'app.html' : 'index.html'
+  const query = studio || chrome || appScene
     ? SCENE.includes(':')
       ? `?mode=${SCENE.split(':')[1]}`
       : ''
     : SCENE
       ? `?scene=${SCENE}`
       : ''
-  const url = `file://${path.join(DIST, page)}${query}`
+  const accentQuery = ACCENT ? `${query ? '&' : '?'}accent=${ACCENT}` : ''
+  const url = `file://${path.join(DIST, page)}${query}${accentQuery}`
   await load(win, url)
+  // An offscreen window never has the focus, so a page in it never sees a
+  // focus event: the composer's menus (slash commands, @-files), which open
+  // only while the field is focused, could not be photographed at all. The
+  // app's scenes run with the page told it is focused, as it is on a desk.
+  // (Turned on once the page has loaded: before that there is no page for
+  // the command to reach, and it never answers. The scenes that type wait
+  // for it.)
+  if (appScene) {
+    try {
+      if (!win.webContents.debugger.isAttached()) win.webContents.debugger.attach('1.3')
+      await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true })
+    } catch (err) {
+      console.warn(`focus emulation unavailable (${err.message})`)
+    }
+  }
   // One rAF is not enough: fonts and the CSS transitions on the cards settle
   // a frame or two later, and a screenshot taken before they do is a lie.
   await new Promise((r) => setTimeout(r, Number(process.env.SHOT_WAIT || 1200)))
@@ -122,7 +151,9 @@ async function shoot(theme) {
   // again, which would have made the artifacts silently inconsistent with the
   // ones taken locally. Overriding the device metrics through the debugger
   // sets the viewport directly and is bounded by nothing.
-  await resizeViewport(win, Math.max(full, HEIGHT))
+  // The app fills its window by design (height: 100%), so its scroll height
+  // is the window's: it keeps the window size rather than growing a page.
+  await resizeViewport(win, appScene ? height : Math.max(full, height))
   const image = await win.webContents.capturePage()
   fs.mkdirSync(OUT, { recursive: true })
   // A scene id can carry a mode after a colon ("studio:broken"), and a colon
@@ -130,7 +161,7 @@ async function shoot(theme) {
   // filename. Sanitised here rather than at the call site so no caller has to
   // remember.
   const slug = (SCENE || 'all').replace(/[^a-zA-Z0-9._-]+/g, '-')
-  const file = path.join(OUT, `${slug}-${theme}.png`)
+  const file = path.join(OUT, `${slug}${ACCENT ? `-${ACCENT}` : ''}-${theme}.png`)
   fs.writeFileSync(file, image.toPNG())
   console.log(`${file}  ${JSON.stringify(image.getSize())}  page=${full}px`)
   win.destroy()

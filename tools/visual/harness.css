@@ -6,7 +6,7 @@ body,
   margin: 0;
   background: var(--canvas);
   color: var(--text-primary);
-  font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  font-family: var(--font-sans);
 }
 .hz-root {
   display: flex;
@@ -32,7 +32,7 @@ body,
 }
 .hz-scene-head code {
   font-size: 11px;
-  color: var(--accent);
+  color: var(--accent-text);
 }
 .hz-scene-body {
   display: flex;
@@ -100,4 +100,18 @@ body,
   flex-direction: column;
   gap: 6px;
   max-width: 760px;
+}
+
+/* The thinking slider's panels, as the popover draws them but inline. */
+.hz-panels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 24px 28px;
+}
+.hz-popover {
+  position: static;
+}
+.hz-chips {
+  display: flex;
+  gap: 12px;
 }

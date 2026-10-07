@@ -28,5 +28,7 @@
   // Only the tests are listed. TypeScript pulls in whatever they import, and
   // the app's own sources are already covered by the other two configs — so
   // this checks the tests against the code without re-reporting the code.
-  "include": ["tests/**/*", "src/preload/index.d.ts", "vitest.config.ts"]
+  // The renderer's env.d.ts comes along for its asset imports (a view that
+  // shows the app icon imports a .png).
+  "include": ["tests/**/*", "src/preload/index.d.ts", "src/renderer/src/env.d.ts", "vitest.config.ts"]
 }

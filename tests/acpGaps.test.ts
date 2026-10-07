@@ -1,0 +1,1109 @@
+// The main process against the ACP surface the CLI actually speaks, driven
+// through the real pipe: AcpConnection parses every line exactly as it does in
+// the app, and only the subprocess is faked. Each case is a way the app used
+// to show something wrong, or wedge, while every screenshot looked fine — a
+// permission prompt nobody could answer, "Internal error" instead of the
+// reason, a reopened chat that quietly forgot its conversation.
+
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
+import {
+  AcpAgent,
+  AcpConnection,
+  parseAgentCapabilities,
+  parseConfigOptions,
+  parseToolCallEvent
+} from '@main/acp'
+import { AppModel } from '@main/model/appModel'
+import type { ChatSession } from '@main/model/chatSession'
+import type { ACPPermissionRequest, JSONValue } from '@shared/acp'
+import type { MainEvent } from '@shared/ipc'
+import type { StoredSession } from '@shared/model'
+import {
+  agentChunk,
+  compactRequest,
+  configOptionUpdate,
+  configOptions,
+  currentModeUpdate,
+  initializeResult,
+  permissionAttached,
+  permissionFresh,
+  promptResult,
+  rpcError,
+  sessionList,
+  STEERING_QUEUED_TEXT,
+  steeringDeliveredText,
+  userChunk
+} from './wire'
+
+// ---------------------------------------------------------------------------
+// A fake `spettro --acp` on the far side of a real AcpConnection
+// ---------------------------------------------------------------------------
+
+type Message = { id?: number | string; method?: string; params?: JSONValue; result?: JSONValue }
+type Handler = (params: JSONValue) => JSONValue | Promise<JSONValue>
+
+/** Thrown from a handler to answer with a JSON-RPC error instead. */
+class Reply extends Error {
+  constructor(readonly error: { code: number; message: string; data?: JSONValue }) {
+    super(error.message)
+  }
+}
+
+class FakeAgent {
+  readonly conn = new AcpConnection({ executablePath: 'spettro', workingDirectory: '/' })
+  /** Everything the app wrote, in order. */
+  readonly sent: Message[] = []
+  readonly handlers: Record<string, Handler> = {}
+
+  constructor() {
+    const internals = this.conn as unknown as { running: boolean; child: unknown }
+    internals.running = true
+    internals.child = {
+      stdin: { write: (line: string) => this.receive(JSON.parse(line) as Message) },
+      exitCode: null,
+      killed: false,
+      kill: () => undefined
+    }
+  }
+
+  /** What the app sent for `method`, requests and notifications alike. */
+  calls(method: string): Message[] {
+    return this.sent.filter((m) => m.method === method)
+  }
+
+  /** A line from the agent, through the connection's own parser. */
+  push(message: object): void {
+    ;(this.conn as unknown as { handleLine(text: string): void }).handleLine(
+      JSON.stringify({ jsonrpc: '2.0', ...message })
+    )
+  }
+
+  update(sessionId: string, update: JSONValue): void {
+    this.push({ method: 'session/update', params: { sessionId, update } })
+  }
+
+  /** An agent → app request, e.g. session/request_permission. */
+  ask(id: number, method: string, params: JSONValue): void {
+    this.push({ id, method, params })
+  }
+
+  private receive(message: Message): void {
+    this.sent.push(message)
+    if (message.method === undefined || message.id === undefined) return
+    const handler = this.handlers[message.method]
+    if (!handler) return
+    const id = message.id
+    Promise.resolve()
+      .then(() => handler(message.params ?? null))
+      .then(
+        (result) => this.push({ id, result }),
+        (err: unknown) => {
+          if (err instanceof Reply) this.push({ id, error: err.error })
+          else throw err
+        }
+      )
+  }
+}
+
+/** A promise someone else settles. */
+function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((r) => (resolve = r))
+  return { promise, resolve }
+}
+
+/** Lets every queued continuation run. */
+async function settle(): Promise<void> {
+  for (let i = 0; i < 20; i++) await new Promise((r) => setImmediate(r))
+}
+
+let dir: string
+let fake: FakeAgent
+let model: AppModel
+let events: MainEvent[]
+let remote: { event: string; args: unknown[] }[]
+
+/** An AppModel whose live agent is `fake`, wired exactly as connect() wires
+ *  a real one. `stored` is put on disk first and loaded, as at launch. */
+function liveModel(stored: StoredSession[] = []): void {
+  dir = mkdtempSync(join(tmpdir(), 'spettro-acp-'))
+  if (stored.length > 0) writeFileSync(join(dir, 'sessions.json'), JSON.stringify(stored))
+  model = new AppModel({ userDataDir: dir, appVersion: '0.0.0-test' })
+  const internals = model as unknown as {
+    connection: AcpConnection
+    agent: AcpAgent
+    liveConnectionToken: number
+    phase: { kind: string }
+    wire(connection: AcpConnection, token: number): void
+    loadPersistedSessions(): void
+  }
+  internals.loadPersistedSessions()
+  const agent = new AcpAgent(fake.conn)
+  agent.capabilities = parseAgentCapabilities(initializeResult())
+  internals.connection = fake.conn
+  internals.agent = agent
+  internals.liveConnectionToken = 1
+  internals.phase = { kind: 'ready' }
+  internals.wire(fake.conn, 1)
+  events = []
+  remote = []
+  model.on('event', (e: MainEvent) => events.push(e))
+  for (const name of ['permission-resolved', 'question-resolved', 'chat-state']) {
+    model.on(name, (...args: unknown[]) => remote.push({ event: name, args }))
+  }
+}
+
+/** The permission queue as the renderer last heard it. */
+function shownPermissions(): ACPPermissionRequest[] {
+  const last = events.filter((e) => e.type === 'permissions').at(-1)
+  return last && last.type === 'permissions' ? last.requests : []
+}
+
+/** A chat with a live ACP session `s1`. */
+async function liveChat(): Promise<ChatSession> {
+  fake.handlers['session/new'] = () => ({ sessionId: 's1', configOptions: [] })
+  const session = model.newChat(dir)
+  await settle()
+  expect(session.acpSessionId).toBe('s1')
+  return session
+}
+
+function stored(id: string, acpSessionId: string | null): StoredSession {
+  return {
+    id,
+    acpSessionId,
+    projectPath: '/work/acme',
+    title: id,
+    createdAt: 1_700_000_000_000,
+    updatedAt: 1_700_000_000_000,
+    isPinned: false,
+    isArchived: false,
+    items: [
+      {
+        kind: 'message',
+        message: {
+          id: `m-${id}`,
+          role: 'user',
+          text: 'hello',
+          attachments: [],
+          isStreaming: false,
+          timestamp: 1_700_000_000_000
+        }
+      }
+    ],
+    configOptions: [],
+    pendingConfigChanges: {}
+  }
+}
+
+function notices(session: ChatSession): string[] {
+  return session.items.flatMap((i) =>
+    i.kind === 'message' && i.message.role === 'notice' ? [i.message.text] : []
+  )
+}
+
+beforeEach(() => {
+  fake = new FakeAgent()
+})
+
+afterEach(() => {
+  rmSync(dir, { recursive: true, force: true })
+})
+
+// ---------------------------------------------------------------------------
+
+describe('JSON-RPC errors', () => {
+  it('carry the reason from data.error, not the SDK’s category', async () => {
+    liveModel()
+    fake.handlers['x/fail'] = () => {
+      throw new Reply(rpcError('invalid api key for provider anthropic'))
+    }
+    await expect(fake.conn.request('x/fail', {})).rejects.toMatchObject({
+      kind: 'rpc',
+      code: -32603,
+      message: 'invalid api key for provider anthropic',
+      data: { error: 'invalid api key for provider anthropic' }
+    })
+  })
+
+  it('reach the chat as the reason when a turn fails', async () => {
+    liveModel()
+    const session = await liveChat()
+    fake.handlers['session/prompt'] = () => {
+      throw new Reply(rpcError('rate limit exceeded, retry in 20s'))
+    }
+    model.send(session.id, 'hi', [])
+    await settle()
+    // Said in words, with the reason as it came kept behind "Show details".
+    expect(notices(session)).toEqual(['You’ve hit the provider’s rate limit. Wait a minute, then try again.'])
+    const notice = session.items.at(-1)
+    expect(notice?.kind === 'message' && notice.message.detail).toBe('rate limit exceeded, retry in 20s')
+    expect(session.isBusy).toBe(false)
+  })
+})
+
+describe('permission prompts', () => {
+  it('take the title, kind and chat of the card they attach to, and show its diff', async () => {
+    liveModel()
+    const session = await liveChat()
+    fake.update('s1', {
+      sessionUpdate: 'tool_call',
+      toolCallId: 'call-3',
+      title: 'Edit src/a.ts',
+      kind: 'edit',
+      status: 'in_progress'
+    })
+    fake.ask(
+      7,
+      'session/request_permission',
+      permissionAttached({
+        sessionId: 's1',
+        toolCallId: 'call-3',
+        diff: { path: '/p/src/a.ts', oldText: 'a', newText: 'b' },
+        reason: 'outside the sandbox'
+      })
+    )
+
+    const [request] = shownPermissions()
+    expect(request.title).toBe('Edit src/a.ts')
+    expect(request.toolKind).toBe('edit')
+    expect(request.chatId).toBe(session.id)
+    expect(request.content.diffs).toEqual([
+      { type: 'diff', path: '/p/src/a.ts', oldText: 'a', newText: 'b' }
+    ])
+    expect(request.content.texts).toEqual(['outside the sandbox'])
+    expect(session.toolById('call-3')?.status).toBe('pending')
+  })
+
+  it('attach to this turn’s card, not an earlier turn’s with the same id', async () => {
+    liveModel()
+    const session = await liveChat()
+    let endTurn: (value: JSONValue) => void = () => undefined
+    fake.handlers['session/prompt'] = () => new Promise((resolve) => (endTurn = resolve))
+    model.send(session.id, 'list', [])
+    await settle()
+    fake.update('s1', { sessionUpdate: 'tool_call', toolCallId: 'call-1', title: 'Run ls', kind: 'execute', status: 'completed' })
+    endTurn({ stopReason: 'end_turn' })
+    await settle()
+    expect(session.isBusy).toBe(false)
+    model.send(session.id, 'touch it', [])
+    await settle()
+    // The CLI starts its numbering over: this turn's first call is call-1 too.
+    fake.update('s1', { sessionUpdate: 'tool_call', toolCallId: 'call-1', title: 'Run touch a', kind: 'execute', status: 'in_progress' })
+    fake.ask(21, 'session/request_permission', permissionAttached({ sessionId: 's1', toolCallId: 'call-1', command: 'touch a' }))
+
+    const [request] = shownPermissions()
+    expect(request.title).toBe('Run touch a')
+    const tools = session.items.flatMap((i) => (i.kind === 'tool' ? [i.tool] : []))
+    expect(tools.map((t) => [t.title, t.status])).toEqual([
+      ['Run ls', 'completed'],
+      ['Run touch a', 'pending']
+    ])
+    // The renderer marks the card the request names.
+    expect(request.toolCallId).toBe(tools[1].id)
+  })
+
+  it('make exactly one titled card for a perm-N request and its settle update', async () => {
+    liveModel()
+    const session = await liveChat()
+    fake.ask(
+      8,
+      'session/request_permission',
+      permissionFresh({ sessionId: 's1', n: 1, title: 'Run rm -rf build', command: 'rm -rf build' })
+    )
+    model.resolvePermission(shownPermissions()[0].id, 'allow-once')
+    fake.update('s1', { sessionUpdate: 'tool_call_update', toolCallId: 'perm-1', status: 'completed' })
+
+    const tools = session.items.filter((i) => i.kind === 'tool')
+    expect(tools).toHaveLength(1)
+    expect(session.toolById('perm-1')).toMatchObject({ title: 'Run rm -rf build', kind: 'execute', status: 'completed' })
+    expect(fake.sent.find((m) => m.id === 8)?.result).toEqual({
+      outcome: { outcome: 'selected', optionId: 'allow-once' }
+    })
+  })
+
+  it('mark a card the user denied, so its failure reads as their answer', async () => {
+    liveModel()
+    const session = await liveChat()
+    fake.update('s1', { sessionUpdate: 'tool_call', toolCallId: 'call-1', title: 'Write hello.txt', kind: 'edit', status: 'in_progress' })
+    fake.ask(9, 'session/request_permission', permissionAttached({ sessionId: 's1', toolCallId: 'call-1', diff: { path: '/w/hello.txt', newText: 'hi' } }))
+    model.resolvePermission(shownPermissions()[0].id, 'deny')
+    // permission.go: after Deny the CLI fails the card.
+    fake.update('s1', { sessionUpdate: 'tool_call_update', toolCallId: 'call-1', status: 'failed' })
+    expect(session.toolById('call-1')).toMatchObject({ status: 'failed', denied: true })
+  })
+
+  it('write a title from the kind when there is no card and no title', async () => {
+    liveModel()
+    await liveChat()
+    fake.ask(9, 'session/request_permission', {
+      sessionId: 's1',
+      toolCall: { toolCallId: 'call-99', status: 'pending', kind: 'execute', content: [] },
+      options: []
+    })
+    expect(shownPermissions()[0].title).toBe('Run a command')
+  })
+
+  it('mark the compaction prompt and give it no card', async () => {
+    liveModel()
+    const session = await liveChat()
+    fake.ask(10, 'session/request_permission', compactRequest('s1'))
+    expect(shownPermissions()[0].variant).toBe('compact')
+    expect(session.items.filter((i) => i.kind === 'tool')).toHaveLength(0)
+  })
+
+  it('disappear when the agent withdraws them with $/cancel_request', async () => {
+    liveModel()
+    const session = await liveChat()
+    fake.update('s1', {
+      sessionUpdate: 'tool_call',
+      toolCallId: 'call-3',
+      title: 'Run make',
+      kind: 'execute',
+      status: 'in_progress'
+    })
+    fake.ask(11, 'session/request_permission', permissionAttached({ sessionId: 's1', toolCallId: 'call-3', command: 'make' }))
+    const id = shownPermissions()[0].id
+
+    fake.push({ method: '$/cancel_request', params: { requestId: 11 } })
+
+    expect(shownPermissions()).toEqual([])
+    // Back to what it was showing, not stuck on "waiting for you".
+    expect(session.toolById('call-3')?.status).toBe('in_progress')
+    // Phones are told too, so theirs closes.
+    expect(remote).toContainEqual({ event: 'permission-resolved', args: [id, null] })
+  })
+
+  it('fail the card a withdrawn perm-N request made', async () => {
+    liveModel()
+    const session = await liveChat()
+    fake.ask(12, 'session/request_permission', permissionFresh({ sessionId: 's1', n: 2, title: 'Run x', command: 'x' }))
+    fake.push({ method: '$/cancel_request', params: { requestId: 12 } })
+    // The CLI counts an unanswered request as a denial.
+    expect(session.toolById('perm-2')?.status).toBe('failed')
+  })
+
+  it('are cleared when the agent is torn down', async () => {
+    liveModel()
+    await liveChat()
+    fake.ask(13, 'session/request_permission', permissionFresh({ sessionId: 's1', n: 3, title: 'Run y', command: 'y' }))
+    ;(model as unknown as { teardownAgent(): void }).teardownAgent()
+    expect(shownPermissions()).toEqual([])
+  })
+
+  it('are answered "cancelled" and cleared when the user stops the turn', async () => {
+    liveModel()
+    const session = await liveChat()
+    fake.handlers['session/prompt'] = () => new Promise(() => undefined)
+    model.send(session.id, 'go', [])
+    await settle()
+    fake.ask(14, 'session/request_permission', permissionFresh({ sessionId: 's1', n: 4, title: 'Run z', command: 'z' }))
+    fake.ask(15, '_spettro/question/ask', {
+      version: 2,
+      sessionId: 's1',
+      questions: [{ id: 'q-1', header: 'Pick', question: 'Which?', options: [{ id: 'a', label: 'A' }] }]
+    })
+
+    model.cancel(session.id)
+
+    expect(fake.calls('session/cancel')).toHaveLength(1)
+    expect(shownPermissions()).toEqual([])
+    expect(fake.sent.find((m) => m.id === 14)?.result).toEqual({ outcome: { outcome: 'cancelled' } })
+    expect(fake.sent.find((m) => m.id === 15)?.result).toEqual({ kind: 'cancelled' })
+  })
+
+  it('go with a turn that ends in an error', async () => {
+    liveModel()
+    const session = await liveChat()
+    const turn = deferred<JSONValue>()
+    fake.handlers['session/prompt'] = () => turn.promise
+    model.send(session.id, 'go', [])
+    await settle()
+    fake.ask(16, 'session/request_permission', permissionFresh({ sessionId: 's1', n: 5, title: 'Run w', command: 'w' }))
+    expect(shownPermissions()).toHaveLength(1)
+
+    fake.handlers['session/prompt'] = () => {
+      throw new Reply(rpcError('boom'))
+    }
+    // Answer the outstanding prompt with an error.
+    const promptId = fake.calls('session/prompt')[0].id as number
+    fake.push({ id: promptId, error: rpcError('provider went away') })
+    await settle()
+    expect(shownPermissions()).toEqual([])
+  })
+})
+
+describe('sending', () => {
+  it('gives an image-only prompt the text spettro requires, and the bubble none', async () => {
+    liveModel()
+    const session = await liveChat()
+    fake.handlers['session/prompt'] = () => promptResult({})
+    model.send(session.id, '   ', [{ data: 'aGk=', mimeType: 'image/png' }])
+    await settle()
+
+    const prompt = (fake.calls('session/prompt')[0].params as { prompt: JSONValue[] }).prompt
+    expect(prompt).toEqual([
+      { type: 'text', text: '(see the attached image)' },
+      { type: 'image', data: 'aGk=', mimeType: 'image/png' }
+    ])
+    const user = session.items.find((i) => i.kind === 'message' && i.message.role === 'user')
+    expect(user?.kind === 'message' && user.message.text).toBe('')
+  })
+
+  it('sends an @-mentioned file as a resource link where it was typed', async () => {
+    // content.go readPromptContent joins the blocks in order and writes each
+    // link as "@<path>", so the link sits in the sentence instead of the
+    // mention's text, and the file becomes a required read.
+    liveModel()
+    const session = await liveChat()
+    fake.handlers['session/prompt'] = () => promptResult({})
+    model.send(session.id, 'compare @src/a.ts with @lib/b c.ts.', [], null, ['src/a.ts', 'lib/b c.ts', 'gone.ts'])
+    await settle()
+
+    const prompt = (fake.calls('session/prompt')[0].params as { prompt: JSONValue[] }).prompt
+    expect(prompt).toEqual([
+      { type: 'text', text: 'compare ' },
+      { type: 'resource_link', uri: pathToFileURL(join(dir, 'src/a.ts')).href, name: 'src/a.ts' },
+      { type: 'text', text: ' with ' },
+      { type: 'resource_link', uri: pathToFileURL(join(dir, 'lib/b c.ts')).href, name: 'lib/b c.ts' },
+      { type: 'text', text: '.' }
+    ])
+    // The bubble keeps what the user wrote.
+    const user = session.items.find((i) => i.kind === 'message' && i.message.role === 'user')
+    expect(user?.kind === 'message' && user.message.text).toBe('compare @src/a.ts with @lib/b c.ts.')
+  })
+
+  it('Try again sends the failed message’s @-mentioned files again, as files', async () => {
+    liveModel()
+    const session = await liveChat()
+    let prompts = 0
+    fake.handlers['session/prompt'] = () => {
+      prompts += 1
+      if (prompts === 1) throw new Reply(rpcError('overloaded'))
+      return promptResult({})
+    }
+    model.send(session.id, 'fix @src/a.ts', [], null, ['src/a.ts', '../outside.ts'])
+    await settle()
+    model.retryLast(session.id)
+    await settle()
+
+    const retried = (fake.calls('session/prompt')[1].params as { prompt: JSONValue[] }).prompt
+    expect(retried).toEqual([
+      { type: 'text', text: 'fix ' },
+      { type: 'resource_link', uri: pathToFileURL(join(dir, 'src/a.ts')).href, name: 'src/a.ts' }
+    ])
+    // Kept on the message (only the file inside the project) for Edit & resend.
+    const users = session.items.flatMap((i) =>
+      i.kind === 'message' && i.message.role === 'user' ? [i.message] : []
+    )
+    expect(users.map((m) => m.mentions)).toEqual([['src/a.ts'], ['src/a.ts']])
+  })
+
+  it('steers the running turn with a message sent while busy', async () => {
+    liveModel()
+    const session = await liveChat()
+    const turn = deferred<JSONValue>()
+    let prompts = 0
+    fake.handlers['session/prompt'] = () => {
+      prompts += 1
+      if (prompts === 1) return turn.promise
+      // bridge.go steerRunningTurn: acknowledge, then end this prompt at once.
+      fake.update('s1', agentChunk(STEERING_QUEUED_TEXT))
+      return promptResult({ stopReason: 'end_turn' })
+    }
+
+    model.send(session.id, 'refactor the parser', [])
+    await settle()
+    model.send(session.id, 'also keep the old API', [])
+    await settle()
+
+    // The steer went out after the turn it steers, and ended nothing.
+    expect(fake.calls('session/prompt')).toHaveLength(2)
+    expect(session.isBusy).toBe(true)
+    expect(notices(session)).toEqual([])
+    const steer = session.messageById(session.steeringMessage('queued') ?? '')
+    expect(steer?.text).toBe('also keep the old API')
+    // The acknowledgement is state, not a message.
+    expect(session.items.some((i) => i.kind === 'message' && i.message.role === 'assistant')).toBe(false)
+
+    fake.update('s1', agentChunk(steeringDeliveredText('also keep the old API')))
+    expect(steer?.steering).toBe('delivered')
+    expect(session.items.some((i) => i.kind === 'message' && i.message.role === 'assistant')).toBe(false)
+
+    turn.resolve(promptResult({ stopReason: 'end_turn' }))
+    await settle()
+    expect(session.isBusy).toBe(false)
+  })
+
+  it('leaves the running turn alone when a mid-turn send is answered on its own', async () => {
+    liveModel()
+    const session = await liveChat()
+    const turn = deferred<JSONValue>()
+    let prompts = 0
+    fake.handlers['session/prompt'] = () => {
+      prompts += 1
+      if (prompts === 1) return turn.promise
+      if (prompts === 2) {
+        // bridge.go Prompt: a slash command is answered at once, never
+        // steered, even while a turn runs.
+        fake.update('s1', agentChunk('Commands: /help /model …'))
+        return promptResult({ stopReason: 'end_turn' })
+      }
+      throw new Reply(rpcError('steering queue closed'))
+    }
+
+    model.send(session.id, 'refactor the parser', [])
+    await settle()
+    fake.update('s1', agentChunk('Reading the parser'))
+    fake.ask(20, 'session/request_permission', permissionFresh({ sessionId: 's1', n: 9, title: 'Run make', command: 'make' }))
+
+    model.send(session.id, '/help', [])
+    await settle()
+    // Not filed as the turn, and the turn's reply is still streaming.
+    expect(session.lastTurn).toBeNull()
+    const streaming = session.items.some(
+      (i) => i.kind === 'message' && i.message.role === 'assistant' && i.message.isStreaming
+    )
+    expect(streaming).toBe(true)
+
+    model.send(session.id, 'also keep the old API', [])
+    await settle()
+    // A failed steer says so, but the turn's own prompt stays answerable.
+    expect(notices(session)).toEqual(['Steering queue closed.'])
+    expect(shownPermissions()).toHaveLength(1)
+    expect(fake.sent.some((m) => m.id === 20 && m.method === undefined)).toBe(false)
+    expect(session.isBusy).toBe(true)
+
+    turn.resolve(promptResult({ stopReason: 'end_turn' }))
+    await settle()
+    expect(session.isBusy).toBe(false)
+    expect(session.lastTurn?.stopReason).toBe('end_turn')
+  })
+
+  it('reads the turn’s usage and files it on the chat', async () => {
+    liveModel()
+    const session = await liveChat()
+    fake.handlers['session/prompt'] = () =>
+      promptResult({
+        stopReason: 'max_tokens',
+        usage: { inputTokens: 1200, outputTokens: 300, totalTokens: 1500, cachedReadTokens: 800 },
+        tokensUsed: 1550
+      })
+    model.send(session.id, 'write a novel', [])
+    await settle()
+
+    expect(session.lastTurn).toMatchObject({
+      stopReason: 'max_tokens',
+      inputTokens: 1200,
+      outputTokens: 300,
+      cachedReadTokens: 800,
+      totalTokens: 1500
+    })
+    expect(session.sessionTokens).toBe(1500)
+    expect(notices(session)).toEqual(['The reply hit the length limit.'])
+  })
+
+  it('says "Interrupted" for a cancelled turn', async () => {
+    liveModel()
+    const session = await liveChat()
+    fake.handlers['session/prompt'] = () => promptResult({ stopReason: 'cancelled' })
+    model.send(session.id, 'x', [])
+    await settle()
+    expect(notices(session)).toEqual(['Interrupted'])
+  })
+})
+
+describe('closing a chat', () => {
+  it('cancels its running turn, then closes the session on the agent', async () => {
+    liveModel()
+    const session = await liveChat()
+    fake.handlers['session/prompt'] = () => new Promise(() => undefined)
+    fake.handlers['session/close'] = () => ({})
+    model.send(session.id, 'long job', [])
+    await settle()
+
+    model.closeChat(session.id)
+
+    const order = fake.sent.map((m) => m.method).filter((m) => m === 'session/cancel' || m === 'session/close')
+    expect(order).toEqual(['session/cancel', 'session/close'])
+    expect(fake.calls('session/close')[0].params).toEqual({ sessionId: 's1' })
+  })
+
+  it('does not close a session the agent never said it could', async () => {
+    liveModel()
+    const session = await liveChat()
+    ;(model as unknown as { agent: AcpAgent }).agent.capabilities.closeSession = false
+    model.closeChat(session.id)
+    expect(fake.calls('session/close')).toHaveLength(0)
+  })
+})
+
+describe('reopening saved chats', () => {
+  it('resumes only the chat that is opened', async () => {
+    liveModel([stored('a', 'old-a'), stored('b', 'old-b')])
+    fake.handlers['session/resume'] = () => ({ configOptions: [] })
+    model.openChat('a')
+    await settle()
+    expect(fake.calls('session/resume').map((m) => (m.params as { sessionId: string }).sessionId)).toEqual([
+      'old-a'
+    ])
+  })
+
+  it('say the context is gone only for a chat that had some', async () => {
+    // The CLI saves no session for a chat that only ran its own slash
+    // commands, so resuming one fails — with nothing lost to report.
+    const commandsOnly = stored('a', 'old-a')
+    const first = commandsOnly.items[0]
+    if (first.kind === 'message') first.message.text = '/help'
+    liveModel([commandsOnly, stored('b', 'old-b')])
+    fake.handlers['session/resume'] = () => {
+      throw new Reply(rpcError('session not found'))
+    }
+    const notices = (id: string): string[] =>
+      (model.sessionById(id)?.items ?? []).flatMap((i) =>
+        i.kind === 'message' && i.message.role === 'notice' ? [i.message.text] : []
+      )
+    model.openChat('a')
+    await settle()
+    expect(notices('a')).toEqual([])
+    model.openChat('b')
+    await settle()
+    expect(notices('b')).toEqual(["Couldn't restore this chat's earlier context — starting fresh."])
+  })
+
+  it('makes a send during the resume wait for it, never starting a new session', async () => {
+    liveModel([stored('a', 'old-a')])
+    const resume = deferred<JSONValue>()
+    fake.handlers['session/resume'] = () => resume.promise
+    fake.handlers['session/new'] = () => ({ sessionId: 'fresh', configOptions: [] })
+    fake.handlers['session/prompt'] = () => promptResult({})
+
+    model.openChat('a')
+    await settle()
+    model.send('a', 'where were we?', [])
+    await settle()
+    expect(fake.calls('session/prompt')).toHaveLength(0)
+
+    resume.resolve({ configOptions: [] })
+    await settle()
+    expect(fake.calls('session/new')).toHaveLength(0)
+    expect((fake.calls('session/prompt')[0].params as { sessionId: string }).sessionId).toBe('old-a')
+  })
+
+  it('push a default changed during the resume, not the value shown before it', async () => {
+    // The CLI keeps workflow_size for every session (config_options.go); a
+    // chat resuming with the old value on screen used to push it back.
+    const size = (value: string): JSONValue => ({
+      id: 'workflow_size',
+      name: 'Workflow size',
+      type: 'select',
+      currentValue: value,
+      options: ['small', 'medium'].map((v) => ({ name: v, value: v }))
+    })
+    const chat = stored('a', 'old-a')
+    chat.configOptions = [
+      { id: 'workflow_size', name: 'Workflow size', kind: { type: 'select', currentValue: 'medium', groups: [], flat: [{ name: 'small', value: 'small' }, { name: 'medium', value: 'medium' }] } }
+    ]
+    liveModel([chat])
+    const resume = deferred<JSONValue>()
+    fake.handlers['session/resume'] = () => resume.promise
+    fake.handlers['session/set_config_option'] = (params) => ({
+      configOptions: [size((params as { value: string }).value)]
+    })
+    model.openChat('a')
+    await settle()
+    await model.setDefaultOption('workflow_size', 'small')
+    resume.resolve({ configOptions: [size('small')] })
+    await settle()
+    const pushed = fake.calls('session/set_config_option').map((m) => (m.params as { value: string }).value)
+    expect(pushed).not.toContain('medium')
+    expect(model.getChatDetail('a')?.configOptions[0].kind).toMatchObject({ currentValue: 'small' })
+  })
+
+  it('seed the slash palette from the folder’s cached commands', () => {
+    dir = mkdtempSync(join(tmpdir(), 'spettro-acp-'))
+    writeFileSync(
+      join(dir, 'preferences.json'),
+      JSON.stringify({ cachedCommandsByProject: { '/work/acme': [{ name: 'deploy' }] } })
+    )
+    writeFileSync(join(dir, 'sessions.json'), JSON.stringify([stored('a', 'old-a')]))
+    const m = new AppModel({ userDataDir: dir, appVersion: '0.0.0-test' })
+    ;(m as unknown as { loadPersistedSessions(): void }).loadPersistedSessions()
+    expect(m.getChatDetail('a')?.commands).toEqual([{ name: 'deploy' }])
+  })
+})
+
+describe('sessions started in the terminal', () => {
+  it('are listed unless a chat is already linked to them', async () => {
+    liveModel([stored('a', 'linked')])
+    fake.handlers['session/list'] = () =>
+      sessionList([
+        { id: 'linked', cwd: '/work/acme', title: 'mine' },
+        { id: 'tui-1', cwd: '/work/acme', title: 'from the terminal', updatedAt: '2026-10-05T10:00:00Z' }
+      ])
+    const entries = await model.listCLISessions('/work/acme')
+    expect(entries).toEqual([
+      { sessionId: 'tui-1', title: 'from the terminal', updatedAt: Date.parse('2026-10-05T10:00:00Z') }
+    ])
+    expect(fake.calls('session/list')[0].params).toEqual({ cwd: '/work/acme' })
+  })
+
+  it('import as a chat with the user’s messages replayed — only during the load', async () => {
+    liveModel()
+    fake.handlers['session/load'] = () => {
+      fake.update('tui-1', userChunk('fix the flaky test'))
+      fake.update('tui-1', agentChunk('Fixed: the timeout was too short.'))
+      fake.update('tui-1', userChunk('thanks'))
+      fake.update('tui-1', agentChunk('You’re welcome.'))
+      return { configOptions: [] }
+    }
+    const chatId = await model.importCLISession('tui-1', dir)
+    const session = model.sessionById(chatId ?? '') as ChatSession
+    const lines = session.items.map((i) => (i.kind === 'message' ? `${i.message.role}: ${i.message.text}` : ''))
+    expect(lines).toEqual([
+      'user: fix the flaky test',
+      'assistant: Fixed: the timeout was too short.',
+      'user: thanks',
+      'assistant: You’re welcome.'
+    ])
+    expect(session.title).toBe('fix the flaky test')
+
+    // Outside a load, the agent doesn't get to speak for the user.
+    fake.update('tui-1', userChunk('injected'))
+    expect(session.items).toHaveLength(4)
+  })
+})
+
+describe('tool output', () => {
+  it('keeps images (at most four), rawOutput and location lines', () => {
+    const image = { type: 'content', content: { type: 'image', data: 'iVBOR', mimeType: 'image/png' } }
+    const event = parseToolCallEvent({
+      toolCallId: 'call-1',
+      content: [{ type: 'content', content: { type: 'text', text: 'shot taken' } }, image, image, image, image, image],
+      rawOutput: { output: 'the full output' },
+      locations: [{ path: '/p/a.go', line: 42 }, { path: '/p/b.go' }]
+    })
+    expect(event?.texts).toEqual(['shot taken'])
+    expect(event?.images).toHaveLength(4)
+    expect(event?.images[0]).toEqual({ data: 'iVBOR', mimeType: 'image/png' })
+    expect(event?.rawOutput).toBe('the full output')
+    expect(event?.locations).toEqual([{ path: '/p/a.go', line: 42 }, { path: '/p/b.go' }])
+  })
+})
+
+describe('workflow cards', () => {
+  it('carry `_meta["spettro.app/workflow"]` through to the event, and nothing else of `_meta`', () => {
+    // internal/acp/workflow.go withUpdateMeta: the run's state rides on every
+    // card update. Any other tool call has no such key.
+    const meta = { version: 1, runId: 'wf_1', status: 'paused', phases: [], members: [] }
+    const card = parseToolCallEvent({
+      toolCallId: 'workflow-wf_1',
+      status: 'in_progress',
+      _meta: { 'spettro.app/workflow': meta, 'other.app/thing': 1 }
+    })
+    expect(card?.workflowMeta).toEqual(meta)
+    expect(parseToolCallEvent({ toolCallId: 'call-1', _meta: { 'other.app/thing': 1 } })?.workflowMeta).toBeUndefined()
+    // Not an object: dropped, so the renderer never has to guess at it.
+    expect(
+      parseToolCallEvent({ toolCallId: 'workflow-wf_1', _meta: { 'spettro.app/workflow': 'nope' } })?.workflowMeta
+    ).toBeUndefined()
+  })
+})
+
+describe('workflow calls for a chat with no live session', () => {
+  it('name the chat’s folder instead of coming back empty', async () => {
+    liveModel()
+    const internals = model as unknown as { agent: AcpAgent; extensions: { attach(c: unknown): void } }
+    internals.extensions.attach(internals.agent)
+    fake.handlers['_spettro/workflow/list'] = () => ({ workflows: [], searchPaths: [], cwd: '/work/acme' })
+    const session = model.newChat('/work/acme')
+    // Cold: never warmed.
+    session.acpSessionId = null
+    await model.listWorkflows(session.id)
+    expect(fake.calls('_spettro/workflow/list').at(-1)?.params).toEqual({ cwd: '/work/acme' })
+  })
+
+  it('fail fast for a method the handshake didn’t list', async () => {
+    liveModel()
+    const internals = model as unknown as { agent: AcpAgent; extensions: { attach(c: unknown): void } }
+    internals.agent.extensionMethods = ['_spettro/account/status']
+    internals.extensions.attach(internals.agent)
+    const session = model.newChat('/work/acme')
+    await expect(model.listWorkflows(session.id)).rejects.toThrow(/doesn't support/)
+    expect(fake.calls('_spettro/workflow/list')).toHaveLength(0)
+  })
+})
+
+describe('settings the CLI shares across sessions', () => {
+  // Only the mode is a session's own; the model, permission, thinking level,
+  // Ultra and workflow size live in ~/.spettro (bridge.go sharedSettings).
+  // A chat that has been cold since launch still shows whatever they were
+  // when it was last open, and pushing that on resume rewrote them for every
+  // session and the TUI: opening an old chat could turn YOLO back on.
+
+  /** Stored chat `id` (ACP session `acpId`), last seen showing `shown`. */
+  function storedShowing(id: string, acpId: string, shown: Parameters<typeof configOptions>[0]): StoredSession {
+    return { ...stored(id, acpId), configOptions: parseConfigOptions(configOptions(shown)) }
+  }
+
+  /** The set_config_option calls the app made, as `id=value`. */
+  function pushed(): string[] {
+    return fake.calls('session/set_config_option').map((m) => {
+      const p = m.params as { configId: string; value: string | boolean }
+      return `${p.configId}=${String(p.value)}`
+    })
+  }
+
+  function answerSetConfig(current: Parameters<typeof configOptions>[0]): void {
+    fake.handlers['session/set_config_option'] = (params) => {
+      const p = params as { configId: string; value: string }
+      Object.assign(current, { [p.configId]: p.value })
+      return { configOptions: configOptions(current) }
+    }
+  }
+
+  const shownIn = (chatId: string): Record<string, unknown> =>
+    model.sessionById(chatId)?.displayedConfigValues() ?? {}
+
+  it('a resumed chat adopts them from the CLI instead of pushing its stale ones', async () => {
+    liveModel([storedShowing('a', 'old-a', { permission: 'yolo', thinking: 'off' })])
+    fake.handlers['session/resume'] = () => ({
+      configOptions: configOptions({ permission: 'ask-first', thinking: 'max' })
+    })
+    answerSetConfig({ permission: 'ask-first', thinking: 'max' })
+    model.openChat('a')
+    await settle()
+    expect(pushed()).toEqual([])
+    expect(shownIn('a')).toMatchObject({ permission: 'ask-first', thinking: 'max' })
+  })
+
+  it('a change in one chat reaches the cold ones, and opening them keeps it', async () => {
+    liveModel([storedShowing('a', 'old-a', { thinking: 'off', permission: 'ask-first' })])
+    const cli = { thinking: 'off', permission: 'ask-first' }
+    fake.handlers['session/new'] = () => ({ sessionId: 's1', configOptions: configOptions(cli) })
+    answerSetConfig(cli)
+    const b = model.newChat(dir)
+    await settle()
+    await model.setConfigValue(b.id, 'thinking', 'max')
+    await model.setConfigValue(b.id, 'permission', 'yolo')
+    expect(shownIn('a')).toMatchObject({ thinking: 'max', permission: 'yolo' })
+
+    fake.handlers['session/resume'] = () => ({ configOptions: configOptions(cli) })
+    model.openChat('a')
+    await settle()
+    expect(pushed()).toEqual(['thinking=max', 'permission=yolo'])
+    expect(cli).toMatchObject({ thinking: 'max', permission: 'yolo' })
+    expect(b.displayedConfigValues()).toMatchObject({ thinking: 'max', permission: 'yolo' })
+  })
+
+  it('a slash command’s config_option_update reaches the cold chats and supersedes their queue', async () => {
+    const a = storedShowing('a', 'old-a', { permission: 'yolo' })
+    a.pendingConfigChanges = { permission: 'yolo' }
+    liveModel([a])
+    fake.handlers['session/new'] = () => ({ sessionId: 's1', configOptions: configOptions({ permission: 'yolo' }) })
+    const b = model.newChat(dir)
+    await settle()
+    // `/permission ask-first` typed in b (bridge.go, the handled-slash path).
+    fake.update('s1', configOptionUpdate(configOptions({ permission: 'ask-first' })))
+    await settle()
+    expect(shownIn('a')).toMatchObject({ permission: 'ask-first' })
+    expect(model.sessionById('a')?.pendingConfigChanges).toEqual({})
+
+    fake.handlers['session/resume'] = () => ({ configOptions: configOptions({ permission: 'ask-first' }) })
+    model.openChat('a')
+    await settle()
+    expect(pushed()).toEqual([])
+    expect(b.displayedConfigValues()).toMatchObject({ permission: 'ask-first' })
+  })
+
+  it('a change the user queued in the cold chat itself still goes through', async () => {
+    const a = storedShowing('a', 'old-a', { thinking: 'high' })
+    a.pendingConfigChanges = { thinking: 'high' }
+    liveModel([a])
+    fake.handlers['session/resume'] = () => ({ configOptions: configOptions({ thinking: 'low' }) })
+    answerSetConfig({ thinking: 'low' })
+    model.openChat('a')
+    await settle()
+    expect(pushed()).toEqual(['thinking=high'])
+  })
+
+  it('the chat’s own mode is still put back on resume', async () => {
+    liveModel([storedShowing('a', 'old-a', { mode: 'ask', permission: 'yolo' })])
+    fake.handlers['session/resume'] = () => ({ configOptions: configOptions({ mode: 'plan' }) })
+    answerSetConfig({ mode: 'plan' })
+    model.openChat('a')
+    await settle()
+    expect(pushed()).toEqual(['mode=ask'])
+    expect(shownIn('a')).toMatchObject({ mode: 'ask', permission: 'ask-first' })
+  })
+
+  it('a default set with nothing live waits for the next chat, which pushes it once', async () => {
+    liveModel([storedShowing('a', 'old-a', {}), storedShowing('b', 'old-b', {})])
+    await model.setDefaultOption('permission', 'restricted')
+    expect(pushed()).toEqual([])
+    expect(shownIn('a')).toMatchObject({ permission: 'restricted' })
+
+    const cli = { permission: 'ask-first' }
+    fake.handlers['session/resume'] = () => ({ configOptions: configOptions(cli) })
+    answerSetConfig(cli)
+    model.openChat('a')
+    await settle()
+    model.openChat('b')
+    await settle()
+    expect(pushed()).toEqual(['permission=restricted'])
+    expect(shownIn('b')).toMatchObject({ permission: 'restricted' })
+  })
+})
+
+describe('the mode chip', () => {
+  it('follows a config_option_update, as `/plan <task>` sends', async () => {
+    liveModel()
+    fake.handlers['session/new'] = () => ({ sessionId: 's1', configOptions: configOptions({ mode: 'coding' }) })
+    const chat = model.newChat(dir)
+    await settle()
+    fake.update('s1', configOptionUpdate(configOptions({ mode: 'plan' })))
+    await settle()
+    expect(chat.displayedConfigValues()['mode']).toBe('plan')
+    expect(events.some((e) => e.type === 'chat-meta' && e.chatId === chat.id && e.meta.configOptions)).toBe(true)
+  })
+
+  it('follows ACP’s current_mode_update too', async () => {
+    liveModel()
+    fake.handlers['session/new'] = () => ({ sessionId: 's1', configOptions: configOptions({ mode: 'coding' }) })
+    const chat = model.newChat(dir)
+    await settle()
+    fake.update('s1', currentModeUpdate('ask'))
+    await settle()
+    expect(chat.displayedConfigValues()['mode']).toBe('ask')
+  })
+})
+
+describe('sessions the app started', () => {
+  it('never come back as "started in a terminal" once their chat is deleted', async () => {
+    liveModel([stored('a', 'old-a')])
+    fake.handlers['session/close'] = () => ({})
+    fake.handlers['session/list'] = () =>
+      sessionList([
+        { id: 'old-a', cwd: '/work/acme', title: 'hello' },
+        { id: 's1', cwd: '/work/acme', title: 'a chat from today' },
+        { id: 'scratch-1', cwd: '/work/acme', title: '/workflows run review' },
+        { id: 'tui-1', cwd: '/work/acme', title: 'from the terminal' }
+      ])
+    const today = await liveChat()
+    // A Workflow Studio run's scratch chat, discarded when the studio closes.
+    fake.handlers['session/new'] = () => ({ sessionId: 'scratch-1', configOptions: [] })
+    fake.handlers['session/prompt'] = () => promptResult({})
+    const scratch = model.runWorkflow(today.id, 'review') as string
+    await settle()
+    model.discardScratchChat(scratch)
+    model.closeChat(today.id)
+    model.closeChat('a')
+    const entries = await model.listCLISessions('/work/acme')
+    expect(entries.map((e) => e.sessionId)).toEqual(['tui-1'])
+
+    // …and that holds across a relaunch.
+    const again = new AppModel({ userDataDir: dir, appVersion: '0.0.0-test' })
+    const prefs = (again as unknown as { prefs: { isKnownSession(id: string): boolean } }).prefs
+    expect(['old-a', 's1', 'scratch-1'].every((id) => prefs.isKnownSession(id))).toBe(true)
+  })
+})
+
+describe('/clear', () => {
+  it('turns the CLI’s reply into a divider saying the context is gone', async () => {
+    liveModel()
+    const session = await liveChat()
+    fake.handlers['session/prompt'] = () => {
+      // commands.go: the whole reply to /clear.
+      fake.update('s1', agentChunk('conversation history cleared'))
+      return promptResult({})
+    }
+    model.send(session.id, '/clear', [])
+    await settle()
+    const last = session.items.at(-1)
+    expect(last?.kind === 'message' && last.message).toMatchObject({
+      role: 'notice',
+      contextCleared: true,
+      text: 'Context cleared. Spettro won’t remember the messages above.'
+    })
+  })
+
+  it('leaves the same words alone in an ordinary turn', async () => {
+    liveModel()
+    const session = await liveChat()
+    fake.handlers['session/prompt'] = () => {
+      fake.update('s1', agentChunk('conversation history cleared'))
+      return promptResult({})
+    }
+    model.send(session.id, 'what does /clear print?', [])
+    await settle()
+    const last = session.items.at(-1)
+    expect(last?.kind === 'message' && last.message.role).toBe('assistant')
+  })
+})
+
+describe('an imported conversation', () => {
+  it('replays a failed or interrupted turn as the notice it got, not as "[turn failed: …]"', async () => {
+    liveModel()
+    fake.handlers['session/load'] = () => {
+      fake.update('tui-1', userChunk('hello'))
+      // bridge.go Prompt stores a turn that ended without an answer so.
+      fake.update('tui-1', agentChunk('[turn failed: agent call failed: no API endpoint configured for provider ""]'))
+      fake.update('tui-1', userChunk('again'))
+      fake.update('tui-1', agentChunk('[turn interrupted]'))
+      return { configOptions: [] }
+    }
+    const chatId = await model.importCLISession('tui-1', dir)
+    const session = model.sessionById(chatId ?? '') as ChatSession
+    const lines = session.items.map((i) =>
+      i.kind === 'message' ? `${i.message.role}${i.message.noticeIsError ? '!' : ''}: ${i.message.detail ?? i.message.text}` : ''
+    )
+    expect(lines).toEqual([
+      'user: hello',
+      'notice!: agent call failed: no API endpoint configured for provider ""',
+      'user: again',
+      'notice: Interrupted'
+    ])
+    expect(notices(session)[0]).toMatch(/connect a model/i)
+  })
+})
+
+describe('past workflow runs', () => {
+  it('read each run’s name and outcome from its folder', async () => {
+    liveModel([stored('a', null)])
+    const run = (id: string): string => {
+      const runDir = join(dir, 'runs', id)
+      mkdirSync(runDir, { recursive: true })
+      return runDir
+    }
+    // workflow.go writes meta.json as a run starts; workflow_live_run.go
+    // writes result.json once it settles.
+    const done = run('wf-done')
+    writeFileSync(join(done, 'meta.json'), JSON.stringify({ name: 'review-changes', description: 'd' }))
+    writeFileSync(join(done, 'result.json'), '[]')
+    const paused = run('wf-paused')
+    writeFileSync(join(paused, 'meta.json'), JSON.stringify({ name: 'audit-deps' }))
+    const bare = run('wf-bare')
+    const listed = [done, paused, bare, join(dir, 'runs', 'gone')].map((d, i) => ({
+      runId: `r${i}`,
+      dir: d,
+      modifiedAt: i,
+      name: '',
+      finished: false
+    }))
+    const internals = model as unknown as { extensions: { client: unknown } }
+    Object.defineProperty(internals.extensions, 'client', {
+      get: () => ({ listWorkflowRuns: () => Promise.resolve(listed) })
+    })
+    const runs = await model.listWorkflowRuns('a')
+    expect(runs.map((r) => [r.name, r.finished])).toEqual([
+      ['review-changes', true],
+      ['audit-deps', false],
+      ['', false],
+      ['', false]
+    ])
+  })
+})

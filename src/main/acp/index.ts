@@ -1,7 +1,7 @@
 // Public surface of the ACP layer (main process): subprocess + JSON-RPC
 // transport (AcpConnection), typed facade (AcpAgent), and the wire parsers.
 
-export { AcpConnection, AcpError } from './connection'
+export { AcpConnection, AcpError, rpcErrorMessage } from './connection'
 export { AcpAgent } from './agent'
 export {
   parseConfigOption,
@@ -15,5 +15,9 @@ export {
   parseSessionUpdate,
   parsePermissionRequest,
   parseQuestionRequest,
-  parseQuestionFromPermission
+  parseQuestionFromPermission,
+  parseAgentCapabilities,
+  parseExtensionMethods,
+  parsePromptResult,
+  parseSessionList
 } from './parse'

@@ -1,79 +1,72 @@
-// Port of Spettro/Views/ConfigBar.swift (doc 26): the data-driven row of
-// glass chips for the agent-advertised session config options. Selects render
-// as a chip with a popover menu (grouped options get section headers);
-// booleans render as a toggle chip. Fully data-driven — whatever the CLI
-// advertises shows up without code changes.
+// The composer toolbar's option cluster: the mode chip, the thinking chip and
+// the settings button. Port of Spettro/Views/ConfigBar.swift (doc 26), which
+// drew every advertised option as a chip; the CLI now sends six, and six
+// chips under a text field read as a control panel. What changes from one
+// message to the next stays a chip here — the mode (Plan / Coding / Ask,
+// tinted with its colour) and how hard the model thinks — and the rest moves
+// behind the settings button (SessionSettingsPopover.tsx), still fully
+// data-driven. The model has its own button on the toolbar's right
+// (ModelMenu.tsx), the way the Claude app places it.
 //
-// Ultra is the one option that gets a look of its own, because it is the one
-// option that changes what a turn *is*: everything else picks a model or a
-// mode, Ultra fans a prompt out across a swarm of parallel sub-agents. Drawn
-// as an anonymous boolean beside "Auto-compact" it reads as a preference, so
-// here it is amber and filled when armed — the most charged thing in the bar.
-//
-// It is also the one option the agent can refuse. A swarm runs many agents at
-// once and per-action approval prompts would flood the client, so the CLI
-// rejects enabling Ultra while Permission is "Ask first"
-// (internal/acp/config_options.go). The chip shows that as an unavailable
-// control with the reason attached rather than hiding itself: a control that
-// disappears when you are not allowed to use it is a control nobody ever
-// learns exists. The special-casing keys off the advertised option ids only —
-// if the CLI stops sending `ultra`, the bar simply stops drawing it.
+// Thinking and Ultra are one control, not two: the thinking slider
+// (ThinkingSlider.tsx), whose stop past Max is Ultra — thinking high plus
+// ultracode, where substantial tasks run as multi-agent workflows. There is
+// deliberately no Ultra toggle anywhere: a second switch for the same dial is
+// how the two used to disagree. The special-casing keys off the advertised
+// option ids only — if the CLI stops sending `thinking`, the bar simply stops
+// drawing it.
 
 import { useCallback, useRef, useState } from 'react'
-import type { JSX } from 'react'
+import type { CSSProperties, JSX } from 'react'
 import type { ACPConfigChoice, ACPConfigGroup, ACPConfigOption } from '@shared/acp'
 import type { ChatDetail } from '@shared/model'
 import { call } from '@renderer/state/store'
 import { modeColor } from '@renderer/design/theme'
 import Popover from '@renderer/views/common/Popover'
-
-/** The CLI's option ids (internal/acp/config_options.go). */
-const ULTRA_ID = 'ultra'
-const PERMISSION_ID = 'permission'
-/** The permission level a swarm cannot run under. */
-const ASK_FIRST = 'ask-first'
-
-/** Why the Ultra chip is unavailable — the CLI's own rejection text, so the
- *  tooltip and the notice the agent sends say the same thing. */
-const ULTRA_LOCKED_REASON =
-  'Ultra requires the Restricted or YOLO permission level — change Permission first'
+import { ThinkingChip } from './ThinkingSlider'
+import SessionSettingsButton, { MODE_ID, choicesOf } from './SessionSettingsPopover'
+import { THINKING_ID } from './thinking'
 
 export default function ConfigBar({ chat }: { chat: ChatDetail }): JSX.Element {
-  // Read the sibling permission select rather than remembering a level of our
-  // own: the two chips sit in the same bar and must never disagree.
-  const permission = chat.configOptions.find((o) => o.id === PERMISSION_ID)
-  const ultraLocked =
-    permission?.kind.type === 'select' && permission.kind.currentValue === ASK_FIRST
-
+  const mode = chat.configOptions.find((o) => o.id === MODE_ID)
+  const hasThinking = chat.configOptions.some((o) => o.id === THINKING_ID)
   return (
     <div className="config-bar">
-      {chat.configOptions.map((option) =>
-        option.kind.type === 'select' ? (
-          <SelectChip
-            key={option.id}
-            option={option}
-            kind={option.kind}
-            onSelect={(value) => void call('setSelectOption', chat.id, option.id, value)}
-          />
-        ) : option.id === ULTRA_ID ? (
-          <UltraChip
-            key={option.id}
-            option={option}
-            isOn={option.kind.currentValue}
-            locked={ultraLocked && !option.kind.currentValue}
-            onToggle={(value) => void call('setBoolOption', chat.id, option.id, value)}
-          />
-        ) : (
-          <BooleanChip
-            key={option.id}
-            option={option}
-            isOn={option.kind.currentValue}
-            onToggle={(value) => void call('setBoolOption', chat.id, option.id, value)}
-          />
-        )
+      {mode?.kind.type === 'select' && (
+        <SelectChip
+          option={mode}
+          kind={mode.kind}
+          onSelect={(value) => void call('setSelectOption', chat.id, mode.id, value)}
+        />
       )}
+      {hasThinking && <ThinkingChip chat={chat} />}
+      <SessionSettingsButton chat={chat} />
     </div>
   )
+}
+
+/** The mode after the current one, for Shift+Tab in the composer: Plan →
+ *  Coding → Ask → Plan, in whatever order the CLI lists them. */
+export function nextMode(options: ACPConfigOption[]): string | null {
+  const mode = options.find((o) => o.id === MODE_ID)
+  if (mode?.kind.type !== 'select') return null
+  const values = choicesOf(mode).map((c) => c.value)
+  if (values.length < 2) return null
+  const at = values.indexOf(mode.kind.currentValue ?? '')
+  return values[(at + 1) % values.length]
+}
+
+/**
+ * What each mode does, in words a non-developer can choose between. The CLI
+ * describes its modes by the agent that runs them ("Planning orchestrator
+ * (delegates all discovery to explore worker)"), which is accurate and means
+ * nothing to the person picking one; a mode this app does not know keeps the
+ * CLI's own text.
+ */
+export const MODE_COPY: Record<string, string> = {
+  plan: 'Think it through and propose a plan before changing anything',
+  coding: 'Make the changes for you',
+  ask: 'Answer questions without changing any files'
 }
 
 // ---------------------------------------------------------------------------
@@ -87,13 +80,17 @@ interface SelectKind {
   flat: ACPConfigChoice[]
 }
 
-function SelectChip({
+export function SelectChip({
   option,
   kind,
+  hint,
   onSelect
 }: {
   option: ACPConfigOption
   kind: SelectKind
+  /** A short plain-words gloss for a choice, shown after its name on the
+   *  chip and in the menu. */
+  hint?: (choice: ACPConfigChoice) => string
   onSelect: (value: string) => void
 }): JSX.Element {
   const [open, setOpen] = useState(false)
@@ -108,19 +105,30 @@ function SelectChip({
   // matches the agent that's running.
   const isMode = (option.category ?? option.id) === 'mode'
   const tint = isMode && kind.currentValue ? modeColor(kind.currentValue) : undefined
+  const current = currentChoice(kind)
+  const currentHint = current && hint ? hint(current) : ''
+  const describe = (choice: ACPConfigChoice): string | undefined =>
+    (isMode ? MODE_COPY[choice.value] : undefined) ?? choice.description
+  const currentText = (current && describe(current)) ?? option.description ?? option.name
 
   return (
     <div className="chip-wrap">
       <button
         ref={anchorRef}
         type="button"
-        className="config-chip"
-        title={option.description ?? option.name}
-        style={tint ? { color: tint } : undefined}
+        className={'config-chip' + (tint ? ' config-chip--tinted' : '')}
+        title={isMode ? `${currentText} (Shift+Tab switches)` : option.description ?? option.name}
+        style={tint ? ({ '--chip-tint': tint } as CSSProperties) : undefined}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        data-testid={isMode ? 'mode-chip' : undefined}
         onClick={() => setOpen((o) => !o)}
       >
         <CategoryIcon category={option.category ?? option.id} />
-        <span className="config-chip-label">{currentLabel(kind)}</span>
+        <span className="config-chip-label">
+          {currentLabel(kind)}
+          {currentHint !== '' && <span className="config-chip-hint"> · {currentHint}</span>}
+        </span>
         <ChevronDownIcon />
       </button>
       <Popover
@@ -147,9 +155,14 @@ function SelectChip({
                   {choice.value === kind.currentValue && <CheckIcon />}
                 </span>
                 <span className="config-menu-texts">
-                  <span className="config-menu-name">{choice.name}</span>
-                  {choice.description && (
-                    <span className="config-menu-description">{choice.description}</span>
+                  <span className="config-menu-name">
+                    {choice.name}
+                    {hint && hint(choice) !== '' && (
+                      <span className="config-menu-hint">{hint(choice)}</span>
+                    )}
+                  </span>
+                  {describe(choice) && (
+                    <span className="config-menu-description">{describe(choice)}</span>
                   )}
                 </span>
               </button>
@@ -166,86 +179,14 @@ function SelectChip({
 function currentLabel(kind: SelectKind): string {
   const value = kind.currentValue
   if (value == null) return '—'
+  return currentChoice(kind)?.name ?? value
+}
+
+function currentChoice(kind: SelectKind): ACPConfigChoice | undefined {
+  const value = kind.currentValue
+  if (value == null) return undefined
   const all = kind.groups.flatMap((g) => g.options).concat(kind.flat)
-  return all.find((c) => c.value === value)?.name ?? value
-}
-
-// ---------------------------------------------------------------------------
-// Boolean chip (BooleanChip port)
-// ---------------------------------------------------------------------------
-
-function BooleanChip({
-  option,
-  isOn,
-  onToggle
-}: {
-  option: ACPConfigOption
-  isOn: boolean
-  onToggle: (value: boolean) => void
-}): JSX.Element {
-  return (
-    <button
-      type="button"
-      className={'config-chip' + (isOn ? ' config-chip--on' : '')}
-      title={option.description ?? option.name}
-      onClick={() => onToggle(!isOn)}
-    >
-      <BoltIcon filled={isOn} />
-      <span className="config-chip-label">{option.name}</span>
-    </button>
-  )
-}
-
-// ---------------------------------------------------------------------------
-// Ultra chip
-// ---------------------------------------------------------------------------
-
-/**
- * The Ultra toggle: same capsule as every other chip, amber and filled when
- * armed so the swarm never runs unannounced.
- *
- * Locked is `aria-disabled`, not `disabled`. A `disabled` button in Chromium
- * swallows the pointer events its own tooltip needs, which would leave the
- * user with a dead control and no explanation — the entire point of showing
- * it. So the chip stays focusable and hoverable, carries the reason in its
- * title, and simply does not fire.
- *
- * Turning Ultra *off* is never locked: the gate only exists to stop a swarm
- * starting under per-action approvals, and a user who somehow arrived at
- * ultra-on with Permission back on "Ask first" must be able to get out.
- */
-function UltraChip({
-  option,
-  isOn,
-  locked,
-  onToggle
-}: {
-  option: ACPConfigOption
-  isOn: boolean
-  locked: boolean
-  onToggle: (value: boolean) => void
-}): JSX.Element {
-  const className =
-    'config-chip config-chip--ultra' +
-    (isOn ? ' config-chip--ultra-on' : '') +
-    (locked ? ' config-chip--locked' : '')
-  return (
-    <button
-      type="button"
-      className={className}
-      aria-disabled={locked}
-      aria-pressed={isOn}
-      title={locked ? ULTRA_LOCKED_REASON : (option.description ?? option.name)}
-      onClick={() => {
-        if (locked) return
-        onToggle(!isOn)
-      }}
-    >
-      <BoltIcon filled={isOn} />
-      <span className="config-chip-label">{option.name}</span>
-      {locked && <LockIcon />}
-    </button>
-  )
+  return all.find((c) => c.value === value)
 }
 
 // ---------------------------------------------------------------------------
@@ -255,13 +196,11 @@ function UltraChip({
 function CategoryIcon({ category }: { category: string }): JSX.Element {
   switch (category) {
     case 'mode':
-      // slider.horizontal.3
+      // A dot in the mode's colour. Not the sliders glyph it used to be:
+      // that is the settings button's, right beside this chip.
       return (
         <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden>
-          <path d="M1.5 4h13M1.5 8h13M1.5 12h13" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
-          <circle cx="10.5" cy="4" r="1.8" fill="var(--surface-raised)" stroke="currentColor" strokeWidth="1.3" />
-          <circle cx="5" cy="8" r="1.8" fill="var(--surface-raised)" stroke="currentColor" strokeWidth="1.3" />
-          <circle cx="11.5" cy="12" r="1.8" fill="var(--surface-raised)" stroke="currentColor" strokeWidth="1.3" />
+          <circle cx="8" cy="8" r="3.2" fill="currentColor" />
         </svg>
       )
     case 'model':
@@ -290,6 +229,17 @@ function CategoryIcon({ category }: { category: string }): JSX.Element {
           />
           <rect x="6" y="7" width="4" height="3.4" rx="0.8" stroke="currentColor" strokeWidth="1.1" />
           <path d="M6.8 7V5.9a1.2 1.2 0 0 1 2.4 0V7" stroke="currentColor" strokeWidth="1.1" />
+        </svg>
+      )
+    case 'workflow_size':
+      // One agent fanning out to three: how wide a workflow plans to go.
+      return (
+        <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden>
+          <circle cx="8" cy="3.2" r="1.9" stroke="currentColor" strokeWidth="1.3" />
+          <circle cx="2.8" cy="12.6" r="1.7" stroke="currentColor" strokeWidth="1.3" />
+          <circle cx="8" cy="12.6" r="1.7" stroke="currentColor" strokeWidth="1.3" />
+          <circle cx="13.2" cy="12.6" r="1.7" stroke="currentColor" strokeWidth="1.3" />
+          <path d="M8 5.1v5.8M6.7 4.7 3.6 10.9M9.3 4.7l3.1 6.2" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round" />
         </svg>
       )
     case 'thought_level':
@@ -328,29 +278,6 @@ function CheckIcon(): JSX.Element {
   return (
     <svg width="11" height="11" viewBox="0 0 16 16" fill="none" aria-hidden>
       <path d="m2.5 8.5 3.7 3.7 7.3-8.4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  )
-}
-
-function LockIcon(): JSX.Element {
-  return (
-    <svg className="config-chip-lock" width="10" height="10" viewBox="0 0 16 16" fill="none" aria-hidden>
-      <rect x="3.5" y="7" width="9" height="7" rx="1.6" stroke="currentColor" strokeWidth="1.4" />
-      <path d="M5.6 7V5.2a2.4 2.4 0 0 1 4.8 0V7" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-    </svg>
-  )
-}
-
-function BoltIcon({ filled }: { filled: boolean }): JSX.Element {
-  return (
-    <svg className="config-chip-bolt" width="13" height="13" viewBox="0 0 16 16" aria-hidden>
-      <path
-        d="M9.2 1.5 3.5 9h3.4l-.9 5.5L11.8 7H8.4l.8-5.5Z"
-        fill={filled ? 'currentColor' : 'none'}
-        stroke="currentColor"
-        strokeWidth="1.2"
-        strokeLinejoin="round"
-      />
     </svg>
   )
 }

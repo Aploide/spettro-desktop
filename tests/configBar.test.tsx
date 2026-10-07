@@ -1,26 +1,31 @@
 // @vitest-environment jsdom
 //
-// The Ultra chip is the one config control the agent can refuse, and the
-// refusal is a rule the CLI enforces (internal/acp/config_options.go) that the
-// bar mirrors so the user learns about it before spending a click. A
-// screenshot shows the chip looking disabled; only a test shows that clicking
-// it does nothing, and that the rule is read off the sibling permission chip
-// rather than remembered separately.
+// The composer toolbar's option cluster: the mode chip, the thinking chip and
+// the settings button, whose popover holds everything else the CLI
+// advertises. Thinking and Ultra are one control — the thinking slider, opened
+// from a chip (tests/thinkingSlider.test.tsx covers the slider) — and there is
+// no Ultra toggle anywhere, in the bar or the popover: only a test can show
+// that something is *absent*.
 
 import { describe, expect, it, vi, beforeEach } from 'vitest'
-import { render, screen, cleanup, fireEvent } from '@testing-library/react'
-import ConfigBar from '@renderer/views/chat/ConfigBar'
+import { act, render, screen, cleanup, fireEvent } from '@testing-library/react'
+import ConfigBar, { nextMode } from '@renderer/views/chat/ConfigBar'
 import type { ChatDetail } from '@shared/model'
 import type { ACPConfigOption } from '@shared/acp'
 
 const calls: [string, unknown[]][] = []
 
-vi.mock('@renderer/state/store', () => ({
-  call: (method: string, ...args: unknown[]) => {
-    calls.push([method, args])
-    return Promise.resolve()
+vi.mock('@renderer/state/store', () => {
+  const mocked = {
+    call: (method: string, ...args: unknown[]) => {
+      calls.push([method, args])
+      return Promise.resolve()
+    },
+    useApp: () => null
   }
-}))
+  // quietCall is call without the failure toast; to a test they are one.
+  return { ...mocked, quietCall: mocked.call }
+})
 
 beforeEach(() => {
   calls.length = 0
@@ -62,68 +67,242 @@ function chat(options: ACPConfigOption[]): ChatDetail {
     configOptions: options,
     commands: [],
     plan: [],
-    usage: null
+    usage: null,
+    lastTurn: null,
+    sessionTokens: 0
   }
 }
 
-describe('the Ultra chip', () => {
-  it('toggles on when the permission level allows a swarm', () => {
-    render(<ConfigBar chat={chat([permission('restricted'), ultra(false)])} />)
-    fireEvent.click(screen.getByText('Ultra'))
-    expect(calls).toEqual([['setBoolOption', ['chat-1', 'ultra', true]]])
+function thinking(value: string): ACPConfigOption {
+  return {
+    id: 'thinking',
+    name: 'Thinking',
+    category: 'thought_level',
+    kind: {
+      type: 'select',
+      currentValue: value,
+      groups: [],
+      flat: ['off', 'low', 'medium', 'high', 'x-high', 'max'].map((v) => ({ value: v, name: v }))
+    }
+  }
+}
+
+describe('thinking and Ultra', () => {
+  it('are one chip, named for the level', () => {
+    render(<ConfigBar chat={chat([permission('restricted'), thinking('x-high'), ultra(false)])} />)
+    expect(screen.getByTestId('thinking-chip').textContent).toContain('Extra high')
   })
 
-  it('refuses to arm under Ask first, and says why', () => {
-    // A swarm runs many agents at once; per-action approval prompts would
-    // flood the client, so the CLI rejects this. Firing anyway would spend a
-    // round trip to be told no.
-    render(<ConfigBar chat={chat([permission('ask-first'), ultra(false)])} />)
-    const chip = screen.getByText('Ultra').closest('button') as HTMLButtonElement
+  it('never draw an Ultra toggle, whether Ultra is on or off', () => {
+    for (const on of [false, true]) {
+      cleanup()
+      render(<ConfigBar chat={chat([permission('restricted'), thinking('high'), ultra(on)])} />)
+      // Besides the thinking chip, the only button is the settings button,
+      // which names the permission level.
+      const others = screen
+        .getAllByRole('button')
+        .filter((b) => b.getAttribute('data-testid') !== 'thinking-chip')
+      expect(others.map((b) => b.getAttribute('data-testid'))).toEqual(['session-settings'])
+      expect(others[0].textContent).toBe('Restricted')
+      // Nor inside the settings popover: nothing pressed, no switch, no
+      // checkbox — Ultra is the slider's last stop and nothing else.
+      fireEvent.click(others[0])
+      expect(document.querySelector('[aria-pressed]')).toBeNull()
+      expect(screen.queryByRole('switch')).toBeNull()
+      expect(screen.queryByRole('checkbox')).toBeNull()
+      const ultraWords = screen
+        .queryAllByText(/^Ultra(code)?$/)
+        .filter((n) => !n.closest('.thinking-slider, [data-testid="thinking-chip"]'))
+      expect(ultraWords).toEqual([])
+    }
+  })
+
+  it('show Ultra on the chip when it is on', () => {
+    render(<ConfigBar chat={chat([permission('restricted'), thinking('high'), ultra(true)])} />)
+    const chip = screen.getByTestId('thinking-chip')
+    expect(chip.textContent).toContain('Ultra')
+    expect(chip.getAttribute('title')).toMatch(/ultracode/)
+  })
+
+  it('open the slider from the chip', () => {
+    render(<ConfigBar chat={chat([permission('restricted'), thinking('high'), ultra(false)])} />)
+    fireEvent.click(screen.getByTestId('thinking-chip'))
+    expect(screen.getByRole('slider').getAttribute('aria-valuetext')).toBe('High')
+  })
+
+  it('hand the focus back to the chip when Escape closes the slider', () => {
+    // The slider takes the focus as it opens; closing must not strand a
+    // keyboard user on <body>.
+    render(<ConfigBar chat={chat([permission('restricted'), thinking('high'), ultra(false)])} />)
+    const chip = screen.getByTestId('thinking-chip')
     fireEvent.click(chip)
+    const slider = screen.getByRole('slider')
+    slider.focus()
+    fireEvent.keyDown(slider, { key: 'Escape' })
+    expect(screen.queryByRole('slider')).toBeNull()
+    expect(document.activeElement).toBe(chip)
+  })
+})
 
-    expect(calls).toEqual([])
-    // aria-disabled rather than `disabled` on purpose: a disabled button in
-    // Chromium swallows the pointer events its own tooltip needs, which would
-    // leave a dead control and no explanation — the entire reason it is still
-    // on screen. So it stays focusable, carries the reason, and does not fire.
-    expect(chip.getAttribute('aria-disabled')).toBe('true')
-    expect(chip.disabled).toBe(false)
-    expect(chip.getAttribute('title') ?? '').toMatch(/Restricted or YOLO/i)
+describe('the settings popover', () => {
+  // internal/acp/config_options.go workflowSizeConfigOption: names are the
+  // capitalised tiers, descriptions carry the agent guideline.
+  function size(value: string, describe = true): ACPConfigOption {
+    const tiers = [
+      ['small', 'Small', '~5 agents per run · fan-outs up to ~5 wide'],
+      ['medium', 'Medium', '~10 agents per run · fan-outs up to ~10 wide'],
+      ['large', 'Large', '~30 agents per run · fan-outs up to ~30 wide'],
+      ['unbounded', 'Unbounded', 'no agent guideline · fan-outs up to ~50 wide']
+    ]
+    return {
+      id: 'workflow_size',
+      name: 'Workflow size',
+      description: 'How many agents a workflow run plans around (a guideline, not a cap)',
+      kind: {
+        type: 'select',
+        currentValue: value,
+        groups: [],
+        flat: tiers.map(([v, name, d]) => (describe ? { value: v, name, description: d } : { value: v, name }))
+      }
+    }
+  }
+
+  function open(options: ACPConfigOption[]): void {
+    render(<ConfigBar chat={chat(options)} />)
+    fireEvent.click(screen.getByTestId('session-settings'))
+  }
+
+  function segments(): string[] {
+    return Array.from(
+      screen.getByRole('radiogroup', { name: 'Workflow size' }).querySelectorAll('.session-segment-hint'),
+      (n) => n.textContent ?? ''
+    )
+  }
+
+  it('takes the focus as it opens, onto the current choice, and gives it back on Escape', async () => {
+    open([permission('restricted'), size('large')])
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0))
+    })
+    const current = screen.getByRole('radio', { checked: true, name: /Restricted/ })
+    expect(document.activeElement).toBe(current)
+    fireEvent.keyDown(current, { key: 'Escape' })
+    expect(screen.queryByRole('dialog', { name: 'Session settings' })).toBeNull()
+    expect(document.activeElement).toBe(screen.getByTestId('session-settings'))
   })
 
-  it('is still visible when it cannot be used', () => {
-    // A control that vanishes when you are not allowed to use it is a control
-    // nobody ever learns exists.
-    render(<ConfigBar chat={chat([permission('ask-first'), ultra(false)])} />)
-    expect(screen.getByText('Ultra')).toBeTruthy()
+  it('labels workflow size tiers in agents, read from the tier’s own description', () => {
+    open([size('large')])
+    expect(segments()).toEqual(['~5 helpers', '~10 helpers', '~30 helpers', 'No limit'])
+    const on = screen.getByRole('radio', { checked: true })
+    expect(on.textContent).toBe('Large~30 helpers')
   })
 
-  it('can always be turned OFF, whatever the permission level is', () => {
-    // The gate exists to stop a swarm starting under ask-first. Someone who
-    // arrived at ultra-on and then lowered their permission has to be able to
-    // get out again.
-    render(<ConfigBar chat={chat([permission('ask-first'), ultra(true)])} />)
-    fireEvent.click(screen.getByText('Ultra'))
-    expect(calls).toEqual([['setBoolOption', ['chat-1', 'ultra', false]]])
+  it('falls back to the known tiers when the CLI gives no descriptions', () => {
+    open([size('medium', false)])
+    expect(segments()).toEqual(['~5 helpers', '~10 helpers', '~30 helpers', 'No limit'])
   })
 
-  it('reads the rule off the sibling chip, not off a value of its own', () => {
-    // The two chips sit in the same bar and must never disagree.
-    render(<ConfigBar chat={chat([permission('yolo'), ultra(false)])} />)
-    const chip = screen.getByText('Ultra').closest('button') as HTMLButtonElement
-    expect(chip.getAttribute('aria-disabled')).toBe('false')
+  it('sets the size through the ordinary select path', () => {
+    open([size('medium')])
+    fireEvent.click(screen.getByRole('radio', { name: /Small/ }))
+    expect(calls).toEqual([['setSelectOption', ['chat-1', 'workflow_size', 'small']]])
+  })
+
+  it('names the permission levels plainly, with the CLI’s descriptions', () => {
+    open([permission('yolo')])
+    const radios = screen.getAllByRole('radio').map((r) => r.querySelector('.session-settings-name')?.textContent)
+    expect(radios).toEqual([
+      'Ask first · Ask before acting',
+      'Restricted · Act within the project',
+      'Don’t ask (YOLO) · Act without asking'
+    ])
+    fireEvent.click(screen.getAllByRole('radio')[1])
+    expect(calls).toEqual([['setSelectOption', ['chat-1', 'permission', 'restricted']]])
+  })
+
+  it('lists each choice once, as the parser hands them over (groups and their union)', () => {
+    // parse.ts fills `flat` with every grouped choice as well.
+    const parsed = permission('restricted')
+    if (parsed.kind.type === 'select') parsed.kind.groups = [{ name: '', options: parsed.kind.flat }]
+    open([parsed])
+    expect(screen.getAllByRole('radio')).toHaveLength(3)
+  })
+
+  it('says the settings are shared by every session', () => {
+    open([permission('restricted')])
+    expect(screen.getByText('Applies to all sessions')).toBeTruthy()
+  })
+
+  it('leaves thinking to its chip — permission first, then size, no second slider', () => {
+    open([size('medium'), thinking('high'), ultra(false), permission('restricted')])
+    const sections = Array.from(document.querySelectorAll('.session-settings-section'))
+    expect(sections).toHaveLength(2)
+    expect(sections[0].getAttribute('aria-label')).toBe('Permission')
+    expect(sections[1].getAttribute('aria-label')).toBe('Workflow size')
+    expect(document.querySelector('.session-settings-panel [role="slider"]')).toBeNull()
+  })
+
+  it('stays data-driven — an unknown boolean renders as a switch and toggles', () => {
+    open([{ id: 'auto-compact', name: 'Auto-compact', kind: { type: 'boolean', currentValue: false } }])
+    fireEvent.click(screen.getByRole('switch'))
+    expect(calls).toEqual([['setBoolOption', ['chat-1', 'auto-compact', true]]])
+  })
+
+  it('stays data-driven — an unknown select renders its choices', () => {
+    open([
+      {
+        id: 'verbosity',
+        name: 'Verbosity',
+        kind: {
+          type: 'select',
+          currentValue: 'terse',
+          groups: [],
+          flat: [
+            { value: 'terse', name: 'Terse', description: 'Short answers' },
+            { value: 'chatty', name: 'Chatty' }
+          ]
+        }
+      }
+    ])
+    expect(screen.getByRole('radiogroup', { name: 'Verbosity' })).toBeTruthy()
+    expect(screen.getByText('Short answers')).toBeTruthy()
+    fireEvent.click(screen.getByRole('radio', { name: /Chatty/ }))
+    expect(calls).toEqual([['setSelectOption', ['chat-1', 'verbosity', 'chatty']]])
   })
 })
 
 describe('the rest of the bar', () => {
-  it('stays data-driven — an unknown boolean still renders and still toggles', () => {
-    render(
-      <ConfigBar
-        chat={chat([{ id: 'auto-compact', name: 'Auto-compact', kind: { type: 'boolean', currentValue: false } }])}
-      />
-    )
-    fireEvent.click(screen.getByText('Auto-compact'))
-    expect(calls).toEqual([['setBoolOption', ['chat-1', 'auto-compact', true]]])
+  function mode(value: string): ACPConfigOption {
+    return {
+      id: 'mode',
+      name: 'Mode',
+      category: 'mode',
+      kind: {
+        type: 'select',
+        currentValue: value,
+        groups: [],
+        flat: [
+          { value: 'plan', name: 'Plan' },
+          { value: 'coding', name: 'Coding' },
+          { value: 'ask', name: 'Ask' }
+        ]
+      }
+    }
+  }
+
+  it('draws the mode as a chip in its own colour', () => {
+    render(<ConfigBar chat={chat([mode('plan')])} />)
+    const chip = screen.getByTestId('mode-chip')
+    expect(chip.textContent).toBe('Plan')
+    expect(chip.getAttribute('style')).toContain('--mode-plan')
+    expect(chip.getAttribute('title')).toMatch(/Shift\+Tab/)
+  })
+
+  it('steps through the modes in the CLI’s order, wrapping', () => {
+    expect(nextMode([mode('plan')])).toBe('coding')
+    expect(nextMode([mode('ask')])).toBe('plan')
+    expect(nextMode([])).toBeNull()
   })
 
   it('draws nothing at all when the agent advertises nothing', () => {

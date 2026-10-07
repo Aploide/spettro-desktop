@@ -13,10 +13,9 @@
 // has reached, because knowing what is still coming is half the value of a
 // declared plan — but only *running* members get a row, and each of those rows
 // shows its most recent tool call rather than the task it was handed at
-// launch. In a twenty-member fan-out the launch items are near-identical and
+// launch. In a twenty-member fan-out the launch tasks are near-identical and
 // tell you nothing about progress; the live detail is the entire reason to
-// watch this column instead of the card. It is the same argument
-// internal/tui/view_swarm.go makes for latestAgentActivity().
+// watch this column instead of the card.
 //
 // Two behaviours here are not in the TUI and exist because a mouse-driven
 // panel is glanced at rather than watched:
@@ -39,8 +38,8 @@ import {
   memberTint,
   type MemberCall,
   type OrchCounts,
-  type OrchRun,
-  type OrchStatus
+  type RunStatus,
+  type WorkflowRun
 } from './transcript/orchestration'
 import {
   CountsLabel,
@@ -58,11 +57,10 @@ import './orchestrationPanel.css'
 const HOLD_MS = 1600
 const EXIT_MS = 7000
 
-/** Running members listed under one phase / one swarm before the panel says
- *  "… N more running". A phase that fans out to thirty agents would otherwise
- *  push every other phase off the column. */
+/** Running members listed under one phase before the panel says "… N more
+ *  running". A phase that fans out to thirty agents would otherwise push
+ *  every other phase off the column. */
 const MAX_PHASE_MEMBERS = 4
-const MAX_SWARM_MEMBERS = 8
 
 /** Instance names are clipped hard: this column is narrow and the detail beside
  *  the name is the part that changes. `truncateInstance` keeps the "#N". */
@@ -84,7 +82,7 @@ type GroupState = 'pending' | 'active' | 'done' | 'failed'
 
 interface PanelGroup {
   key: string
-  /** '' renders headerless — a swarm, or the workflow's unnamed bucket. */
+  /** '' renders headerless — the agents dispatched outside any phase. */
   title: string
   state: GroupState
   counts: OrchCounts
@@ -96,7 +94,7 @@ interface PanelSection {
   key: string
   title: string
   meta: string
-  status: OrchStatus
+  status: RunStatus
   counts: OrchCounts
   groups: PanelGroup[]
   /** True once the run has finished: one line, no tree. */
@@ -108,23 +106,8 @@ interface PanelSection {
 }
 
 /** A run's identity across updates: the lifecycle tool call it was born from. */
-function runKey(run: OrchRun): string {
+function runKey(run: WorkflowRun): string {
   return run.tool.id
-}
-
-function sectionTitle(run: OrchRun): string {
-  if (run.kind === 'workflow') return runTitle(run)
-  // runTitle() spells this "ultra swarm"; beside a workflow's own name a
-  // sentence-cased title reads as a heading rather than as a tool call.
-  return run.subagentType === '' ? 'Ultra swarm' : `Ultra swarm · ${run.subagentType}`
-}
-
-function sectionMeta(run: OrchRun): string {
-  if (run.kind === 'workflow') return run.description
-  const parts: string[] = []
-  if (run.isolation === 'worktree') parts.push('worktree')
-  if (run.items.length > 0) parts.push(`${run.items.length} items`)
-  return parts.join(' · ')
 }
 
 /**
@@ -166,21 +149,7 @@ function groupState(counts: OrchCounts): GroupState {
   return 'pending'
 }
 
-function buildGroups(run: OrchRun): PanelGroup[] {
-  if (run.kind === 'swarm') {
-    if (run.members.length === 0) return []
-    const { rows, hidden } = toPanelMembers(run.members, MAX_SWARM_MEMBERS)
-    return [
-      {
-        key: 'swarm',
-        title: '',
-        state: groupState(run.counts),
-        counts: run.counts,
-        members: rows,
-        hidden
-      }
-    ]
-  }
+function buildGroups(run: WorkflowRun): PanelGroup[] {
   return run.phases.map((phase, i) => {
     const { rows, hidden } = toPanelMembers(phase.members, MAX_PHASE_MEMBERS)
     return {
@@ -197,13 +166,23 @@ function buildGroups(run: OrchRun): PanelGroup[] {
 /** The status a run that merely *vanished* from the live list gets: the panel
  *  never saw the final update, so it reports what the last snapshot knew
  *  rather than claiming a success it cannot vouch for. */
-function settledStatus(run: OrchRun): OrchStatus {
+function settledStatus(run: WorkflowRun): RunStatus {
   if (run.status !== 'running') return run.status
   return run.counts.failed > 0 ? 'failed' : 'done'
 }
 
-function settledNote(run: OrchRun): string {
-  if (run.kind === 'workflow' && run.summary !== '') return run.summary
+/** The settled line's words. A run that left the live list because it is
+ *  waiting at a checkpoint, or was stopped, says that — "done" would be a
+ *  claim about a run that has not finished. */
+function settledNote(run: WorkflowRun): string {
+  if (run.status === 'paused') {
+    const message = run.pausedAt?.message ?? ''
+    return message === '' ? 'Waiting for Spettro' : `Waiting — ${message}`
+  }
+  if (run.status === 'stopped') {
+    return run.stoppedReason === '' ? 'Stopped' : `Stopped — ${run.stoppedReason}`
+  }
+  if (run.summary !== '') return run.summary
   const { total, done, failed } = run.counts
   if (total === 0) return 'finished'
   return failed > 0 ? `${done} done · ${failed} failed` : `${done} done`
@@ -214,12 +193,12 @@ function fraction(counts: OrchCounts): string {
   return `${counts.done + counts.failed}/${counts.total}`
 }
 
-function buildSection(run: OrchRun, collapsed: boolean, seq: number): PanelSection {
+function buildSection(run: WorkflowRun, collapsed: boolean, seq: number): PanelSection {
   const status = collapsed ? settledStatus(run) : run.status
   return {
     key: runKey(run),
-    title: sectionTitle(run),
-    meta: sectionMeta(run),
+    title: runTitle(run),
+    meta: run.description,
     status,
     counts: run.counts,
     groups: collapsed ? [] : buildGroups(run),
@@ -235,15 +214,21 @@ function buildSection(run: OrchRun, collapsed: boolean, seq: number): PanelSecti
 
 interface Settled {
   key: string
-  run: OrchRun
+  run: WorkflowRun
   collapsed: boolean
 }
 
 export default function OrchestrationPanel({
   runs,
+  current,
   onClose
 }: {
-  runs: OrchRun[]
+  runs: WorkflowRun[]
+  /** Every run in the transcript as it stands now, by card id. A run leaves
+   *  `runs` the moment it stops running — paused at a checkpoint, stopped,
+   *  finished — and its settled line must say which, from the state it left
+   *  in rather than the last running snapshot (which can only guess "done"). */
+  current?: ReadonlyMap<string, WorkflowRun>
   onClose: () => void
 }): JSX.Element | null {
   const [settled, setSettled] = useState<Settled[]>([])
@@ -251,15 +236,19 @@ export default function OrchestrationPanel({
   // settles keeps the slot the eye already found it in.
   const order = useRef(new Map<string, number>())
   const seq = useRef(0)
-  const seen = useRef(new Map<string, OrchRun>())
+  const seen = useRef(new Map<string, WorkflowRun>())
   const timers = useRef<ReturnType<typeof setTimeout>[]>([])
+  // Read through a ref: it changes with every transcript update, exactly as
+  // `runs` does, and must not become a second trigger for the effect below.
+  const currentRef = useRef(current)
+  currentRef.current = current
 
   // Hold, collapse, release. The dependency is the array identity, which the
   // parent rebuilds on every update — the body only acts on differences, so
   // running it that often costs a map walk and nothing else.
   useEffect(() => {
-    const live = new Map<string, OrchRun>()
-    const latest = new Map<string, OrchRun>()
+    const live = new Map<string, WorkflowRun>()
+    const latest = new Map<string, WorkflowRun>()
     for (const run of runs) {
       const key = runKey(run)
       latest.set(key, run)
@@ -269,8 +258,13 @@ export default function OrchestrationPanel({
     const gone: Settled[] = []
     for (const [key, run] of seen.current) {
       if (live.has(key)) continue
-      // Prefer the finished snapshot — it carries the run's own summary line.
-      gone.push({ key, run: latest.get(key) ?? run, collapsed: false })
+      // Prefer the run as it is now — it carries the run's own summary line,
+      // or the pause or stop that took it off the live list.
+      gone.push({
+        key,
+        run: latest.get(key) ?? currentRef.current?.get(key) ?? run,
+        collapsed: false
+      })
     }
     seen.current = live
 
@@ -335,15 +329,24 @@ export default function OrchestrationPanel({
   if (sections.length === 0) return null
 
   const liveCount = sections.filter((section) => !section.collapsed).length
+  // The runs held for a beat after they end are not running: while only
+  // those are left, the header says they finished rather than "running".
+  const title = liveCount > 0 ? 'Running in background' : 'Finished in background'
 
   return (
-    <div className="orp" aria-label="Live orchestration">
-      <header className="orp-head">
+    <div className="orp" aria-label={title}>
+      <header className={`orp-head${liveCount > 0 ? '' : ' orp-head--settled'}`}>
         <span className="orp-head-dot" aria-hidden="true" />
-        <span className="orp-head-title">Live</span>
-        <span className="orp-head-count">{liveCount > 0 ? liveCount : sections.length}</span>
+        <span className="orp-head-title">{title}</span>
+        <span className="orp-head-count">· {liveCount > 0 ? liveCount : sections.length}</span>
         <span className="orp-head-spacer" />
-        <button className="orp-close" type="button" aria-label="Hide live panel" onClick={onClose}>
+        <button
+          className="orp-close"
+          type="button"
+          aria-label="Hide background panel"
+          title="Hide"
+          onClick={onClose}
+        >
           <Icon name="sidebar.right" size={14} />
         </button>
       </header>
@@ -407,9 +410,9 @@ function PhaseGroup({ group }: { group: PanelGroup }): JSX.Element {
       )}
       {/* Drawn even for a phase nothing has reached: an empty track holds the
           row's height, so a phase starting mid-run tints in place instead of
-          pushing everything under it down. A headerless group (a swarm) is the
-          whole run, and its meter is already the run's own — two identical
-          bars stacked would just read as noise. */}
+          pushing everything under it down. A headerless group (agents outside
+          any phase) has no meter of its own: it would sit directly under the
+          run's, and two bars stacked read as one thing said twice. */}
       {group.title !== '' && (
         <div className="orp-phase-meter">
           <ProgressMeter counts={group.counts} />

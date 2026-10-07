@@ -13,14 +13,17 @@
    contrast is bought by choosing a ramp that reads on the surface rather than
    by manufacturing a surface that suits the ramp. */
 
-/* The palette lives in custom properties because the effect has to read on
-   three unrelated surfaces: the composer (dark canvas, or white in light
-   appearance) and a sent user bubble (always accent blue). A surface that is
-   not dark declares its own ramp — see .tr-user-bubble in transcript.css.
-   Defaults must be set here, on :root, and not on .glow: a declaration on the
-   element itself would beat the surface's inherited one. */
+/* Every stop of every ramp passes AA (4.5:1) on both surfaces it lights,
+   the composer and the user bubble, so a word stays readable wherever the
+   sweep happens to be; tests/theme.test.ts holds them to that.
+
+   The palette lives in custom properties because the effect has to read on
+   more than one surface: the composer and a sent user bubble, each a neutral
+   grey in either appearance. A surface that needs different hues declares
+   its own ramp; defaults must be set here, on :root, and not on .glow: a
+   declaration on the element itself would beat the surface's inherited one. */
 :root {
-  --glow-ramp: #7c3aed, #a855f7, #e879f9, #ecfeff, #38bdf8, #22d3ee;
+  --glow-ramp: #a78bfa, #c084fc, #e879f9, #ecfeff, #38bdf8, #22d3ee;
 }
 
 /* On white the cyan end all but disappears, and a white specular stop would be
@@ -28,7 +31,20 @@
    spends the highlight on magenta instead. */
 @media (prefers-color-scheme: light) {
   :root {
-    --glow-ramp: #6d28d9, #9333ea, #c026d3, #db2777, #0284c7, #0891b2;
+    --glow-ramp: #6d28d9, #9333ea, #a21caf, #be185d, #0369a1, #0e7490;
+  }
+}
+
+/* Monochrome keeps the shimmer and drops the hues: a sweep of greys, with the
+   specular stop at the ink's far end (white on dark; on light, where white
+   would hole the word, a mid grey between two inks). */
+:root[data-accent='mono'] {
+  --glow-ramp: #98989d, #c7c7cc, #ffffff, #e5e5ea, #aeaeb2, #98989d;
+}
+
+@media (prefers-color-scheme: light) {
+  :root[data-accent='mono'] {
+    --glow-ramp: #1d1d1f, #48484a, #6c6c70, #58585c, #2c2c2e, #1d1d1f;
   }
 }
 
@@ -70,7 +86,7 @@ textarea.glow-input {
    glyphs are painted back in. */
 textarea.glow-input::selection {
   color: var(--text-primary);
-  background: color-mix(in srgb, var(--accent) 45%, transparent);
+  background: var(--selection);
 }
 
 .glow {
@@ -85,22 +101,79 @@ textarea.glow-input::selection {
   /* Weight does the work the pill used to: a lit phrase is heavier than the
      prose around it even where the hue happens to sit close to it. */
   font-weight: 600;
-  animation: glow-drift 7s linear infinite;
+  /* The band drifts across it once every 7 s, unhurried on purpose: this
+     sits under the cursor while someone is typing, and anything fast enough
+     to notice as motion is fast enough to distract (the TUI's 7 s drift).
+     glowDrift.ts moves it, in steps of 30 a second and only while the phrase
+     can be seen: as an animation here, the main thread restyled it on every
+     display frame. Under reduced motion it stays where it starts — the
+     colour still says the phrase is special. */
 }
 
-/* Unhurried on purpose. This sits under the cursor while someone is typing,
-   and anything fast enough to notice as motion is fast enough to distract —
-   the same reasoning as the TUI's 7s drift. */
-@keyframes glow-drift {
-  to {
-    background-position: -200% 0;
-  }
+/* Under "Ask first" workflows do not run, so the phrase is marked but not
+   lit: the text colour, still, with a dotted underline that says "this is the
+   phrase" without the shimmer that says "this is armed". The hint under the
+   composer says why. */
+.glow.glow--muted {
+  background-image: none;
+  color: var(--text-secondary);
+  -webkit-text-fill-color: currentColor;
+  font-weight: 600;
+  text-decoration: underline dotted color-mix(in srgb, var(--text-secondary) 70%, transparent);
+  text-underline-offset: 3px;
+  animation: none;
 }
 
-/* Someone who has asked not to see motion still gets the colour — the point of
-   the effect is that the phrase is special, and that survives being still. */
-@media (prefers-reduced-motion: reduce) {
-  .glow {
-    animation: none;
-  }
+/* The line under the composer that explains a lit (or muted) phrase. Small
+   and quiet: it annotates the field, it is not a banner. */
+.workflow-hint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 22px;
+  padding: 4px var(--sp-md) 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text-secondary);
+}
+
+.workflow-hint > svg {
+  flex: none;
+  color: var(--text-tertiary);
+}
+
+.workflow-hint--paused > svg {
+  color: var(--warning);
+}
+
+.workflow-hint-text {
+  min-width: 0;
+}
+
+.workflow-hint-strong {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.workflow-hint-action {
+  flex: none;
+  margin-left: 2px;
+  padding: 2px 8px;
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  background: var(--surface-raised);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.workflow-hint-action:hover {
+  background: var(--hover-fill);
+}
+
+.workflow-hint-action:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
 }

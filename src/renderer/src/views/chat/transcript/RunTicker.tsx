@@ -1,5 +1,13 @@
 // Port of spettro-apple/Spettro/Views/RunTicker.swift — the live readout of
-// an in-flight turn: spinner, elapsed time, and tokens streamed so far.
+// an in-flight turn, as one muted line at the tail of the transcript:
+// "Working… 12s · 3.4k tokens · Esc to interrupt".
+//
+// The first word says what the turn is doing as far as the transcript can
+// tell. That matters more here than in most chat apps: the CLI does not
+// stream its answer (it arrives whole when the turn ends), so after the last
+// tool call there is a stretch where nothing on screen moves. Saying
+// "Writing the answer…" there is the difference between a turn that looks
+// busy and one that looks stuck.
 //
 // It ticks once a second rather than per frame: the spinner carries the
 // sense of motion, and re-rendering a text run at 20 fps to advance a
@@ -12,13 +20,58 @@
 import { useEffect, useRef, useState } from 'react'
 import type { CSSProperties, JSX } from 'react'
 import type { ACPConfigOption } from '@shared/acp'
-import type { ChatDetail } from '@shared/model'
+import type { ChatDetail, TranscriptItem } from '@shared/model'
 import { modeColor } from '@renderer/design/theme'
+import { useStore } from '@renderer/state/store'
 import './transcript.css'
+
+/**
+ * What a running turn is doing, from the tail of its transcript: waiting on
+ * the user (an approval, or an answer to its question), thinking (reasoning
+ * is streaming), working (a tool is running), or — every tool settled and
+ * the model on its own again — writing the answer.
+ */
+export function runPhase(
+  items: TranscriptItem[],
+  awaitingApproval: boolean,
+  awaitingAnswer = false
+): string {
+  if (awaitingApproval) return 'Waiting for your approval…'
+  if (awaitingAnswer) return 'Waiting for your answer…'
+  // Only this turn counts: the tail after the newest user message that
+  // started one (a steer sent mid-turn doesn't start anything).
+  let start = 0
+  for (let i = items.length - 1; i >= 0; i--) {
+    const item = items[i]
+    const startsTurn =
+      item.kind === 'message' && item.message.role === 'user' && item.message.steering === undefined
+    if (startsTurn) {
+      start = i + 1
+      break
+    }
+  }
+  const turn = items.slice(start)
+  const running = turn.some(
+    (item) =>
+      item.kind === 'tool' && (item.tool.status === 'in_progress' || item.tool.status === 'pending')
+  )
+  if (running) return 'Working…'
+  const last = turn.findLast((item) => !(item.kind === 'message' && item.message.role === 'user'))
+  if (!last) return 'Working…'
+  if (last.kind === 'message' && last.message.role === 'reasoning' && last.message.isStreaming) {
+    return 'Thinking…'
+  }
+  if (last.kind === 'tool' || (last.kind === 'message' && last.message.role !== 'notice')) {
+    return 'Writing the answer…'
+  }
+  return 'Working…'
+}
 
 export function RunTicker({ chat }: { chat: ChatDetail }): JSX.Element | null {
   const busy = chat.isBusy
   const tokensUsed = chat.usage?.tokensUsed ?? 0
+  const awaiting = useStore((s) => s.permissions.some((p) => p.chatId === chat.id))
+  const asking = useStore((s) => s.questions.some((q) => q.chatId === chat.id))
 
   const [startedAt, setStartedAt] = useState<number | null>(null)
   const [now, setNow] = useState(() => Date.now())
@@ -50,15 +103,26 @@ export function RunTicker({ chat }: { chat: ChatDetail }): JSX.Element | null {
   const elapsed = elapsedLabel(startedAt, now)
   const liveTokens = chat.usage?.tokensUsed != null ? Math.max(0, tokensUsed - tokensAtRunStart.current) : 0
   const color = tickerModeColor(chat.configOptions)
+  const phase = runPhase(chat.items, awaiting, asking)
+  // While the turn waits on the user, Esc answers the sheet (deny, skip)
+  // rather than interrupting, so the hint would be wrong there.
+  const waitingOnUser = awaiting || asking
 
   return (
-    <div className="tk" aria-label={`Working for ${elapsed}`}>
+    <div className="tk" role="status" aria-label={`${phase} ${elapsed}`}>
       <SpettroSpinner size={12} color={color} />
+      <span className="tk-phase tr-shimmer">{phase}</span>
       <span className="tk-num">{elapsed}</span>
       {liveTokens > 0 && (
         <>
-          <span>·</span>
-          <span className="tk-num">{formatTokens(liveTokens)} tok</span>
+          <span aria-hidden="true">·</span>
+          <span className="tk-num">{formatTokens(liveTokens)} tokens</span>
+        </>
+      )}
+      {!waitingOnUser && (
+        <>
+          <span aria-hidden="true">·</span>
+          <span className="tk-hint">Esc to interrupt</span>
         </>
       )}
     </div>
@@ -68,7 +132,7 @@ export function RunTicker({ chat }: { chat: ChatDetail }): JSX.Element | null {
 /** The active mode's tint, so the spinner matches the agent that's running. */
 function tickerModeColor(options: ACPConfigOption[]): string {
   const mode = options.find((o) => o.id === 'mode')
-  if (!mode) return 'var(--accent)'
+  if (!mode) return 'var(--accent-text)'
   return modeColor(currentLabel(mode))
 }
 

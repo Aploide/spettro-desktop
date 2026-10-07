@@ -6,6 +6,8 @@
 
 import { describe, expect, it } from 'vitest'
 import {
+  SpettroExtensions,
+  UnsupportedExtensionError,
   decodeWorkflowInfo,
   decodeWorkflowList,
   decodeWorkflowRuns,
@@ -121,7 +123,10 @@ describe('decodeWorkflowRuns', () => {
     const runs = decodeWorkflowRuns({
       runs: [{ runId: 'wf_1', dir: '/d/wf_1', modifiedAt: 1700000000000 }]
     })
-    expect(runs).toEqual([{ runId: 'wf_1', dir: '/d/wf_1', modifiedAt: 1700000000000 }])
+    // Name and outcome come from the run's folder, which main reads after.
+    expect(runs).toEqual([
+      { runId: 'wf_1', dir: '/d/wf_1', modifiedAt: 1700000000000, name: '', finished: false }
+    ])
   })
 
   it('drops an entry with no run id, since resume is keyed on it', () => {
@@ -131,5 +136,32 @@ describe('decodeWorkflowRuns', () => {
 
   it('answers an absent list with an empty one', () => {
     expect(decodeWorkflowRuns({})).toEqual([])
+  })
+})
+
+describe('SpettroExtensions workflow calls', () => {
+  function recorder(supports?: (method: string) => boolean) {
+    const calls: { method: string; params: unknown }[] = []
+    const caller = {
+      raw: async (method: string, params: unknown) => {
+        calls.push({ method, params })
+        return { workflows: [], searchPaths: [], cwd: '/p' }
+      },
+      ...(supports ? { supports } : {})
+    }
+    return { calls, ext: new SpettroExtensions(caller as never) }
+  }
+
+  it('scope by session when live and by absolute folder when cold (ext_workflow.go resolveCwd)', async () => {
+    const { calls, ext } = recorder()
+    await ext.listWorkflows({ sessionId: 's1' })
+    await ext.readWorkflow({ cwd: '/work/acme' }, 'review')
+    expect(calls.map((c) => c.params)).toEqual([{ sessionId: 's1' }, { cwd: '/work/acme', name: 'review' }])
+  })
+
+  it('refuse a method the agent did not list, without asking it', async () => {
+    const { calls, ext } = recorder((m) => m !== '_spettro/workflow/list')
+    await expect(ext.listWorkflows({ cwd: '/p' })).rejects.toBeInstanceOf(UnsupportedExtensionError)
+    expect(calls).toEqual([])
   })
 })

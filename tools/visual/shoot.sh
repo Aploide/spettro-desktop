@@ -37,13 +37,81 @@ SCENES=(
   workflow-running
   workflow-finished
   workflow-wide
-  swarm-running
-  swarm-finished
+  workflow-paused
+  workflow-stopped
+  workflow-continued
+  workflow-detail
+  workflow-failed
   mixed
   studio
   studio:empty
   studio:broken
   chrome
+  chrome:thinking
+  chrome:meteor
+  chrome:smoulder
+  app:welcome
+  app:welcome-empty
+  app:welcome-folders
+  app:chat
+  app:chat-tools
+  app:chat-error
+  app:chat-steering
+  app:cleared
+  app:commands
+  app:context
+  app:busy
+  app:guide
+  app:ultra
+  app:slash
+  app:mention
+  app:model-menu
+  app:session-settings
+  app:thinking
+  app:thinking-paused
+  app:sidebar-many
+  app:sidebar-menu
+  app:collapsed
+  app:switcher
+  app:permission-bash
+  app:permission-diff
+  app:permission-compact
+  app:permission-denied
+  app:permission-orphan
+  app:question
+  app:question-multi
+  app:settings-general
+  app:settings-account
+  app:settings-models
+  app:settings-permissions
+  app:settings-memory
+  app:settings-remote
+  app:settings-updates
+  app:settings-advanced
+  app:settings-shortcuts
+  app:settings-about
+  app:onboarding
+  app:installing
+  app:install-failed
+  app:gate
+  app:gate-keys
+  app:failure
+  app:reconnecting
+  app:confirm-delete
+  app:deleted-undo
+  app:no-model
+  app:no-model-sent
+  app:no-model-connect
+  app:no-model-error
+  app:no-model-menu
+  app:no-model-signin
+  app:mode-menu
+  app:welcome-sent
+  app:welcome-new-project
+  app:welcome-more
+  app:gate-signin
+  app:gate-local
+  app:error-toast
 )
 
 THEMES="${SHOT_THEMES:-dark,light}"
@@ -53,7 +121,7 @@ THEME_COUNT="$(printf '%s' "$THEMES" | awk -F, '{print NF}')"
 
 rm -rf "$OUT"
 for scene in "${SCENES[@]}"; do
-  SHOT_THEMES="$THEMES" SHOT_HEIGHT="${SHOT_HEIGHT:-1800}" \
+  SHOT_THEMES="$THEMES" SHOT_HEIGHT="${SHOT_HEIGHT:-1800}" SHOT_ACCENT="${SHOT_ACCENT:-}" \
     "$ELECTRON" --no-sandbox tools/visual/capture.cjs "$DIST" "$OUT" "$scene"
 done
 

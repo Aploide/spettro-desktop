@@ -6,6 +6,7 @@
 // (including a broken script and a compile error, which are the states worth
 // looking at) and mounts the real component. Nothing about the view is faked.
 
+import './accentPrelude'
 import { useEffect } from 'react'
 import type { JSX } from 'react'
 import { createRoot } from 'react-dom/client'
@@ -13,6 +14,7 @@ import WorkflowStudio from '@renderer/views/workflows/WorkflowStudio'
 import { initStore } from '@renderer/state/store'
 import { SCENES } from './fixtures'
 import '@renderer/design/theme.css'
+import '@renderer/design/shell.css'
 import '@renderer/design/form.css'
 import '@renderer/views/chat/transcript/transcript.css'
 import './harness.css'
@@ -99,7 +101,9 @@ const RUN_CHAT = {
   configOptions: [],
   commands: [],
   plan: [],
-  usage: null
+  usage: null,
+  lastTurn: null,
+  sessionTokens: 0
 }
 
 const MODE = new URLSearchParams(location.search).get('mode') ?? 'editing'
@@ -132,6 +136,12 @@ const ANSWERS: Record<string, unknown> = {
             { title: 'Verify', detail: 'adversarial refutation' }
           ]
         },
+  // _spettro/workflow/runs with what main reads from each run's folder.
+  workflowRuns: [
+    { runId: 'wf-7c1e', dir: '/home/carlo/.spettro/sessions/s-41/workflows/wf-7c1e', modifiedAt: Date.now() - 4 * 60_000, name: 'review-changes', finished: true },
+    { runId: 'wf-5a90', dir: '/home/carlo/.spettro/sessions/s-41/workflows/wf-5a90', modifiedAt: Date.now() - 3 * 3_600_000, name: 'audit-deps', finished: false },
+    { runId: 'wf-2b44', dir: '/home/carlo/.spettro/sessions/s-38/workflows/wf-2b44', modifiedAt: Date.now() - 2 * 86_400_000, name: 'review-changes', finished: true }
+  ],
   workflowRun: 'scratch-1',
   workflowDiscardRun: undefined,
   cancel: undefined

@@ -5,18 +5,25 @@
 // (the phone is already paired and just needs the host listening); showing a
 // QR is the once-ever action. Collapsing them into one button would put a
 // pairing code on screen for no reason.
+//
+// It lives in Settings › Remote. A code that can't be drawn still pairs: the
+// link behind it is offered to copy. A code that runs out says so, with "Show
+// New Code", instead of quietly vanishing. Removing a device asks first.
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { PairedDeviceDTO, RemoteHostState } from '@shared/model'
-import { PAIRING_WINDOW_MS } from '@shared/remote'
 import { call, useApp } from '../../state/store'
+import { confirmDialog } from '@renderer/views/common/ConfirmDialog'
+import { CopyButton } from '@renderer/views/common/Disclosure'
 import './remote.css'
 
 export interface RemoteAccessViewProps {
   onClose?: () => void
+  /** Inside Settings: the pane has its own title, so no header. */
+  embedded?: boolean
 }
 
-export default function RemoteAccessView({ onClose }: RemoteAccessViewProps): JSX.Element {
+export default function RemoteAccessView({ onClose, embedded = false }: RemoteAccessViewProps): JSX.Element {
   const app = useApp()
   const remote = app?.remote ?? null
 
@@ -28,35 +35,25 @@ export default function RemoteAccessView({ onClose }: RemoteAccessViewProps): JS
     return () => clearInterval(timer)
   }, [])
 
-  // The DTO carries no expiry, but the window is always 5 minutes: pin the
-  // deadline locally when a pairing QR appears.
-  const deadlineRef = useRef<number | null>(null)
-  const pairingOpen = remote?.pairingQR != null
-  useEffect(() => {
-    if (pairingOpen) deadlineRef.current = Date.now() + PAIRING_WINDOW_MS
-    else deadlineRef.current = null
-  }, [pairingOpen, remote?.pairingURL])
-
   if (!remote) {
     return (
-      <div className="remote">
-        <Header onClose={onClose} />
-        <div className="remote__divider" />
+      <div className={`remote${embedded ? ' remote--embedded' : ''}`}>
+        {!embedded && <Header onClose={onClose} />}
+        {!embedded && <div className="remote__divider" />}
         <p className="remote__muted">Remote access is not available yet.</p>
       </div>
     )
   }
 
+  // Open while there is a code to show (drawn or not) — or one that ran out.
+  const pairing = remote.pairingOpen || remote.pairingURL !== null || remote.pairingExpired
+
   return (
-    <div className="remote">
-      <Header onClose={onClose} />
-      <div className="remote__divider" />
+    <div className={`remote${embedded ? ' remote--embedded' : ''}`}>
+      {!embedded && <Header onClose={onClose} />}
+      {!embedded && <div className="remote__divider" />}
       <SwitchRow remote={remote} />
-      {remote.pairingQR != null ? (
-        <PairingPanel remote={remote} now={now} deadline={deadlineRef.current} />
-      ) : (
-        <PairedDevices remote={remote} now={now} />
-      )}
+      {pairing ? <PairingPanel remote={remote} now={now} /> : <PairedDevices remote={remote} now={now} />}
       <div className="remote__spacer" />
       <footer className="remote__footer">
         <LockIcon />
@@ -112,7 +109,7 @@ function SwitchRow({ remote }: { remote: RemoteHostState }): JSX.Element {
   const statusDetail = !remote.enabled
     ? 'Your phone will show this computer as unavailable.'
     : connected.length === 0
-      ? `${remote.hostName}${remote.port != null ? ` · port ${remote.port}` : ''}`
+      ? 'Open Spettro on your phone, on the same Wi-Fi, to connect.'
       : connected.length === 1
         ? `${connected[0].name} is connected`
         : `${connected.length} devices connected`
@@ -153,15 +150,18 @@ function SwitchRow({ remote }: { remote: RemoteHostState }): JSX.Element {
             />
           </span>
         ) : (
-          <button
-            className="remote__rename-link"
-            onClick={() => {
-              setDraftName(remote.hostName)
-              setRenaming(true)
-            }}
-          >
-            Shown to your devices as “{remote.hostName}” — rename
-          </button>
+          <span className="remote__status-detail">
+            Shown to your devices as “{remote.hostName}”{' '}
+            <button
+              className="link remote__rename-link"
+              onClick={() => {
+                setDraftName(remote.hostName)
+                setRenaming(true)
+              }}
+            >
+              Rename
+            </button>
+          </span>
         )}
       </div>
       <label className="remote__toggle">
@@ -182,24 +182,38 @@ function SwitchRow({ remote }: { remote: RemoteHostState }): JSX.Element {
 // Pairing panel
 // ---------------------------------------------------------------------------
 
-function PairingPanel({
-  remote,
-  now,
-  deadline
-}: {
-  remote: RemoteHostState
-  now: number
-  deadline: number | null
-}): JSX.Element {
+function PairingPanel({ remote, now }: { remote: RemoteHostState; now: number }): JSX.Element {
+  const deadline = remote.pairingExpiresAt
   const remaining = deadline != null ? Math.max(0, Math.floor((deadline - now) / 1000)) : null
+  const expired = remote.pairingExpired || remaining === 0
+
+  if (expired) {
+    return (
+      <div className="remote__pairing">
+        <div className="remote__qr remote__qr--missing">
+          <QRIcon />
+          <span>Code expired</span>
+        </div>
+        <div className="remote__pairing-text">
+          <span className="remote__pairing-title">This code has expired</span>
+          <span className="remote__pairing-expiry">Codes work for five minutes. Show a new one to pair.</span>
+        </div>
+        <div className="remote__pairing-actions">
+          <button className="remote__button" onClick={() => void call('remoteClosePairing')}>
+            Done
+          </button>
+          <button className="remote__button remote__button--accent" onClick={() => void call('remoteOpenPairing')}>
+            Show new code
+          </button>
+        </div>
+      </div>
+    )
+  }
+
   // A visible countdown is the honest way to present a code that stops
   // working: a user who walks away and comes back can see why a scan failed.
   const expiryText =
-    remaining == null
-      ? ''
-      : remaining > 0
-        ? `Expires in ${Math.floor(remaining / 60)}:${String(remaining % 60).padStart(2, '0')}`
-        : 'This code has expired — show a new one.'
+    remaining == null ? '' : `Expires in ${Math.floor(remaining / 60)}:${String(remaining % 60).padStart(2, '0')}`
 
   return (
     <div className="remote__pairing">
@@ -212,9 +226,19 @@ function PairingPanel({
         </div>
       )}
       <div className="remote__pairing-text">
-        <span className="remote__pairing-title">Scan this in Spettro on your iPhone</span>
+        <span className="remote__pairing-title">
+          {remote.pairingQR ? 'Scan this in Spettro on your iPhone' : 'Pair with the link instead'}
+        </span>
         <span className="remote__pairing-expiry">{expiryText}</span>
       </div>
+      {remote.pairingURL && (
+        <div className="remote__manual">
+          <span className="remote__manual-text">
+            Can&rsquo;t scan? Copy the pairing link and open it on your phone.
+          </span>
+          <CopyButton text={remote.pairingURL} label="Copy link" className="remote__button" />
+        </div>
+      )}
       <button className="remote__button" onClick={() => void call('remoteClosePairing')}>
         Done
       </button>
@@ -231,10 +255,10 @@ function PairedDevices({ remote, now }: { remote: RemoteHostState; now: number }
   return (
     <section className="remote__devices">
       <div className="remote__devices-head">
-        <h3 className="remote__devices-title">Paired Devices</h3>
+        <h3 className="remote__devices-title">Paired devices</h3>
         <button className="remote__button remote__button--accent" onClick={() => void call('remoteOpenPairing')}>
           <QRIcon />
-          Pair a Device
+          Pair a device
         </button>
       </div>
       {active.length === 0 ? (
@@ -284,8 +308,19 @@ function DeviceRow({
         <span className="remote__device-name">{device.name}</span>
         <span className="remote__device-detail">{detail}</span>
       </div>
-      <button className="remote__remove" onClick={() => void call('remoteRevokeDevice', device.deviceId)}>
-        Remove
+      <button
+        className="remote__remove"
+        onClick={async () => {
+          const answer = await confirmDialog({
+            title: `Remove “${device.name}”?`,
+            message: 'It won’t be able to connect to this computer until you pair it again.',
+            confirmLabel: 'Remove',
+            destructive: true
+          })
+          if (answer === 'confirm') void call('remoteRevokeDevice', device.deviceId)
+        }}
+      >
+        Remove…
       </button>
     </div>
   )

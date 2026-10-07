@@ -6,9 +6,16 @@
 // %LOCALAPPDATA%\Programs\spettro on Windows) → dev-checkout fallback
 // (a `spettro/bin/spettro` or `spettro/spettro` build in a parent directory
 // of the app, e.g. ../spettro when running from the desktop repo).
+//
+// Everything that runs the binary is asynchronous: `--version` against a
+// broken or hung binary used to block the main process — the whole window —
+// for up to twelve seconds while it said "Looking for Spettro…".
+//
+// SPETTRO_IGNORE_DEV_CLI=1 skips the dev-checkout fallback, so a dev run from
+// beside the CLI repo can still see the first-run setup screens.
 
-import { spawnSync } from 'child_process'
-import { accessSync, constants, statSync } from 'fs'
+import { execFile } from 'child_process'
+import { accessSync, constants, existsSync, statSync } from 'fs'
 import { homedir } from 'os'
 import { delimiter, dirname, join } from 'path'
 
@@ -79,39 +86,89 @@ function candidatePaths(): { path: string; isDev: boolean }[] {
       list.push({ path: join(dir, 'spettro'), isDev: false })
     }
   }
-  for (const dev of devCandidates()) {
-    list.push({ path: dev, isDev: true })
+  if (process.env.SPETTRO_IGNORE_DEV_CLI !== '1') {
+    for (const dev of devCandidates()) {
+      list.push({ path: dev, isDev: true })
+    }
   }
   return list
 }
 
-/** Best-effort `spettro --version` (then `spettro version`) with a short
- *  timeout; the authoritative version comes from the ACP handshake. */
-function readVersion(path: string): string | null {
-  for (const args of [['--version'], ['version']]) {
+/** How long `--version` may take before the binary is assumed not to say. */
+const VERSION_TIMEOUT_MS = 6000
+
+function runVersion(path: string, args: string[]): Promise<string | null> {
+  return new Promise((resolve) => {
     try {
-      const result = spawnSync(path, args, { timeout: 6000, encoding: 'utf8' })
-      const out = (result.stdout ?? '').trim()
-      if (out !== '' && out.length < 200) return out
+      execFile(path, args, { timeout: VERSION_TIMEOUT_MS, encoding: 'utf8', windowsHide: true }, (_err, stdout) => {
+        // Whatever it printed counts, even with a non-zero exit.
+        const out = (stdout ?? '').trim()
+        resolve(out !== '' && out.length < 200 ? out : null)
+      })
     } catch {
-      // fall through
+      resolve(null)
     }
-  }
-  return null
+  })
+}
+
+/** Best-effort `spettro --version` (then `spettro version`) with a short
+ *  timeout, off the main thread; the authoritative version comes from the
+ *  ACP handshake. */
+async function readVersion(path: string): Promise<string | null> {
+  return (await runVersion(path, ['--version'])) ?? (await runVersion(path, ['version']))
 }
 
 /** Returns the first usable CLI, honoring an explicit user override first. */
-export function locateCLI(explicitPath: string | null): LocatedCLI | null {
+export async function locateCLI(explicitPath: string | null): Promise<LocatedCLI | null> {
   if (explicitPath && explicitPath.trim() !== '' && isExecutable(explicitPath)) {
-    return { path: explicitPath, version: readVersion(explicitPath), isDev: false }
+    return { path: explicitPath, version: await readVersion(explicitPath), isDev: false }
   }
   const seen = new Set<string>()
   for (const candidate of candidatePaths()) {
     if (seen.has(candidate.path)) continue
     seen.add(candidate.path)
     if (isExecutable(candidate.path)) {
-      return { path: candidate.path, version: readVersion(candidate.path), isDev: candidate.isDev }
+      return {
+        path: candidate.path,
+        version: await readVersion(candidate.path),
+        isDev: candidate.isDev
+      }
     }
   }
   return null
+}
+
+/** Why a file the user chose can't be the CLI. */
+export type ExplicitCLIProblem = 'missing' | 'not-runnable' | 'not-spettro'
+
+/** Each problem, said so it points the right way: a path with nothing at it
+ *  is not "the wrong file". */
+export const EXPLICIT_CLI_PROBLEM: Record<ExplicitCLIProblem, string> = {
+  missing: 'There’s no file at that path.',
+  'not-runnable': 'Spettro can’t run that file. Check that it’s the spettro program.',
+  'not-spettro': 'That file isn’t Spettro. Choose the file named “spettro”.'
+}
+
+/** Whether `--version` output is Spettro's: "spettro v2.8.2", "spettro dev",
+ *  or a bare version from a build that prints only that. */
+export function looksLikeSpettroVersion(output: string | null): boolean {
+  if (output === null) return false
+  return /\bspettro\b/i.test(output) || /^v?\d+\.\d+(?:\.\d+)?(?:[-+.\w]*)$/.test(output.trim())
+}
+
+/**
+ * A file the user chose ("Use an existing copy…", "Type a path"), checked
+ * before it is saved: it must exist, be runnable, and say it is Spettro when
+ * asked its version. Unlike locateCLI, it never falls back to another copy.
+ */
+export async function checkExplicitCLI(
+  path: string,
+  version: (p: string) => Promise<string | null> = readVersion
+): Promise<{ ok: true; cli: LocatedCLI } | { ok: false; problem: ExplicitCLIProblem }> {
+  const trimmed = path.trim()
+  if (trimmed === '' || !existsSync(trimmed)) return { ok: false, problem: 'missing' }
+  if (!isExecutable(trimmed)) return { ok: false, problem: 'not-runnable' }
+  const said = await version(trimmed)
+  if (!looksLikeSpettroVersion(said)) return { ok: false, problem: 'not-spettro' }
+  return { ok: true, cli: { path: trimmed, version: said, isDev: false } }
 }

@@ -1,11 +1,20 @@
-// Port of Platforms/macOS/Views/ChatHeaderView.swift (doc 22): chat title and
-// project on the left; plan chip, git stat chip, and context-window ring on
-// the right.
+// The chat's slim (44px) title bar, after ChatHeaderView.swift (doc 22) and
+// the Claude Code tab: the session title, which you click to rename in place,
+// a muted `project › branch` breadcrumb, and on the right the uncommitted-change
+// chip, the context-window ring and the terminal toggle. While the sidebar is
+// collapsed its reopen button leads the bar, where the sidebar's own was.
+// While the engine restarts underneath (a crash, an update, Restart engine)
+// a "Reconnecting…" pill sits in the bar — the only sign of it besides Send
+// waiting; nothing on screen is unmounted.
 
-import { useEffect, useRef, useState } from 'react'
-import type { ACPPlanEntry, ACPUsage } from '@shared/acp'
-import type { ChatDetail, GitStat } from '@shared/model'
-import { call } from '@renderer/state/store'
+import { memo, useEffect, useRef, useState } from 'react'
+import type { ACPUsage } from '@shared/acp'
+import type { ChatDetail, GitStat, TurnSummary } from '@shared/model'
+import { call, useApp, useStore } from '@renderer/state/store'
+import { startNewSession, toggleSidebar, toggleTerminal, useShell } from '@renderer/state/shell'
+import { Icon } from '@renderer/design/icons'
+import InlineRename from '@renderer/views/shell/InlineRename'
+import { withShortcut } from '@renderer/views/shell/util'
 import { DiffStatLabel } from './transcript/ToolCallView'
 
 /** `projectURL.lastPathComponent` — works for both / and \ separators. */
@@ -14,27 +23,130 @@ export function projectName(projectPath: string): string {
   return parts[parts.length - 1] || projectPath
 }
 
-export default function ChatHeader({ chat }: { chat: ChatDetail }): JSX.Element {
+/** Ctrl+` everywhere, macOS included — it is the terminal toggle people
+ *  already know from their editor. */
+export const TERMINAL_SHORTCUT = 'Ctrl+`'
+
+/** Memoised: a streamed chunk changes the transcript, which the header
+ *  doesn't show (the chat view hands it a chat steady across those). */
+export default memo(ChatHeader)
+
+function ChatHeader({ chat }: { chat: ChatDetail }): JSX.Element {
   const git = useGitStat(chat.projectPath, chat.isBusy)
   const name = projectName(chat.projectPath)
+  const [renaming, setRenaming] = useState(false)
+  const terminalVisible = useShell((s) => s.terminalVisible)
+
   return (
-    <div className="chat-header">
+    <header className="chat-header">
+      <SidebarReopenButton withNewSession />
       <div className="chat-header-titles">
-        <div className="chat-header-title">{chat.title}</div>
-        <div className="chat-header-project">
-          <FolderIcon />
-          <span className="chat-header-project-name">
-            {git.branch ? `${name} · ${git.branch}` : name}
-          </span>
-        </div>
+        {renaming ? (
+          <InlineRename
+            chatId={chat.id}
+            title={chat.title}
+            className="chat-header-rename"
+            onDone={() => setRenaming(false)}
+          />
+        ) : (
+          <button
+            type="button"
+            className="chat-header-title"
+            title={`${chat.title}\nClick to rename`}
+            aria-label={`${chat.title}, rename session`}
+            onClick={() => setRenaming(true)}
+          >
+            {chat.title}
+          </button>
+        )}
+        <span className="chat-header-crumb" title={chat.projectPath}>
+          <span className="chat-header-crumb-part">{name}</span>
+          {git.branch && (
+            <>
+              <span className="chat-header-crumb-sep" aria-hidden>
+                ›
+              </span>
+              <span className="chat-header-crumb-part">{git.branch}</span>
+            </>
+          )}
+        </span>
       </div>
       <div className="chat-header-spacer" />
+      <ReconnectingPill />
       <div className="chat-header-chips">
-        {chat.plan.length > 0 && <PlanChip entries={chat.plan} />}
         {git.files.length > 0 && <GitStatChip git={git} projectPath={chat.projectPath} />}
-        {chat.usage && <ContextMeter usage={chat.usage} />}
+        {chat.usage && (
+          <ContextMeter usage={chat.usage} lastTurn={chat.lastTurn} sessionTokens={chat.sessionTokens} />
+        )}
+        <button
+          type="button"
+          className={'header-btn' + (terminalVisible ? ' header-btn--on' : '')}
+          title={`${terminalVisible ? 'Hide terminal' : 'Show terminal'} (${TERMINAL_SHORTCUT})`}
+          aria-label="Terminal"
+          data-testid="terminal-toggle"
+          aria-pressed={terminalVisible}
+          onClick={toggleTerminal}
+        >
+          <Icon name="terminal" size={15} />
+        </button>
       </div>
-    </div>
+    </header>
+  )
+}
+
+/** "Reconnecting…" while the engine restarts under the window; nothing
+ *  otherwise. */
+export function ReconnectingPill(): JSX.Element | null {
+  const reconnecting = useApp()?.connection === 'reconnecting'
+  if (!reconnecting) return null
+  return (
+    <span className="reconnecting-pill" role="status" data-testid="reconnecting">
+      <span className="reconnecting-dot" aria-hidden />
+      Reconnecting…
+    </span>
+  )
+}
+
+/** Leads a title bar while the sidebar is collapsed — the way back is where
+ *  the sidebar's own hide button was, and (in a chat) New session beside it,
+ *  so starting over never depends on knowing the shortcut. Renders nothing
+ *  while the sidebar is showing. */
+export function SidebarReopenButton({ withNewSession = false }: { withNewSession?: boolean }): JSX.Element | null {
+  const collapsed = useShell((s) => s.sidebarCollapsed)
+  // With the sidebar away, its "Needs you" badges are too: the button says
+  // that another session is waiting on you.
+  const selectedId = useApp()?.selectedSessionId ?? null
+  const elsewhere = useStore(
+    (s) =>
+      s.permissions.some((p) => p.chatId !== null && p.chatId !== selectedId) ||
+      s.questions.some((q) => q.chatId !== null && q.chatId !== selectedId)
+  )
+  if (!collapsed) return null
+  return (
+    <>
+      <button
+        type="button"
+        className="header-btn header-btn--badged"
+        title={elsewhere ? 'Show sidebar — another session needs you' : withShortcut('Show sidebar', 'B')}
+        aria-label={elsewhere ? 'Show sidebar (another session needs you)' : 'Show sidebar'}
+        data-testid="sidebar-reopen"
+        onClick={toggleSidebar}
+      >
+        <Icon name="sidebar.left" size={15} />
+        {elsewhere && <span className="header-btn-badge" aria-hidden="true" />}
+      </button>
+      {withNewSession && (
+        <button
+          type="button"
+          className="header-btn"
+          title={withShortcut('New session', 'N')}
+          aria-label="New session"
+          onClick={() => startNewSession()}
+        >
+          <Icon name="square.and.pencil" size={15} />
+        </button>
+      )}
+    </>
   )
 }
 
@@ -64,73 +176,38 @@ export function useDismiss(open: boolean, onClose: () => void): React.RefObject<
 }
 
 // ---------------------------------------------------------------------------
-// Plan chip
-// ---------------------------------------------------------------------------
-
-function PlanChip({ entries }: { entries: ACPPlanEntry[] }): JSX.Element {
-  const [open, setOpen] = useState(false)
-  const ref = useDismiss(open, () => setOpen(false))
-  const completed = entries.filter((e) => e.status === 'completed').length
-
-  return (
-    <div className="chip-wrap" ref={ref}>
-      <button
-        type="button"
-        className="chip"
-        title="Agent plan"
-        onClick={() => setOpen((o) => !o)}
-      >
-        <ChecklistIcon />
-        <span className="chip-label mono-digits">
-          {completed}/{entries.length}
-        </span>
-      </button>
-      {open && (
-        <div className="popover popover--plan">
-          <div className="popover-heading">Plan</div>
-          {entries.map((entry, i) => (
-            <div className="plan-row" key={i}>
-              <span
-                className={
-                  'plan-row-icon' + (entry.status === 'completed' ? ' plan-row-icon--done' : '')
-                }
-              >
-                <PlanStatusIcon status={entry.status} />
-              </span>
-              <span
-                className={'plan-row-text' + (entry.status === 'completed' ? ' plan-row-text--done' : '')}
-              >
-                {entry.content}
-              </span>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
-
-// ---------------------------------------------------------------------------
 // Git stat chip
 // ---------------------------------------------------------------------------
 
 /** GitStatModel port: polls the main-process `gitStat` endpoint every 5s and
  *  immediately when the session's busy state flips (the Swift `refreshSoon`
- *  triggers). */
+ *  triggers). Each poll is three git processes started by the main process,
+ *  so it rests while the window is hidden and catches up the moment it is
+ *  shown; and a poll that finds nothing new doesn't re-render the header. */
 function useGitStat(projectPath: string, isBusy: boolean): GitStat {
   const [stat, setStat] = useState<GitStat>({ branch: '', files: [] })
   useEffect(() => {
     let alive = true
+    let shown = ''
     const refresh = (): void => {
+      if (document.visibilityState === 'hidden') return
       void call('gitStat', projectPath).then((s) => {
-        if (alive) setStat(s)
+        const json = JSON.stringify(s)
+        if (!alive || json === shown) return
+        shown = json
+        setStat(s)
       })
+    }
+    const onVisibility = (): void => {
+      if (document.visibilityState !== 'hidden') refresh()
     }
     refresh()
     const timer = setInterval(refresh, 5000)
+    document.addEventListener('visibilitychange', onVisibility)
     return () => {
       alive = false
       clearInterval(timer)
+      document.removeEventListener('visibilitychange', onVisibility)
     }
   }, [projectPath, isBusy])
   return stat
@@ -189,11 +266,23 @@ const RING_STROKE = 2.5
 const RING_RADIUS = (RING_SIZE - RING_STROKE) / 2
 const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS
 
-function ContextMeter({ usage }: { usage: ACPUsage }): JSX.Element {
+function ContextMeter({
+  usage,
+  lastTurn,
+  sessionTokens
+}: {
+  usage: ACPUsage
+  lastTurn: TurnSummary | null
+  sessionTokens: number
+}): JSX.Element {
   const [open, setOpen] = useState(false)
   const ref = useDismiss(open, () => setOpen(false))
 
   const fraction = Math.min(1, Math.max(0, usage.used / usage.size))
+  // What the chat has cost: every turn's provider total, added up here; the
+  // CLI's own running count stands in until a turn has been filed.
+  const chatTotal = sessionTokens > 0 ? sessionTokens : (usage.tokensUsed ?? 0)
+  const reply = lastTurn ? lastReplyLine(lastTurn) : null
   const ringColor =
     fraction > 0.9 ? 'var(--diff-removed)' : fraction > 0.75 ? 'var(--mode-yellow)' : 'var(--accent)'
 
@@ -202,7 +291,11 @@ function ContextMeter({ usage }: { usage: ACPUsage }): JSX.Element {
       <button
         type="button"
         className="chip"
-        title="Context window used"
+        data-testid="context-meter"
+        title={
+          `Context: ${formatTokens(usage.used)} of ${formatTokens(usage.size)} tokens` +
+          (chatTotal > usage.used ? ` · this chat ${formatTokens(chatTotal)} in total` : '')
+        }
         onClick={() => setOpen((o) => !o)}
       >
         <svg
@@ -242,15 +335,22 @@ function ContextMeter({ usage }: { usage: ACPUsage }): JSX.Element {
           <div className="context-usage-line">
             {formatTokens(usage.used)} of {formatTokens(usage.size)} tokens ({percentLabel(fraction)})
           </div>
-          {usage.tokensUsed != null && usage.tokensUsed > usage.used && (
-            <div className="context-total-line">
-              Total processed: {formatTokens(usage.tokensUsed)} tokens
-            </div>
+          {reply && <div className="context-total-line">{reply}</div>}
+          {chatTotal > usage.used && (
+            <div className="context-total-line">This chat: {formatTokens(chatTotal)} tokens in total</div>
           )}
         </div>
       )}
     </div>
   )
+}
+
+/** "Last reply: 12.4k in · 820 out (9.1k cached)" — what the latest turn
+ *  sent and got back; null when the agent reported no accounting for it. */
+export function lastReplyLine(turn: TurnSummary): string | null {
+  if (turn.inputTokens === 0 && turn.outputTokens === 0) return null
+  const cached = turn.cachedReadTokens > 0 ? ` (${formatTokens(turn.cachedReadTokens)} cached)` : ''
+  return `Last reply: ${formatTokens(turn.inputTokens)} in · ${formatTokens(turn.outputTokens)} out${cached}`
 }
 
 /** ContextMeter.percentLabel — whole percents; non-zero below 1% is "<1%". */
@@ -265,72 +365,4 @@ export function formatTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`
   return `${n}`
-}
-
-// ---------------------------------------------------------------------------
-// Icons (SF Symbol stand-ins)
-// ---------------------------------------------------------------------------
-
-function FolderIcon(): JSX.Element {
-  return (
-    <svg width="9" height="9" viewBox="0 0 16 16" fill="none" aria-hidden>
-      <path
-        d="M1.5 3.5A1.5 1.5 0 0 1 3 2h3l1.5 2H13a1.5 1.5 0 0 1 1.5 1.5v6A1.5 1.5 0 0 1 13 13H3a1.5 1.5 0 0 1-1.5-1.5v-8Z"
-        stroke="currentColor"
-        strokeWidth="1.4"
-      />
-    </svg>
-  )
-}
-
-function ChecklistIcon(): JSX.Element {
-  return (
-    <svg width="11" height="11" viewBox="0 0 16 16" fill="none" aria-hidden>
-      <path d="M2 4.5 3.3 6 6 3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M8.5 4.5H14M8.5 11.5H14" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-      <path d="M2 11.5 3.3 13 6 10" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  )
-}
-
-function PlanStatusIcon({ status }: { status: string }): JSX.Element {
-  if (status === 'completed') {
-    // checkmark.circle.fill
-    return (
-      <svg width="11" height="11" viewBox="0 0 16 16" aria-hidden>
-        <circle cx="8" cy="8" r="7" fill="currentColor" />
-        <path
-          d="m5 8.2 2 2.1 4-4.6"
-          stroke="var(--canvas)"
-          strokeWidth="1.6"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          fill="none"
-        />
-      </svg>
-    )
-  }
-  if (status === 'in_progress') {
-    // circle.dotted.circle
-    return (
-      <svg width="11" height="11" viewBox="0 0 16 16" fill="none" aria-hidden>
-        <circle
-          cx="8"
-          cy="8"
-          r="7"
-          stroke="currentColor"
-          strokeWidth="1.3"
-          strokeDasharray="2 2.4"
-          strokeLinecap="round"
-        />
-        <circle cx="8" cy="8" r="3.4" stroke="currentColor" strokeWidth="1.3" />
-      </svg>
-    )
-  }
-  // circle
-  return (
-    <svg width="11" height="11" viewBox="0 0 16 16" fill="none" aria-hidden>
-      <circle cx="8" cy="8" r="7" stroke="currentColor" strokeWidth="1.3" />
-    </svg>
-  )
 }

@@ -2,22 +2,19 @@
 // so a screenshot can be taken and looked at.
 //
 // It exists because these views are almost impossible to review by reading
-// the code — the whole point of the workflow card and the swarm card is what
-// they look like when twenty rows land at once, half of them still moving.
+// the code — the whole point of the workflow card is what it looks like when
+// twenty rows land at once, half of them still moving.
 // The harness mounts them against fixtures shaped exactly like the CLI's wire
 // output (fixtures.ts) so every state, including the ones that need a real
 // provider and ten minutes of waiting to reach, is one build away.
 
+import './accentPrelude'
 import type { JSX } from 'react'
 import { createRoot } from 'react-dom/client'
 import { groupTranscript, activeRuns } from '@renderer/views/chat/transcript/orchestration'
-import { WorkflowCard } from '@renderer/views/chat/transcript/WorkflowCard'
-import { SwarmCard } from '@renderer/views/chat/transcript/SwarmCard'
+import { groupToolRuns } from '@renderer/views/chat/transcript/toolGroups'
 import OrchestrationPanel from '@renderer/views/chat/OrchestrationPanel'
-import TranscriptItemView from '@renderer/views/chat/transcript/TranscriptItemView'
-import { SubAgentCallView } from '@renderer/views/chat/transcript/ToolCallView'
-import { subAgentCall } from '@renderer/views/chat/transcript/toolPresentation'
-import { ScriptCallRow } from '@renderer/views/chat/transcript/OrchestrationBits'
+import { TranscriptRowView } from '@renderer/views/chat/transcript/TranscriptItemView'
 import { SCENES, type Scene } from './fixtures'
 import { LIVE_SCENE } from './fixtures.live'
 import '@renderer/design/theme.css'
@@ -40,31 +37,9 @@ function SceneView({ scene }: { scene: Scene }): JSX.Element {
       <div className="hz-scene-body">
         <div className="hz-transcript">
           <div className="chat-transcript-inner">
-            {rows.map((row) => {
-              if (row.kind === 'run') {
-                return row.run.kind === 'workflow' ? (
-                  <WorkflowCard key={row.id} run={row.run} />
-                ) : (
-                  <SwarmCard key={row.id} run={row.run} />
-                )
-              }
-              if (row.kind === 'script') {
-                return <ScriptCallRow key={row.id} script={row.script} />
-              }
-              if (row.kind === 'agent') {
-                const call = subAgentCall(row.member.tool)
-                if (!call) return null
-                return (
-                  <SubAgentCallView
-                    key={row.id}
-                    tool={row.member.tool}
-                    call={call}
-                    children={row.member.children}
-                  />
-                )
-              }
-              return <TranscriptItemView key={row.id} item={row.item} />
-            })}
+            {groupToolRuns(rows).map((row) => (
+              <TranscriptRowView key={row.id} row={row} />
+            ))}
           </div>
         </div>
         {live.length > 0 && (

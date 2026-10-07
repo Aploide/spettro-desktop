@@ -1,0 +1,460 @@
+{
+ "_comment": "Captured from a real `spettro --acp` (dev build, Oct 2026) under a throwaway HOME by tools/perf/README.md \"Refreshing the fixture\"; the fake agent replays these shapes verbatim and fills in the live values.",
+ "initialize": {
+  "_meta": {
+   "spettro.app/extensions": {
+    "clientMethods": [
+     "_spettro/question/ask"
+    ],
+    "methods": [
+     "_spettro/account/status",
+     "_spettro/account/login/start",
+     "_spettro/account/login/poll",
+     "_spettro/account/login/cancel",
+     "_spettro/account/logout",
+     "_spettro/providers/list",
+     "_spettro/providers/connect",
+     "_spettro/providers/disconnect",
+     "_spettro/providers/local/probe",
+     "_spettro/providers/local/add",
+     "_spettro/providers/local/remove",
+     "_spettro/models/list",
+     "_spettro/models/favorite",
+     "_spettro/workflow/list",
+     "_spettro/workflow/read",
+     "_spettro/workflow/write",
+     "_spettro/workflow/delete",
+     "_spettro/workflow/validate",
+     "_spettro/workflow/runs"
+    ],
+    "version": 4
+   }
+  },
+  "agentCapabilities": {
+   "auth": {},
+   "loadSession": true,
+   "mcpCapabilities": {},
+   "promptCapabilities": {
+    "embeddedContext": true,
+    "image": true
+   },
+   "sessionCapabilities": {
+    "close": {},
+    "list": {},
+    "resume": {}
+   }
+  },
+  "agentInfo": {
+   "name": "spettro",
+   "title": "Spettro (perf fake)",
+   "version": "perf-fake"
+  },
+  "authMethods": [
+   {
+    "description": "Launch Spettro's own interactive TUI (no --acp flag) and run /models to add a provider API key; ACP sessions reuse that stored configuration.",
+    "id": "spettro-setup",
+    "name": "Configure a provider",
+    "type": "terminal"
+   }
+  ],
+  "protocolVersion": 1
+ },
+ "options": {
+  "mode": {
+   "category": "mode",
+   "currentValue": "plan",
+   "id": "mode",
+   "name": "Mode",
+   "options": [
+    {
+     "description": "Planning orchestrator (delegates all discovery to explore worker)",
+     "name": "Plan",
+     "value": "plan"
+    },
+    {
+     "description": "Coding orchestrator",
+     "name": "Coding",
+     "value": "coding"
+    },
+    {
+     "description": "Read-only orchestrator for Q&A",
+     "name": "Ask",
+     "value": "ask"
+    }
+   ],
+   "type": "select"
+  },
+  "permission": {
+   "currentValue": "restricted",
+   "description": "How Spettro requests approval for actions",
+   "id": "permission",
+   "name": "Permission",
+   "options": [
+    {
+     "description": "Prompt before running tools, edits, or commands",
+     "name": "Ask first",
+     "value": "ask-first"
+    },
+    {
+     "description": "Allow safe actions; prompt for sensitive ones",
+     "name": "Restricted",
+     "value": "restricted"
+    },
+    {
+     "description": "Automatically approve all tool, path, and command requests",
+     "name": "YOLO",
+     "value": "yolo"
+    }
+   ],
+   "type": "select"
+  },
+  "thinking": {
+   "category": "thought_level",
+   "currentValue": "high",
+   "description": "Extended-thinking effort",
+   "id": "thinking",
+   "name": "Thinking",
+   "options": [
+    {
+     "name": "Off",
+     "value": "off"
+    },
+    {
+     "name": "Low",
+     "value": "low"
+    },
+    {
+     "name": "Medium",
+     "value": "medium"
+    },
+    {
+     "name": "High",
+     "value": "high"
+    },
+    {
+     "name": "X-High",
+     "value": "x-high"
+    },
+    {
+     "name": "Max",
+     "value": "max"
+    }
+   ],
+   "type": "select"
+  },
+  "ultra": {
+   "currentValue": false,
+   "description": "Ultracode: substantive tasks run as dynamic workflows",
+   "id": "ultra",
+   "name": "Ultra",
+   "type": "boolean"
+  },
+  "workflow_size": {
+   "currentValue": "medium",
+   "description": "How many agents a workflow run plans around (a guideline, not a cap)",
+   "id": "workflow_size",
+   "name": "Workflow size",
+   "options": [
+    {
+     "description": "~5 agents per run · fan-outs up to ~3 wide",
+     "name": "Small",
+     "value": "small"
+    },
+    {
+     "description": "~10 agents per run · fan-outs up to ~6 wide",
+     "name": "Medium",
+     "value": "medium"
+    },
+    {
+     "description": "~30 agents per run · fan-outs up to ~16 wide",
+     "name": "Large",
+     "value": "large"
+    },
+    {
+     "description": "no agent guideline · fan-outs up to ~64 wide",
+     "name": "Unbounded",
+     "value": "unbounded"
+    }
+   ],
+   "type": "select"
+  }
+ },
+ "availableCommands": [
+  {
+   "description": "show available commands",
+   "name": "help"
+  },
+  {
+   "description": "switch agent mode",
+   "input": {
+    "hint": "plan|coding|ask|..."
+   },
+   "name": "mode"
+  },
+  {
+   "description": "show or set the active model",
+   "input": {
+    "hint": "provider:model [api_key]"
+   },
+   "name": "models"
+  },
+  {
+   "description": "set permission level",
+   "input": {
+    "hint": "yolo|restricted|ask-first"
+   },
+   "name": "permission"
+  },
+  {
+   "description": "set token budget per request",
+   "input": {
+    "hint": "<n|0>"
+   },
+   "name": "budget"
+  },
+  {
+   "description": "set extended-thinking level",
+   "input": {
+    "hint": "off|low|medium|high|x-high|max"
+   },
+   "name": "thinking"
+  },
+  {
+   "description": "work autonomously toward an objective",
+   "input": {
+    "hint": "<objective> | status"
+   },
+   "name": "goal"
+  },
+  {
+   "description": "run a prompt on a recurring interval",
+   "input": {
+    "hint": "<interval> <prompt> | stop | status"
+   },
+   "name": "loop"
+  },
+  {
+   "description": "show, add to, or clear persistent memory",
+   "input": {
+    "hint": "[show | add [user|project] <fact> | clear [user|project|all]]"
+   },
+   "name": "memory"
+  },
+  {
+   "description": "summarize older history to free context",
+   "input": {
+    "hint": "[auto <status|on|off>]"
+   },
+   "name": "compact"
+  },
+  {
+   "description": "clear conversation history",
+   "name": "clear"
+  },
+  {
+   "description": "show session token usage and prompt-cache metrics",
+   "name": "stats"
+  },
+  {
+   "description": "manage session tasks",
+   "input": {
+    "hint": "[list|add|done|set|show|rm|clear]"
+   },
+   "name": "tasks"
+  },
+  {
+   "description": "list or kill background shell jobs",
+   "input": {
+    "hint": "[list] | kill <id>|all"
+   },
+   "name": "jobs"
+  },
+  {
+   "description": "list effective runtime hooks",
+   "name": "hooks"
+  },
+  {
+   "description": "show diffs of files modified this session",
+   "input": {
+    "hint": "[path ...]"
+   },
+   "name": "diff"
+  },
+  {
+   "description": "toggle ultra (ultracode: substantive tasks run as dynamic workflows)",
+   "input": {
+    "hint": "[on|off]"
+   },
+   "name": "ultra"
+  },
+  {
+   "description": "list, show, or run saved workflow templates",
+   "input": {
+    "hint": "[list|show <name>|run <name> [json | task]|size [tier]|where]"
+   },
+   "name": "workflows"
+  },
+  {
+   "description": "show or set the size tier workflow runs plan around",
+   "input": {
+    "hint": "[small|medium|large|unbounded]"
+   },
+   "name": "workflow-size"
+  },
+  {
+   "description": "switch to plan mode",
+   "input": {
+    "hint": "[task]"
+   },
+   "name": "plan"
+  },
+  {
+   "description": "show/set permission level and debug",
+   "input": {
+    "hint": "[yolo|restricted|ask-first] | debug <on|off>"
+   },
+   "name": "permissions"
+  },
+  {
+   "description": "list Agent Skills and where each comes from",
+   "name": "skills"
+  }
+ ],
+ "providers": {
+  "providers": [
+   {
+    "id": "anthropic",
+    "name": "Anthropic",
+    "envKey": "ANTHROPIC_API_KEY",
+    "connected": false,
+    "suggested": true,
+    "modelCount": 15
+   },
+   {
+    "id": "openai",
+    "name": "OpenAI",
+    "envKey": "OPENAI_API_KEY",
+    "connected": false,
+    "suggested": true,
+    "modelCount": 30
+   },
+   {
+    "id": "mistral",
+    "name": "Mistral",
+    "envKey": "MISTRAL_API_KEY",
+    "connected": false,
+    "suggested": true,
+    "modelCount": 24
+   },
+   {
+    "id": "zai",
+    "name": "Z.AI",
+    "envKey": "ZAI_API_KEY",
+    "connected": false,
+    "suggested": true,
+    "modelCount": 18
+   },
+   {
+    "id": "cerebras",
+    "name": "Cerebras",
+    "envKey": "CEREBRAS_API_KEY",
+    "connected": false,
+    "suggested": false,
+    "modelCount": 2
+   },
+   {
+    "id": "crof",
+    "name": "CrofAI",
+    "envKey": "CROF_API_KEY",
+    "connected": false,
+    "suggested": false,
+    "modelCount": 24
+   },
+   {
+    "id": "deepseek",
+    "name": "DeepSeek",
+    "envKey": "DEEPSEEK_API_KEY",
+    "connected": false,
+    "suggested": false,
+    "modelCount": 2
+   },
+   {
+    "id": "google",
+    "name": "Google",
+    "envKey": "GOOGLE_API_KEY",
+    "connected": false,
+    "suggested": false,
+    "modelCount": 17
+   },
+   {
+    "id": "groq",
+    "name": "Groq",
+    "envKey": "GROQ_API_KEY",
+    "connected": false,
+    "suggested": false,
+    "modelCount": 9
+   },
+   {
+    "id": "minimax",
+    "name": "MiniMax (minimax.io)",
+    "envKey": "MINIMAX_API_KEY",
+    "connected": false,
+    "suggested": false,
+    "modelCount": 7
+   },
+   {
+    "id": "moonshotai",
+    "name": "Moonshot AI",
+    "envKey": "MOONSHOT_API_KEY",
+    "connected": false,
+    "suggested": false,
+    "modelCount": 4
+   },
+   {
+    "id": "nvidia",
+    "name": "Nvidia",
+    "envKey": "NVIDIA_API_KEY",
+    "connected": false,
+    "suggested": false,
+    "modelCount": 79
+   },
+   {
+    "id": "openrouter",
+    "name": "OpenRouter",
+    "envKey": "OPENROUTER_API_KEY",
+    "connected": false,
+    "suggested": false,
+    "modelCount": 368
+   },
+   {
+    "id": "prometheus",
+    "name": "Prometheus",
+    "envKey": "PROMETHEUS_API_KEY",
+    "connected": false,
+    "suggested": false,
+    "modelCount": 18
+   },
+   {
+    "id": "xai",
+    "name": "xAI",
+    "envKey": "XAI_API_KEY",
+    "connected": false,
+    "suggested": false,
+    "modelCount": 8
+   }
+  ],
+  "local": null,
+  "subscription": {
+   "id": "spettro",
+   "name": "Spettro",
+   "connected": false,
+   "suggested": false,
+   "modelCount": 0
+  }
+ },
+ "account": {
+  "signedIn": false,
+  "modelCount": 0,
+  "pricingUrl": "https://spettro.app/pricing"
+ }
+}

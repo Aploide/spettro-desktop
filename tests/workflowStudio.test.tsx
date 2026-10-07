@@ -13,15 +13,21 @@ import WorkflowStudio from '@renderer/views/workflows/WorkflowStudio'
 const calls: [string, unknown[]][] = []
 let answers: Record<string, unknown | ((...args: unknown[]) => unknown)> = {}
 
-vi.mock('@renderer/state/store', () => ({
-  call: (method: string, ...args: unknown[]) => {
-    calls.push([method, args])
-    const answer = answers[method]
-    if (typeof answer === 'function') return Promise.resolve(answer(...args))
-    return Promise.resolve(answer ?? null)
-  },
-  useChat: () => null
-}))
+vi.mock('@renderer/state/store', () => {
+  const mocked = {
+    call: (method: string, ...args: unknown[]) => {
+      calls.push([method, args])
+      const answer = answers[method]
+      // Async like the real IPC: an answer that throws rejects, it doesn't
+      // throw out of the call.
+      if (typeof answer === 'function') return Promise.resolve().then(() => answer(...args))
+      return Promise.resolve(answer ?? null)
+    },
+    useChat: () => null
+  }
+  // quietCall is call without the failure toast; to a test they are one.
+  return { ...mocked, quietCall: mocked.call }
+})
 
 const SCRIPT = "export const meta = { name: 'review', description: 'd', phases: [] }\n"
 
@@ -193,5 +199,58 @@ describe('closing', () => {
 
     cleanup()
     expect(made('workflowDiscardRun')[0][1]).toEqual(['scratch-1'])
+  })
+})
+
+describe('unsaved edits', () => {
+  it('asks before opening another workflow over them (WP9 review)', async () => {
+    const { ConfirmHost } = await import('@renderer/views/common/ConfirmDialog')
+    render(<ConfirmHost />)
+    await openFirstWorkflow()
+    fireEvent.change(screen.getByLabelText('Workflow script'), {
+      target: { value: SCRIPT + '\n// edited\n' }
+    })
+    fireEvent.click(document.querySelector('.wfs-row-open')!)
+    await waitFor(() => expect(screen.getByText(/Save changes to/)).toBeTruthy())
+    // Cancel keeps the edits on screen and opens nothing.
+    fireEvent.click(screen.getByText('Cancel'))
+    await vi.advanceTimersByTimeAsync(50)
+    expect(made('workflowRead')).toHaveLength(1)
+    expect(String((screen.getByLabelText('Workflow script') as HTMLTextAreaElement).value)).toContain('// edited')
+  })
+})
+
+describe('past runs', () => {
+  it('lists the project’s recent runs, and a click shows a run’s files', async () => {
+    answers.workflowRuns = [
+      { runId: 'r2', dir: '/home/u/.spettro/sessions/s/workflows/r2', modifiedAt: Date.now() - 120_000, name: 'review', finished: true },
+      { runId: 'r1', dir: '/home/u/.spettro/sessions/s/workflows/r1', modifiedAt: Date.now() - 7_200_000, name: '', finished: false }
+    ]
+    render(<WorkflowStudio chatId="chat-1" onClose={() => undefined} />)
+    const section = await screen.findByRole('region', { name: 'Recent runs' })
+    expect(section.textContent).toContain('Finished · 2m')
+    expect(section.textContent).toContain('Unnamed workflow')
+    expect(section.textContent).toContain('Not finished · 2h')
+    fireEvent.click(screen.getByText('Unnamed workflow'))
+    expect(made('showItemInFolder')).toEqual([['showItemInFolder', ['/home/u/.spettro/sessions/s/workflows/r1']]])
+  })
+
+  it('shows nothing for a project without any, or a CLI that can’t list them', async () => {
+    answers.workflowRuns = () => {
+      throw new Error('method not found')
+    }
+    render(<WorkflowStudio chatId="chat-1" onClose={() => undefined} />)
+    await waitFor(() => expect(made('workflowRuns')).toHaveLength(1))
+    expect(screen.queryByRole('region', { name: 'Recent runs' })).toBeNull()
+  })
+
+  it('says when to use a workflow under its name', async () => {
+    answers.workflowList = {
+      workflows: [{ ...INFO, whenToUse: 'before opening a PR' }],
+      searchPaths: ['/p/.spettro/workflows'],
+      cwd: '/p'
+    }
+    render(<WorkflowStudio chatId="chat-1" onClose={() => undefined} />)
+    expect(await screen.findByText('before opening a PR')).toBeTruthy()
   })
 })

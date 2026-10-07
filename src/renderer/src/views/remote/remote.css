@@ -85,7 +85,7 @@
 }
 
 .remote__wifi--on {
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .remote__switch-text {
@@ -105,21 +105,10 @@
   color: var(--text-secondary);
 }
 
-.remote__rename-link {
-  border: none;
-  background: none;
-  padding: 0;
-  margin-top: 2px;
-  font-size: 11px;
-  color: var(--text-secondary);
-  text-align: left;
-  text-decoration: underline;
-  text-decoration-color: var(--hairline);
-  cursor: pointer;
-}
-
-.remote__rename-link:hover {
-  color: var(--text-primary);
+/* "Rename" after the name: an accent text button (.link), at the line's size. */
+.remote__switch-text .remote__rename-link {
+  font-size: inherit;
+  margin-left: 2px;
 }
 
 .remote__rename-input {
@@ -164,15 +153,15 @@
 }
 
 .remote__toggle input:checked + .remote__toggle-track {
-  background: var(--accent);
+  background: var(--switch-on);
 }
 
 .remote__toggle-thumb {
   width: 20px;
   height: 20px;
   border-radius: 50%;
-  background: #fff;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+  background: var(--paper);
+  box-shadow: var(--shadow-sm);
   transition: transform 0.15s ease;
 }
 
@@ -194,7 +183,7 @@
   height: 220px;
   border-radius: var(--rad-md);
   /* The QR itself is dark-on-light; give it a quiet frame in dark mode. */
-  background: #fff;
+  background: var(--paper);
   padding: var(--sp-sm);
   image-rendering: pixelated;
 }
@@ -239,7 +228,8 @@
   color: var(--text-primary);
   background: var(--surface-raised);
   border: 1px solid var(--hairline);
-  border-radius: var(--rad-sm);
+  /* A pill, like every other button in Settings (.btn). */
+  border-radius: 999px;
   cursor: pointer;
 }
 
@@ -248,13 +238,13 @@
 }
 
 .remote__button--accent {
-  color: #fff;
+  color: var(--accent-contrast);
   background: var(--accent);
   border-color: transparent;
 }
 
 .remote__button--accent:hover {
-  filter: brightness(1.1);
+  background: var(--accent-hover);
   border-color: transparent;
 }
 
@@ -273,10 +263,16 @@
   justify-content: space-between;
 }
 
+/* The same small-caps eyebrow as every other Settings section
+   (.form-section-title), with "Pair a device" on its row. */
 .remote__devices-title {
   margin: 0;
-  font-size: 13px;
+  padding: 0 var(--sp-md);
+  font-size: 11px;
   font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
 }
 
 .remote__device-list {
@@ -295,7 +291,7 @@
 }
 
 .remote__device-icon--on {
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .remote__device-text {
@@ -362,4 +358,29 @@
 .remote__footer svg {
   flex-shrink: 0;
   margin-top: 1px;
+}
+
+/* Inside Settings › Remote: the pane supplies the title and the frame. */
+.remote--embedded {
+  padding: var(--sp-lg) var(--sp-xl) var(--sp-xl);
+}
+
+.remote__pairing-actions {
+  display: flex;
+  gap: var(--sp-sm);
+}
+
+/* "Can't scan?": the pairing link itself, to copy. */
+.remote__manual {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-md);
+  max-width: 360px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+
+.remote__manual-text {
+  flex: 1;
 }

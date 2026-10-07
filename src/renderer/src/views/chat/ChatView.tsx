@@ -2,32 +2,40 @@
 // header, scrolling transcript, composer, config bar, terminal drawer.
 //
 // Two things here are not in the Swift original, and both exist because a
-// workflow or an Ultra swarm is not one tool call but a hundred. The
+// multi-agent workflow is not one tool call but a hundred. The
 // transcript is folded first (`groupTranscript`), so a run renders as the one
 // card that owns its members instead of a wall of interleaved rows; and while
 // a run is in flight the column can split, docking a live panel on the right.
 //
 // The panel is a *column*, not an overlay: it shares the row with the
-// transcript and stops above the divider, so it can never sit on top of the
-// composer or the terminal drawer, and the transcript's centred measure
+// transcript and ends where the composer begins, so it can never sit on top
+// of the composer or the terminal drawer, and the transcript's centred measure
 // simply narrows around it.
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { JSX } from 'react'
-import { call, ensureChatLoaded, useChat } from '@renderer/state/store'
+import type { ChatDetail } from '@shared/model'
+import { call, ensureChatLoaded, useApp, useChat, useStore } from '@renderer/state/store'
+import { setTerminalVisible, useShell } from '@renderer/state/shell'
 import TerminalDrawer from '@renderer/views/terminal/TerminalDrawer'
+import { isBroadFolder } from '@renderer/views/shell/util'
 import { TranscriptRowView } from './transcript/TranscriptItemView'
-import { activeRuns, groupTranscript } from './transcript/orchestration'
+import { activeRuns, groupTranscript, type WorkflowRun } from './transcript/orchestration'
+import { groupToolRuns } from './transcript/toolGroups'
+import { useTailFirst } from './transcript/tailFirst'
+import {
+  TranscriptActionsProvider,
+  transcriptAnchors,
+  type TranscriptActions
+} from './transcript/TranscriptActions'
 import { RunTicker } from './transcript/RunTicker'
-import { Icon } from './transcript/ToolCallView'
+import { Icon, ProjectPathContext } from './transcript/ToolCallView'
 import OrchestrationPanel from './OrchestrationPanel'
 import ChatHeader, { projectName } from './ChatHeader'
-import AppIcon from '@renderer/views/shell/AppIcon'
-import Composer from './Composer'
+import Composer, { type PromptSeed } from './Composer'
+import StarterPrompts, { useEmptyFolder } from './StarterPrompts'
+import PromptDock from './PromptDock'
 import './chat.css'
-
-/** UserDefaults key `spettro.terminalDrawerVisible` — global, not per project. */
-const TERMINAL_VISIBLE_KEY = 'spettro.terminalDrawerVisible'
 
 /** UserDefaults key `spettro.orchestrationPanelVisible` — global, like the
  *  terminal drawer. Unlike the drawer it defaults to *shown*: the panel costs
@@ -39,18 +47,42 @@ const PANEL_VISIBLE_KEY = 'spettro.orchestrationPanelVisible'
 /** How close to the bottom (px) still counts as "pinned to the tail". */
 const PIN_THRESHOLD = 64
 
-export default function ChatView({ chatId }: { chatId: string }): JSX.Element {
+/** Memoised: the shell re-renders on every app state, and the chat — the
+ *  whole transcript under it — has nothing to redraw for one. */
+export default memo(ChatView)
+
+/**
+ * The chat as the chrome around the transcript (header, composer, prompt
+ * dock) sees it: the same object until something other than the transcript
+ * changes. A streamed chunk is a new chat with new items and nothing else
+ * new, and redrew the whole toolbar with it. Its `items` may be stale, so
+ * only what doesn't read them may be handed it.
+ */
+function useChromeChat(chat: ChatDetail | null): ChatDetail | null {
+  const steady = useRef(chat)
+  const was = steady.current
+  if (chat !== was && !(chat && was && sameButItems(chat, was))) steady.current = chat
+  return steady.current
+}
+
+function sameButItems(a: ChatDetail, b: ChatDetail): boolean {
+  const keys = Object.keys(a) as (keyof ChatDetail)[]
+  if (keys.length !== Object.keys(b).length) return false
+  return keys.every((key) => key === 'items' || a[key] === b[key])
+}
+
+function ChatView({ chatId }: { chatId: string }): JSX.Element {
   const chat = useChat(chatId)
+  const chrome = useChromeChat(chat)
   const scrollRef = useRef<HTMLDivElement>(null)
   const pinnedRef = useRef(true)
   const manualPauseRef = useRef(false)
   const scrollTowardLatestRef = useRef(false)
   const touchYRef = useRef<number | null>(null)
   const [showJumpToLatest, setShowJumpToLatest] = useState(false)
-  const [promptSeed, setPromptSeed] = useState('')
-  const [terminalVisible, setTerminalVisible] = useState(
-    () => localStorage.getItem(TERMINAL_VISIBLE_KEY) === '1'
-  )
+  const [promptSeed, setPromptSeed] = useState<PromptSeed | null>(null)
+  // Global (Ctrl+` and the header toggle both flip it), not per chat.
+  const terminalVisible = useShell((s) => s.terminalVisible)
   const [panelVisible, setPanelVisible] = useState(
     () => localStorage.getItem(PANEL_VISIBLE_KEY) !== '0'
   )
@@ -61,10 +93,6 @@ export default function ChatView({ chatId }: { chatId: string }): JSX.Element {
   }, [chatId])
 
   useEffect(() => {
-    localStorage.setItem(TERMINAL_VISIBLE_KEY, terminalVisible ? '1' : '0')
-  }, [terminalVisible])
-
-  useEffect(() => {
     localStorage.setItem(PANEL_VISIBLE_KEY, panelVisible ? '1' : '0')
   }, [panelVisible])
 
@@ -73,7 +101,16 @@ export default function ChatView({ chatId }: { chatId: string }): JSX.Element {
   // transcript changes, and never mutates it in place.
   const items = chat?.items
   const rows = useMemo(() => (items ? groupTranscript(items) : []), [items])
+  const displayRows = useMemo(() => groupToolRuns(rows), [rows])
+  // A long chat opens on its last rows; the rest follow a frame later.
+  const heldAbove = useTailFirst(displayRows.length)
+  const drawnRows = heldAbove > 0 ? displayRows.slice(heldAbove) : displayRows
   const live = useMemo(() => activeRuns(rows), [rows])
+  const runsById = useMemo(() => {
+    const out = new Map<string, WorkflowRun>()
+    for (const row of rows) if (row.kind === 'run') out.set(row.run.tool.id, row.run)
+    return out
+  }, [rows])
 
   const scrollToBottom = useCallback(() => {
     const el = scrollRef.current
@@ -112,14 +149,52 @@ export default function ChatView({ chatId }: { chatId: string }): JSX.Element {
   const itemCount = chat?.items.length ?? 0
   const lastItem = chat?.items[itemCount - 1]
   const lastItemText = lastItem?.kind === 'message' ? lastItem.message.text.length : itemCount
+  // The user's own message: whatever they were reading, they want to see
+  // what they just sent and the answer to it, as in every chat app.
+  const lastUserId = lastItem?.kind === 'message' && lastItem.message.role === 'user' ? lastItem.message.id : null
+  const seenUserId = useRef(lastUserId)
   useEffect(() => {
+    if (lastUserId !== null && lastUserId !== seenUserId.current) {
+      manualPauseRef.current = false
+      scrollTowardLatestRef.current = false
+      pinnedRef.current = true
+      setShowJumpToLatest(false)
+    }
+    seenUserId.current = lastUserId
     if (pinnedRef.current) scrollToBottom()
-  }, [itemCount, lastItemText, scrollToBottom])
+  }, [itemCount, lastItemText, lastUserId, scrollToBottom])
 
+  // The column also grows without an item changing (a reply's markdown laid
+  // out, a list parsed from a command's reply, an image decoded) and shrinks
+  // when the composer grows under it; a pinned reader stays at the tail.
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el || typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(() => {
+      if (pinnedRef.current) scrollToBottom()
+    })
+    observer.observe(el)
+    if (el.firstElementChild) observer.observe(el.firstElementChild)
+    return () => observer.disconnect()
+  }, [chatId, loaded, scrollToBottom])
+
+  // Where the last scroll event left the column: a scroll that didn't move
+  // it up was ours (or the content growing under it), never the reader's.
+  const lastScrollTopRef = useRef(0)
   const onScroll = useCallback(() => {
     const el = scrollRef.current
     if (!el) return
+    const movedUp = el.scrollTop < lastScrollTopRef.current - 1
+    lastScrollTopRef.current = el.scrollTop
     const isAtLatest = el.scrollHeight - el.scrollTop - el.clientHeight < PIN_THRESHOLD
+    // Pinned and not scrolled up: the scroll event arrived after more of the
+    // reply had landed, so the tail moved past where we put the column.
+    // Follow it rather than reading the gap as the reader leaving.
+    if (pinnedRef.current && !manualPauseRef.current && !movedUp) {
+      if (!isAtLatest) scrollToBottom()
+      setShowJumpToLatest(false)
+      return
+    }
     if (manualPauseRef.current && !(scrollTowardLatestRef.current && isAtLatest)) {
       pinnedRef.current = false
       setShowJumpToLatest(true)
@@ -131,7 +206,7 @@ export default function ChatView({ chatId }: { chatId: string }): JSX.Element {
     }
     pinnedRef.current = isAtLatest
     setShowJumpToLatest(!isAtLatest)
-  }, [])
+  }, [scrollToBottom])
 
   // A deliberate upward gesture opts out of follow mode immediately, even
   // when the reader is still within the tail threshold. New streamed tokens
@@ -158,83 +233,125 @@ export default function ChatView({ chatId }: { chatId: string }): JSX.Element {
     touchYRef.current = nextY
   }
 
+  const busy = chat?.isBusy ?? false
+  // Kept the same object while the two anchors stay put: every row reads
+  // this context, and a new value per streamed chunk re-rendered them all.
+  const { lastUserMessageId, retryNoticeId } = useMemo(
+    () => transcriptAnchors(items ?? [], busy),
+    [items, busy]
+  )
+  const actions = useMemo<TranscriptActions>(
+    () => ({
+      editMessage: (text, mentions) => setPromptSeed({ text, mentions, nonce: Date.now() }),
+      retry: () => void call('retryLast', chatId),
+      lastUserMessageId,
+      retryNoticeId
+    }),
+    [chatId, lastUserMessageId, retryNoticeId]
+  )
+  const closeTerminal = useCallback(() => setTerminalVisible(false), [])
+  const dock = useMemo(
+    () => (chrome ? <PromptDock chat={chrome} lastUserId={lastUserMessageId} /> : null),
+    [chrome, lastUserMessageId]
+  )
+
+  // Esc interrupts a running turn from the composer or the transcript —
+  // never from inside a menu or popover (they take Escape for themselves),
+  // and never once something else has handled it. Nor while this chat has
+  // an approval or a question up: there Esc means "deny" / "skip" (the card
+  // hears it on the window, after this handler), and a deny must not also
+  // throw away the whole turn — nor may an Esc typed in the composer, where
+  // the card ignores it, cancel the turn the card belongs to.
+  const promptOpen = useStore(
+    (s) => s.permissions.some((p) => p.chatId === chatId) || s.questions.some((q) => q.chatId === chatId)
+  )
+  const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>): void => {
+    if (event.key !== 'Escape' || event.defaultPrevented || !busy || promptOpen) return
+    const target = event.target as Element
+    if (!target.closest('.composer-input, .chat-transcript')) return
+    const overlay = '[aria-modal="true"], [role="dialog"], [role="menu"], .popover--portal'
+    if (document.querySelector(overlay)) return
+    event.preventDefault()
+    void call('cancel', chatId)
+  }
+
   if (!chat) return <div className="chat-view" />
 
   const showReopen = !panelVisible && live.length > 0
 
   return (
-    <div className="chat-view">
-      <ChatHeader chat={chat} />
+    <ProjectPathContext.Provider value={chat.projectPath}>
+      <div className="chat-view" onKeyDown={onKeyDown}>
+        <ChatHeader chat={chrome ?? chat} />
 
-      <div className="chat-body">
-        <div
-          className="chat-transcript"
-          ref={scrollRef}
-          onScroll={onScroll}
-          onWheel={(event) => pauseFollowing(event.deltaY)}
-          onTouchStart={onTouchStart}
-          onTouchMove={onTouchMove}
-          onTouchEnd={() => {
-            touchYRef.current = null
-          }}
-          tabIndex={0}
-          aria-label="Conversation"
-        >
-          <div className="chat-transcript-inner">
-            {chat.items.length === 0 && (
-              <WelcomeBanner projectPath={chat.projectPath} onPrompt={setPromptSeed} />
-            )}
-            {rows.map((row) => (
-              <TranscriptRowView row={row} key={row.id} />
-            ))}
-            {(chat.isBusy || showReopen) && (
-              <div className="chat-run-ticker">
-                <RunTicker chat={chat} />
-                {showReopen && (
-                  <ReopenPanelChip count={live.length} onShow={() => setPanelVisible(true)} />
-                )}
-              </div>
-            )}
-            <div className="chat-bottom-anchor" />
-          </div>
-        </div>
-        {chat.isBusy && showJumpToLatest && (
-          <button
-            type="button"
-            className="chat-jump-latest"
-            onClick={jumpToLatest}
-            aria-label="Jump to latest message"
+        <div className="chat-body">
+          <div
+            className="chat-transcript"
+            ref={scrollRef}
+            onScroll={onScroll}
+            onWheel={(event) => pauseFollowing(event.deltaY)}
+            onTouchStart={onTouchStart}
+            onTouchMove={onTouchMove}
+            onTouchEnd={() => {
+              touchYRef.current = null
+            }}
+            tabIndex={0}
+            aria-label="Conversation"
           >
-            <Icon name="chevron.down" size={13} />
-            <span>Latest message</span>
-          </button>
-        )}
-
-        {/* Kept mounted and collapsed by :empty rather than unmounted: the
-            panel holds a just-finished run for a beat before letting it go,
-            and that settle only renders if the column is still there. */}
-        <aside className="chat-orchestration">
-          {panelVisible && (
-            <OrchestrationPanel runs={live} onClose={() => setPanelVisible(false)} />
+            <div className="chat-transcript-inner">
+              {chat.items.length === 0 && (
+                <WelcomeBanner
+                  projectPath={chat.projectPath}
+                  onPrompt={(text) => setPromptSeed({ text, nonce: Date.now() })}
+                />
+              )}
+              <TranscriptActionsProvider value={actions}>
+                {drawnRows.map((row) => (
+                  <TranscriptRowView row={row} key={row.id} />
+                ))}
+              </TranscriptActionsProvider>
+              {(chat.isBusy || showReopen) && (
+                <div className="chat-run-ticker">
+                  <RunTicker chat={chat} />
+                  {showReopen && (
+                    <ReopenPanelChip count={live.length} onShow={() => setPanelVisible(true)} />
+                  )}
+                </div>
+              )}
+              <div className="chat-bottom-anchor" />
+            </div>
+          </div>
+          {showJumpToLatest && (
+            <button
+              type="button"
+              className="chat-jump-latest"
+              onClick={jumpToLatest}
+              aria-label="Jump to latest message"
+            >
+              <Icon name="chevron.down" size={13} />
+              <span>Latest message</span>
+            </button>
           )}
-        </aside>
+
+          {/* Kept mounted and collapsed by :empty rather than unmounted: the
+              panel holds a just-finished run for a beat before letting it go,
+              and that settle only renders if the column is still there. */}
+          <aside className="chat-orchestration">
+            {panelVisible && (
+              <OrchestrationPanel runs={live} current={runsById} onClose={() => setPanelVisible(false)} />
+            )}
+          </aside>
+        </div>
+
+        <Composer chat={chrome ?? chat} promptSeed={promptSeed} dock={dock} />
+
+        <TerminalDrawer
+          projectPath={chat.projectPath}
+          visible={terminalVisible}
+          onClose={closeTerminal}
+        />
       </div>
-
-      <div className="chat-divider" />
-
-      <Composer
-        chat={chat}
-        terminalVisible={terminalVisible}
-        onToggleTerminal={() => setTerminalVisible((v) => !v)}
-        promptSeed={promptSeed}
-      />
-
-      <TerminalDrawer
-        projectPath={chat.projectPath}
-        visible={terminalVisible}
-        onClose={() => setTerminalVisible(false)}
-      />
-    </div>
+    </ProjectPathContext.Provider>
   )
 }
 
@@ -253,17 +370,16 @@ function ReopenPanelChip({ count, onShow }: { count: number; onShow: () => void 
       className="chat-live-chip"
       type="button"
       onClick={onShow}
-      title="Show the live orchestration panel"
+      title="Show what's running in the background"
     >
       <Icon name="sidebar.right" size={12} />
-      <span>
-        {count} run{count === 1 ? '' : 's'} live
-      </span>
+      <span>{count} running in background</span>
     </button>
   )
 }
 
-/** Empty-state banner shown until the first prompt is sent (doc 22). */
+/** Empty-state banner shown until the first prompt is sent (doc 22): a
+ *  greeting, the folder this session works in, and a few ways to start. */
 function WelcomeBanner({
   projectPath,
   onPrompt
@@ -271,22 +387,13 @@ function WelcomeBanner({
   projectPath: string
   onPrompt: (prompt: string) => void
 }): JSX.Element {
+  const broad = isBroadFolder(projectPath, useApp()?.homePath ?? '')
+  const empty = useEmptyFolder(projectPath, broad)
   return (
     <div className="chat-welcome">
-      <AppIcon size={104} />
-      <div className="chat-welcome-title">How can I help?</div>
+      <div className="chat-welcome-title">What should we build?</div>
       <div className="chat-welcome-sub">Working in {projectName(projectPath)}</div>
-      <div className="chat-welcome-prompts" aria-label="Suggested prompts">
-        <button type="button" onClick={() => onPrompt('Explain this project in simple terms')}>
-          Explain this project
-        </button>
-        <button type="button" onClick={() => onPrompt('Help me find and fix a problem')}>
-          Fix a problem
-        </button>
-        <button type="button" onClick={() => onPrompt('Help me add a new feature')}>
-          Add a feature
-        </button>
-      </div>
+      <StarterPrompts fresh={broad || empty} onPrompt={onPrompt} />
     </div>
   )
 }

@@ -24,15 +24,26 @@
   min-width: 0;
   border-radius: var(--rad-md);
   border: 1px solid var(--hairline);
-  background: color-mix(in srgb, var(--text-secondary) 5%, transparent);
+  background: var(--surface-raised);
 }
 
-.wfc--running {
-  border-color: color-mix(in srgb, var(--accent) 34%, transparent);
-}
-
+/* A running card says so with its mark and badge, not its outline: the
+   transcript's cards share one hairline. Only the states that are the
+   reader's business tint it. */
 .wfc--failed {
-  border-color: color-mix(in srgb, var(--diff-removed) 30%, transparent);
+  border-color: color-mix(in srgb, var(--diff-removed) 26%, var(--hairline));
+}
+
+/* Waiting at a checkpoint: amber, like anything that needs an answer. Still
+   — a pulse here would say the run is working when it is waiting. */
+.wfc--paused {
+  border-color: color-mix(in srgb, var(--warning) 30%, var(--hairline));
+}
+
+/* A card a later turn took over is history the card below repeats: it steps
+   back rather than competing with it. */
+.wfc--continued {
+  background: none;
 }
 
 /* ------------------------------------------------------------------------- */
@@ -75,7 +86,7 @@
 }
 
 .wfc--running .wfc-mark {
-  color: var(--accent);
+  color: var(--accent-text);
   background: color-mix(in srgb, var(--accent) 15%, transparent);
   animation: wfc-pulse 2s ease-in-out infinite;
 }
@@ -83,6 +94,16 @@
 .wfc--failed .wfc-mark {
   color: var(--diff-removed);
   background: color-mix(in srgb, var(--diff-removed) 15%, transparent);
+}
+
+.wfc--paused .wfc-mark {
+  color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 15%, transparent);
+}
+
+.wfc--continued .wfc-name,
+.wfc--continued .wfc-mark {
+  opacity: 0.7;
 }
 
 @keyframes wfc-pulse {
@@ -135,22 +156,37 @@
   align-items: center;
   gap: 4px;
   flex: none;
-  padding: 1px 6px;
+  padding: 1px 7px;
   border-radius: 999px;
-  font-size: 9.5px;
-  font-weight: 600;
-  letter-spacing: 0.3px;
-  text-transform: uppercase;
+  font-size: var(--fs-xs);
+  font-weight: 550;
+  line-height: 16px;
 }
 
 .wfc-badge--running {
   background: color-mix(in srgb, var(--accent) 16%, transparent);
-  color: color-mix(in srgb, var(--accent) 80%, var(--text-primary));
+  color: var(--accent-text);
 }
 
 .wfc-badge--failed {
   background: color-mix(in srgb, var(--diff-removed) 16%, transparent);
   color: color-mix(in srgb, var(--diff-removed) 82%, var(--text-primary));
+}
+
+.wfc-badge--paused {
+  background: color-mix(in srgb, var(--warning) 18%, transparent);
+  color: color-mix(in srgb, var(--warning) 78%, var(--text-primary));
+}
+
+.wfc-done {
+  flex: none;
+  color: var(--success);
+}
+
+.wfc-badge--stopped,
+.wfc-badge--continued {
+  background: color-mix(in srgb, var(--text-secondary) 14%, transparent);
+  color: var(--text-secondary);
 }
 
 .wfc-metrics {
@@ -183,6 +219,22 @@
   text-overflow: ellipsis;
 }
 
+/* What the run was sized for. It trails the counts, pushed right when no
+   clock is ticking there; beside a clock it simply follows it. */
+.wfc-plan {
+  flex: 0 1 auto;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--tr-tertiary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wfc-plan--end {
+  margin-left: auto;
+}
+
 /* ------------------------------------------------------------------------- */
 /* Body                                                                       */
 /* ------------------------------------------------------------------------- */
@@ -203,6 +255,57 @@
 
 .wfc--settled .wfc-phase--pending {
   padding-bottom: var(--sp-xs);
+}
+
+/* The sentence a paused, stopped or continued run leads with: what it is
+   waiting for, why it ended, where it went. */
+.wfc-state {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 0;
+  padding: 6px var(--sp-sm);
+  border-radius: var(--rad-sm);
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--text-secondary) 7%, transparent);
+}
+
+.wfc-state .orch-glyph {
+  margin-top: 2px;
+}
+
+.wfc-state--failed {
+  background: color-mix(in srgb, var(--diff-removed) 9%, transparent);
+}
+
+.wfc-state--paused {
+  background: color-mix(in srgb, var(--warning) 10%, transparent);
+}
+
+.wfc-state--stopped,
+.wfc-state--continued {
+  color: var(--text-secondary);
+}
+
+.wfc-state-arrow {
+  color: var(--text-tertiary);
+}
+
+.wfc-state-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.wfc-state-meta {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--tr-tertiary);
+  padding-top: 1px;
 }
 
 .wfc-empty {
@@ -283,7 +386,7 @@
 }
 
 .wfc-phase--done .wfc-dot {
-  background: color-mix(in srgb, var(--text-secondary) 60%, transparent);
+  background: var(--success);
 }
 
 .wfc-phasebody {
@@ -312,6 +415,17 @@
   white-space: nowrap;
 }
 
+/* A phase the script added while running rather than declaring it. */
+.wfc-phasetag {
+  flex: none;
+  padding: 0 5px;
+  border-radius: 999px;
+  border: 1px solid var(--hairline);
+  font-size: var(--fs-xs);
+  line-height: 15px;
+  color: var(--tr-tertiary);
+}
+
 .wfc-phasedetail {
   flex: 1 1 auto;
   min-width: 0;
@@ -329,17 +443,16 @@
 
 .wfc-phaseratio {
   flex: none;
-  font-size: 10.5px;
+  font-size: var(--fs-xs);
   font-variant-numeric: tabular-nums;
   color: var(--text-secondary);
 }
 
+/* Plain muted words, like a tool row's meta — not a pill: nothing has
+   happened here, and a badge would make it the loudest thing on the line. */
 .wfc-phasepending {
   flex: none;
-  font-size: 9.5px;
-  font-weight: 600;
-  letter-spacing: 0.4px;
-  text-transform: uppercase;
+  font-size: var(--fs-xs);
   color: var(--tr-tertiary);
 }
 
@@ -410,7 +523,7 @@
 }
 
 /* ------------------------------------------------------------------------- */
-/* Log tail and the raw tree                                                  */
+/* Log tail                                                                   */
 /* ------------------------------------------------------------------------- */
 
 .wfc-log {
@@ -424,13 +537,16 @@
 }
 
 .wfc-logline {
-  font-family: 'SF Mono', SFMono-Regular, ui-monospace, 'Cascadia Mono', 'Segoe UI Mono',
-    'JetBrains Mono', Menlo, Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 11px;
   line-height: 1.55;
   color: var(--text-secondary);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+.wfc-logline--dropped {
+  color: var(--tr-tertiary);
 }
 
 .wfc-disclose {
@@ -457,39 +573,13 @@
 }
 
 .wfc-logpeek {
-  font-family: 'SF Mono', SFMono-Regular, ui-monospace, 'Cascadia Mono', 'Segoe UI Mono',
-    'JetBrains Mono', Menlo, Consolas, monospace;
-  font-size: 10.5px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
   color: var(--tr-tertiary);
   min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-.wfc-raw {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-xs);
-  min-width: 0;
-  padding-top: var(--sp-sm);
-  border-top: 1px solid var(--hairline);
-}
-
-.wfc-pre {
-  margin: 0;
-  max-height: 320px;
-  overflow: auto;
-  padding: var(--sp-sm);
-  border-radius: var(--rad-sm);
-  background: var(--tr-panel);
-  font-family: 'SF Mono', SFMono-Regular, ui-monospace, 'Cascadia Mono', 'Segoe UI Mono',
-    'JetBrains Mono', Menlo, Consolas, monospace;
-  font-size: 11px;
-  line-height: 1.55;
-  color: var(--text-secondary);
-  white-space: pre;
-  user-select: text;
 }
 
 /* ------------------------------------------------------------------------- */
@@ -499,7 +589,7 @@
 .wfc-head:focus-visible,
 .wfc-more:focus-visible,
 .wfc-disclose:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--accent) 70%, transparent);
+  outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
   border-radius: var(--rad-sm);
 }

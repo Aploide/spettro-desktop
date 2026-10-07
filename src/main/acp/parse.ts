@@ -6,6 +6,7 @@
 
 import { randomUUID } from 'node:crypto'
 import type {
+  ACPAgentCapabilities,
   ACPCommand,
   ACPConfigChoice,
   ACPConfigGroup,
@@ -13,13 +14,19 @@ import type {
   ACPPermissionOption,
   ACPPermissionRequest,
   ACPPlanEntry,
+  ACPPromptResult,
   ACPQuestion,
   ACPQuestionOption,
   ACPQuestionRequest,
+  ACPSessionInfo,
   ACPSessionUpdate,
+  ACPStopReason,
   ACPToolCallEvent,
   ACPToolDiffContent,
+  ACPToolImage,
+  ACPToolLocation,
   ACPToolStatus,
+  ACPTurnUsage,
   ACPUsage,
   JSONValue
 } from '../../shared/acp'
@@ -209,10 +216,21 @@ function parseToolStatus(raw: string | null): ACPToolStatus {
     : 'unknown'
 }
 
-/** One tool-content item: a diff, a nested content block's text, or bare text. */
-function parseToolContent(
-  value: JSONValue
-): { kind: 'text'; text: string } | { kind: 'diff'; diff: ACPToolDiffContent } | null {
+/** At most this many images are kept per tool call. A screenshot loop can
+ *  return one per step, and every image kept is persisted with the chat. */
+export const MAX_TOOL_IMAGES = 4
+/** An image whose base64 is longer than this is dropped rather than kept:
+ *  one oversized capture would otherwise bloat sessions.json for good. */
+const MAX_TOOL_IMAGE_CHARS = 4_000_000
+
+type ToolContent =
+  | { kind: 'text'; text: string }
+  | { kind: 'diff'; diff: ACPToolDiffContent }
+  | { kind: 'image'; image: ACPToolImage }
+
+/** One tool-content item: a diff, a nested content block (text or image), or
+ *  bare text. */
+function parseToolContent(value: JSONValue): ToolContent | null {
   const obj = objectValue(value)
   if (!obj) return null
   if (stringValue(obj['type']) === 'diff') {
@@ -221,13 +239,61 @@ function parseToolContent(
     if (path === null || newText === null) return null
     return { kind: 'diff', diff: { type: 'diff', path, oldText: stringValue(obj['oldText']), newText } }
   }
-  // "content" wrapper holds a nested content block, usually text.
+  // "content" wrapper holds a nested content block, usually text — an image
+  // when the tool returned one (tools.go: screenshots, view-image).
   const inner = objectValue(obj['content'])
+  if (inner && stringValue(inner['type']) === 'image') {
+    const data = stringValue(inner['data'])
+    const mimeType = stringValue(inner['mimeType'])
+    if (data === null || data === '' || mimeType === null) return null
+    return { kind: 'image', image: { data, mimeType } }
+  }
   const innerText = inner ? stringValue(inner['text']) : null
   if (innerText !== null) return { kind: 'text', text: innerText }
   const bare = stringValue(obj['text'])
   if (bare !== null) return { kind: 'text', text: bare }
   return null
+}
+
+/** A tool call's `content` array, split by kind. */
+function parseToolContents(value: JSONValue | undefined): {
+  texts: string[]
+  diffs: ACPToolDiffContent[]
+  images: ACPToolImage[]
+} {
+  const texts: string[] = []
+  const diffs: ACPToolDiffContent[] = []
+  const images: ACPToolImage[] = []
+  for (const item of arrayValue(value) ?? []) {
+    const parsed = parseToolContent(item)
+    if (!parsed) continue
+    if (parsed.kind === 'text') texts.push(parsed.text)
+    else if (parsed.kind === 'diff') diffs.push(parsed.diff)
+    else if (images.length < MAX_TOOL_IMAGES && parsed.image.data.length <= MAX_TOOL_IMAGE_CHARS) {
+      images.push(parsed.image)
+    }
+  }
+  return { texts, diffs, images }
+}
+
+/** `locations[]`: a path each, plus the line when the agent names one. */
+function parseLocations(value: JSONValue | undefined): ACPToolLocation[] {
+  const out: ACPToolLocation[] = []
+  for (const loc of arrayValue(value) ?? []) {
+    const obj = objectValue(loc)
+    const path = stringValue(obj?.['path'])
+    if (!obj || path === null) continue
+    const line = intValue(obj['line'])
+    out.push(line !== null && line > 0 ? { path, line } : { path })
+  }
+  return out
+}
+
+/** `rawOutput` is `{output}` from spettro (content.go); a bare string from an
+ *  agent that sends one is taken as is. */
+function parseRawOutput(value: JSONValue | undefined): string | null {
+  if (typeof value === 'string') return value
+  return stringValue(objectValue(value)?.['output'])
 }
 
 /** Parses a `tool_call` / `tool_call_update` payload. `toolCallId` required. */
@@ -237,19 +303,10 @@ export function parseToolCallEvent(value: JSONValue): ACPToolCallEvent | null {
   const toolCallId = stringValue(obj['toolCallId'])
   if (toolCallId === null) return null
 
-  const texts: string[] = []
-  const diffs: ACPToolDiffContent[] = []
-  for (const item of arrayValue(obj['content']) ?? []) {
-    const parsed = parseToolContent(item)
-    if (!parsed) continue
-    if (parsed.kind === 'text') texts.push(parsed.text)
-    else diffs.push(parsed.diff)
-  }
-  const locations = (arrayValue(obj['locations']) ?? [])
-    .map((loc) => stringValue(objectValue(loc)?.['path']))
-    .filter((p): p is string => p !== null)
+  const { texts, diffs, images } = parseToolContents(obj['content'])
+  const locations = parseLocations(obj['locations'])
 
-  const event: ACPToolCallEvent = { toolCallId, texts, diffs, locations }
+  const event: ACPToolCallEvent = { toolCallId, texts, diffs, images, locations }
   const title = stringValue(obj['title'])
   if (title !== null) event.title = title
   const kind = stringValue(obj['kind'])
@@ -257,6 +314,12 @@ export function parseToolCallEvent(value: JSONValue): ACPToolCallEvent | null {
   // Status: absent stays absent; present-but-unrecognized becomes 'unknown'.
   if (obj['status'] !== undefined) event.status = parseToolStatus(stringValue(obj['status']))
   if (obj['rawInput'] !== undefined) event.rawInput = obj['rawInput']
+  const rawOutput = parseRawOutput(obj['rawOutput'])
+  if (rawOutput !== null) event.rawOutput = rawOutput
+  // Kept as it came: the renderer reads it defensively (orchestration.ts),
+  // and an object is the only shape spettro sends.
+  const workflow = objectValue(objectValue(obj['_meta'])?.['spettro.app/workflow'])
+  if (workflow) event.workflowMeta = workflow
   return event
 }
 
@@ -283,6 +346,8 @@ export function parseSessionUpdate(update: JSONValue): ACPSessionUpdate | null {
       return { kind: 'agent_message_chunk', text: chunkText(obj) }
     case 'agent_thought_chunk':
       return { kind: 'agent_thought_chunk', text: chunkText(obj) }
+    case 'user_message_chunk':
+      return { kind: 'user_message_chunk', text: chunkText(obj) }
     case 'tool_call': {
       const event = parseToolCallEvent(update)
       return event ? { kind: 'tool_call', event } : null
@@ -295,6 +360,10 @@ export function parseSessionUpdate(update: JSONValue): ACPSessionUpdate | null {
       return { kind: 'available_commands_update', commands: parseCommands(obj['availableCommands']) }
     case 'config_option_update':
       return { kind: 'config_option_update', options: parseConfigOptions(obj['configOptions']) }
+    case 'current_mode_update': {
+      const modeId = stringValue(obj['currentModeId'])
+      return modeId ? { kind: 'current_mode_update', modeId } : null
+    }
     case 'plan':
       return { kind: 'plan', entries: parsePlan(obj['entries']) }
     case 'usage_update': {
@@ -307,11 +376,122 @@ export function parseSessionUpdate(update: JSONValue): ACPSessionUpdate | null {
 }
 
 // ---------------------------------------------------------------------------
+// Handshake, prompt results, session list
+// ---------------------------------------------------------------------------
+
+/** `initialize` → `agentCapabilities`. An agent that doesn't mention a
+ *  capability doesn't have it: ACP capabilities are opt-in. */
+export function parseAgentCapabilities(result: JSONValue | undefined): ACPAgentCapabilities {
+  const caps = objectValue(objectValue(result)?.['agentCapabilities'])
+  const sessions = objectValue(caps?.['sessionCapabilities'])
+  const prompt = objectValue(caps?.['promptCapabilities'])
+  // Each session capability is an object when present (`{}` today), null or
+  // absent when not.
+  const has = (key: string): boolean => objectValue(sessions?.[key]) !== null
+  return {
+    loadSession: boolValue(caps?.['loadSession']) === true,
+    listSessions: has('list'),
+    resumeSession: has('resume'),
+    closeSession: has('close'),
+    promptImage: boolValue(prompt?.['image']) === true,
+    promptEmbeddedContext: boolValue(prompt?.['embeddedContext']) === true
+  }
+}
+
+/** The `_spettro/*` methods the agent serves, from the `initialize` result's
+ *  `_meta["spettro.app/extensions"].methods` (ext.go). Null when it didn't
+ *  say — an older CLI, or another agent — which means "try and see", not
+ *  "none". */
+export function parseExtensionMethods(result: JSONValue | undefined): string[] | null {
+  const ext = objectValue(objectValue(objectValue(result)?.['_meta'])?.['spettro.app/extensions'])
+  const methods = arrayValue(ext?.['methods'])
+  if (!methods) return null
+  return methods.map(stringValue).filter((m): m is string => m !== null)
+}
+
+const STOP_REASONS: readonly ACPStopReason[] = [
+  'end_turn',
+  'max_tokens',
+  'max_turn_requests',
+  'refusal',
+  'cancelled'
+]
+
+/** ACP `Usage`; null unless the three required counts are all there. */
+function parseTurnUsage(value: JSONValue | undefined): ACPTurnUsage | null {
+  const obj = objectValue(value)
+  if (!obj) return null
+  const inputTokens = intValue(obj['inputTokens'])
+  const outputTokens = intValue(obj['outputTokens'])
+  const totalTokens = intValue(obj['totalTokens'])
+  if (inputTokens === null || outputTokens === null || totalTokens === null) return null
+  const usage: ACPTurnUsage = { inputTokens, outputTokens, totalTokens }
+  const cachedRead = intValue(obj['cachedReadTokens'])
+  if (cachedRead !== null) usage.cachedReadTokens = cachedRead
+  const cachedWrite = intValue(obj['cachedWriteTokens'])
+  if (cachedWrite !== null) usage.cachedWriteTokens = cachedWrite
+  return usage
+}
+
+/** A `session/prompt` response (bridge.go Prompt): the stop reason, plus the
+ *  turn's usage and Spettro's own token count when reported. Null when there
+ *  is no stop reason, which is not a response to a prompt. */
+export function parsePromptResult(value: JSONValue | undefined): ACPPromptResult | null {
+  const obj = objectValue(value)
+  const raw = stringValue(obj?.['stopReason'])
+  if (!obj || raw === null) return null
+  const result: ACPPromptResult = {
+    stopReason: (STOP_REASONS as readonly string[]).includes(raw) ? (raw as ACPStopReason) : 'unknown'
+  }
+  const usage = parseTurnUsage(obj['usage'])
+  if (usage) result.usage = usage
+  const tokensUsed = intValue(objectValue(obj['_meta'])?.['spettro.app/tokensUsed'])
+  if (tokensUsed !== null) result.tokensUsed = tokensUsed
+  return result
+}
+
+/** RFC 3339 → ms since epoch; null for anything Date can't read. */
+function parseTimestamp(value: JSONValue | undefined): number | null {
+  const raw = stringValue(value)
+  if (raw === null) return null
+  const ms = Date.parse(raw)
+  return Number.isFinite(ms) ? ms : null
+}
+
+/** A `session/list` page (sessions.go ListSessions). Entries without an id
+ *  are dropped. */
+export function parseSessionList(value: JSONValue | undefined): {
+  sessions: ACPSessionInfo[]
+  nextCursor: string | null
+} {
+  const obj = objectValue(value)
+  const sessions: ACPSessionInfo[] = []
+  for (const entry of arrayValue(obj?.['sessions']) ?? []) {
+    const e = objectValue(entry)
+    const sessionId = stringValue(e?.['sessionId'])
+    if (!e || sessionId === null || sessionId === '') continue
+    sessions.push({
+      sessionId,
+      cwd: stringValue(e['cwd']) ?? '',
+      title: nonEmpty(stringValue(e['title'])),
+      updatedAt: parseTimestamp(e['updatedAt'])
+    })
+  }
+  return { sessions, nextCursor: nonEmpty(stringValue(obj?.['nextCursor'])) }
+}
+
+// ---------------------------------------------------------------------------
 // Permission requests (ACPPermissionRequest.parse)
 // ---------------------------------------------------------------------------
 
 /** Parses `session/request_permission` params. `sessionId` and a `toolCall`
- *  object are required; malformed requests earn a -32602 from the connection. */
+ *  object are required; malformed requests earn a -32602 from the connection.
+ *
+ *  `title` is the agent's own when it sent one and blank otherwise: a request
+ *  the CLI attaches to a card it is already drawing carries only the id, the
+ *  pending status and the content (permission.go requestApproval), and only
+ *  the app knows that card's title. AppModel fills the blank. `chatId` is
+ *  likewise the app's to stamp. */
 export function parsePermissionRequest(params: JSONValue): ACPPermissionRequest | null {
   const obj = objectValue(params)
   if (!obj) return null
@@ -332,15 +512,29 @@ export function parsePermissionRequest(params: JSONValue): ACPPermissionRequest 
     options.push(option)
   }
 
+  const { texts, diffs } = parseToolContents(toolCall['content'])
   const request: ACPPermissionRequest = {
     id: randomUUID(),
     sessionId,
-    title: stringValue(toolCall['title']) ?? 'Permission requested',
+    chatId: null,
+    title: nonEmpty(stringValue(toolCall['title'])) ?? '',
+    content: { texts, diffs },
+    locations: parseLocations(toolCall['locations']),
     options
   }
+  const toolCallId = stringValue(toolCall['toolCallId'])
+  if (toolCallId !== null) request.toolCallId = toolCallId
   const toolKind = stringValue(toolCall['kind'])
   if (toolKind !== null) request.toolKind = toolKind
   if (toolCall['rawInput'] !== undefined) request.rawInput = toolCall['rawInput']
+  // compaction.go asks "compact now?" over this transport with its own ids
+  // (`compact-N`) and options (`compact` / `continue`). Either gives it away.
+  if (
+    toolCallId?.startsWith('compact-') === true ||
+    options.some((o) => o.optionId === 'compact')
+  ) {
+    request.variant = 'compact'
+  }
   return request
 }
 
@@ -409,6 +603,7 @@ export function parseQuestionRequest(params: JSONValue): ACPQuestionRequest | nu
   const request: ACPQuestionRequest = {
     id: randomUUID(),
     version: intValue(payload['version']) ?? 1,
+    chatId: null,
     questions
   }
   const sessionId = stringValue(payload['sessionId'])

@@ -1,23 +1,24 @@
 // The small pieces every orchestration surface is built from — the workflow
-// card, the swarm card and the live side panel all draw the same meter, the
-// same status glyph, the same member line.
+// card and the live side panel draw the same meter, the same status glyph,
+// the same member line.
 //
 // They live together because consistency here is the whole readability story:
 // a run shown in the transcript and the same run shown in the side panel must
 // be recognisably one thing, and a member row must look identical whether it
-// sits under a phase, in a swarm grid, or in the panel. Splitting these across
-// the three call sites is how the three drift apart.
+// sits under a phase or in the panel. Splitting these across the call sites is
+// how they drift apart.
 //
-// These are ports of the TUI's internal/tui/view_workflow.go and view_swarm.go
-// primitives, and they carry the decisions those files argue for: a failure is
-// never rounded away to nothing, an instance name is never truncated through
-// its "#N" suffix, and a running member shows what it is doing NOW rather than
-// the item it was handed at launch.
+// These are ports of the TUI's internal/tui/view_workflow.go primitives, and
+// they carry the decisions that file argues for: a failure is never rounded
+// away to nothing, an instance name is never truncated through its "#N"
+// suffix, and a running member shows what it is doing NOW rather than the
+// task it was handed at launch.
 
 import { useState } from 'react'
 import type { JSX, ReactNode } from 'react'
 import { displayDetail } from './toolPresentation'
-import type { MemberCall, OrchCounts, OrchStatus, WorkflowScript } from './orchestration'
+import type { MemberCall, OrchCounts, OrchStatus, RunStatus, WorkflowScript } from './orchestration'
+import { plainWorkflowError } from './orchestration'
 import { Icon } from './ToolCallView'
 import { MarkdownText } from './MarkdownText'
 import { SpettroSpinner } from './RunTicker'
@@ -89,13 +90,18 @@ export function ProgressMeter({
 // Status glyph
 // ---------------------------------------------------------------------------
 
-/** ▶ running / ✓ done / ✗ failed — the three states anything orchestrated is
- *  ever in, drawn the same size everywhere so rows stay aligned. */
+/**
+ * One glyph per state, drawn the same size everywhere so rows stay aligned:
+ * a spinner while running, a tick or a cross once over, a pause for a run
+ * waiting at a checkpoint (it is not hung, and must not spin as if working),
+ * a square for a run stopped on purpose, and a dashed ring for a member that
+ * has not started.
+ */
 export function StatusGlyph({
   status,
   size = 11
 }: {
-  status: OrchStatus
+  status: OrchStatus | RunStatus
   size?: number
 }): JSX.Element {
   if (status === 'running') {
@@ -105,15 +111,20 @@ export function StatusGlyph({
       </span>
     )
   }
-  const failed = status === 'failed'
+  const icon = GLYPHS[status]
   return (
-    <span
-      className={`orch-glyph orch-glyph--${failed ? 'failed' : 'done'}`}
-      aria-label={failed ? 'failed' : 'done'}
-    >
-      <Icon name={failed ? 'xmark.circle.fill' : 'checkmark.circle.fill'} size={size} />
+    <span className={`orch-glyph orch-glyph--${status}`} aria-label={icon.label}>
+      <Icon name={icon.name} size={size} />
     </span>
   )
+}
+
+const GLYPHS: Record<Exclude<OrchStatus | RunStatus, 'running'>, { name: string; label: string }> = {
+  done: { name: 'checkmark.circle.fill', label: 'done' },
+  failed: { name: 'xmark.circle.fill', label: 'failed' },
+  pending: { name: 'circle.dashed', label: 'not started' },
+  paused: { name: 'pause.circle.fill', label: 'waiting' },
+  stopped: { name: 'stop.circle.fill', label: 'stopped' }
 }
 
 // ---------------------------------------------------------------------------
@@ -132,6 +143,8 @@ export function CountsLabel({ counts }: { counts: OrchCounts }): JSX.Element {
   if (counts.failed > 0) {
     terms.push({ key: 'failed', text: `${counts.failed} failed`, failed: true })
   }
+  if (counts.pending > 0) terms.push({ key: 'pending', text: `${counts.pending} queued` })
+  if (counts.stopped > 0) terms.push({ key: 'stopped', text: `${counts.stopped} stopped` })
   if (counts.cached > 0) terms.push({ key: 'cached', text: `${counts.cached} replayed` })
   return (
     <span className="orch-counts">
@@ -160,10 +173,9 @@ const INSTANCE_MAX = 22
  * detail. Expanding reveals the tool calls it made and the summary it reported.
  *
  * The detail is deliberately the member's *latest* tool call rather than the
- * task it was launched with: in a twenty-member fan-out the launch items are
- * near-identical and tell you nothing about progress, which is the readability
- * fix internal/tui/view_swarm.go was written for. Once a member finishes, the
- * live detail stops meaning anything and the row falls back to its task.
+ * task it was launched with: in a twenty-member fan-out the launch tasks are
+ * near-identical and tell you nothing about progress. Once a member finishes,
+ * the live detail stops meaning anything and the row falls back to its task.
  */
 export function MemberRow({
   member,
@@ -262,7 +274,9 @@ export function MemberRow({
 export function ScriptCallRow({ script }: { script: WorkflowScript }): JSX.Element {
   const [expanded, setExpanded] = useState(false)
   const name = script.savedAs === '' ? 'workflow' : script.savedAs
-  const reason = script.error !== '' ? script.error : script.tool.output.trim()
+  const raw = script.error !== '' ? script.error : script.tool.output.trim()
+  // The same sentence a run card that died this way leads with.
+  const reason = script.status === 'failed' ? plainWorkflowError(raw) : raw.split('\n')[0]
   const hasSource = script.source !== '' || script.returned !== ''
 
   return (
@@ -282,7 +296,11 @@ export function ScriptCallRow({ script }: { script: WorkflowScript }): JSX.Eleme
           Workflow<span className="orch-script-name"> · {name}</span>
         </span>
         <StatusGlyph status={script.status} />
-        {reason !== '' && <span className="orch-script-reason">{reason.split('\n')[0]}</span>}
+        {reason !== '' && (
+          <span className="orch-script-reason" title={raw}>
+            {reason}
+          </span>
+        )}
         <span className="orch-script-spacer" />
         {hasSource && (
           <span className={`tr-chevron${expanded ? ' tr-chevron--open' : ''}`}>

@@ -77,7 +77,17 @@ function isMethodNotFound(error: unknown): boolean {
  *  as well, which is what lets the same store code serve both. */
 export interface ExtensionCaller {
   raw(method: string, params: JSONValue): Promise<JSONValue>
+  /** Whether the other end serves `method`, when it said so up front
+   *  (`initialize` lists the agent's `_spettro/*` methods). A caller that
+   *  can't tell leaves this out, and every call is tried. */
+  supports?(method: string): boolean
 }
+
+/** Which project a workflow call is about: a live ACP session (the CLI uses
+ *  that session's folder, exactly as it would for a prompt), or — for a chat
+ *  with no live session yet — the absolute folder itself (ext_workflow.go
+ *  resolveCwd accepts either). */
+export type WorkflowTarget = { sessionId: string } | { cwd: string }
 
 /** The typed extension calls, written against the seam above. */
 export class SpettroExtensions {
@@ -111,48 +121,49 @@ export class SpettroExtensions {
 
   // MARK: Workflows
   //
-  // Every call carries the chat's ACP session id rather than a path, so the
-  // CLI resolves the project the same way it does for a prompt and a script
-  // can never land in the wrong repo. An unknown session id is an error there,
-  // not a quiet fall back to the process cwd.
+  // Every call names its project the way the CLI resolves one for a prompt:
+  // by the chat's live ACP session when there is one, so a script can never
+  // land in a different repo than the conversation's. An unknown session id
+  // is an error there, not a quiet fall back to the process cwd. A chat with
+  // no live session names its absolute folder instead.
 
-  listWorkflows(sessionId: string): Promise<WorkflowList> {
-    return this.call(ExtensionMethod.workflowList, { sessionId }, decodeWorkflowList)
+  listWorkflows(target: WorkflowTarget): Promise<WorkflowList> {
+    return this.call(ExtensionMethod.workflowList, { ...target }, decodeWorkflowList)
   }
 
-  readWorkflow(sessionId: string, name: string): Promise<WorkflowSource> {
-    return this.call(ExtensionMethod.workflowRead, { sessionId, name }, decodeWorkflowSource)
+  readWorkflow(target: WorkflowTarget, name: string): Promise<WorkflowSource> {
+    return this.call(ExtensionMethod.workflowRead, { ...target, name }, decodeWorkflowSource)
   }
 
   /** Saves and returns the *parsed* header: the script is the source of truth
    *  for the phase list, not whatever the editor was showing. */
   writeWorkflow(
-    sessionId: string,
+    target: WorkflowTarget,
     name: string,
     scope: WorkflowScope,
     script: string
   ): Promise<WorkflowInfo> {
     return this.call(
       ExtensionMethod.workflowWrite,
-      { sessionId, name, scope, script },
+      { ...target, name, scope, script },
       decodeWorkflowInfo
     )
   }
 
-  deleteWorkflow(sessionId: string, name: string, scope: WorkflowScope): Promise<boolean> {
+  deleteWorkflow(target: WorkflowTarget, name: string, scope: WorkflowScope): Promise<boolean> {
     return this.call(
       ExtensionMethod.workflowDelete,
-      { sessionId, name, scope },
+      { ...target, name, scope },
       (v) => boolValue(objectValue(v)?.['deleted']) ?? false
     )
   }
 
-  validateWorkflow(sessionId: string, script: string): Promise<WorkflowValidation> {
-    return this.call(ExtensionMethod.workflowValidate, { sessionId, script }, decodeWorkflowValidation)
+  validateWorkflow(target: WorkflowTarget, script: string): Promise<WorkflowValidation> {
+    return this.call(ExtensionMethod.workflowValidate, { ...target, script }, decodeWorkflowValidation)
   }
 
-  listWorkflowRuns(sessionId: string, limit = 50): Promise<WorkflowRunInfo[]> {
-    return this.call(ExtensionMethod.workflowRuns, { sessionId, limit }, decodeWorkflowRuns)
+  listWorkflowRuns(target: WorkflowTarget, limit = 50): Promise<WorkflowRunInfo[]> {
+    return this.call(ExtensionMethod.workflowRuns, { ...target, limit }, decodeWorkflowRuns)
   }
 
   // MARK: Providers
@@ -207,12 +218,16 @@ export class SpettroExtensions {
 
   /** Sends one extension request and decodes its result. A method-not-found
    *  reply means the CLI predates this surface, which surfaces as
-   *  `UnsupportedExtensionError` so callers can offer an update. */
+   *  `UnsupportedExtensionError` so callers can offer an update — as does a
+   *  method the agent's handshake didn't list, without asking at all. */
   private async call<T>(
     method: string,
     params: JSONValue,
     decode: (value: JSONValue) => T
   ): Promise<T> {
+    if (this.caller.supports && !this.caller.supports(method)) {
+      throw new UnsupportedExtensionError(method)
+    }
     let result: JSONValue
     try {
       result = await this.caller.raw(method, params)
@@ -461,7 +476,9 @@ export function decodeWorkflowRuns(value: JSONValue): WorkflowRunInfo[] {
       {
         runId,
         dir: stringValue(row?.['dir'] as JSONValue) ?? '',
-        modifiedAt: intValue(row?.['modifiedAt'] as JSONValue) ?? 0
+        modifiedAt: intValue(row?.['modifiedAt'] as JSONValue) ?? 0,
+        name: '',
+        finished: false
       }
     ]
   })

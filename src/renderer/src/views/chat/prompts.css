@@ -1,0 +1,604 @@
+/* Inline approval and question cards (PermissionCard, QuestionCard,
+   PromptDock). They sit on top of the composer, on the transcript's measure,
+   and read as part of it: the composer's raised surface and hairline, a
+   smaller radius, one quiet shadow. Colors reference ONLY theme tokens. */
+
+.prompt-dock:empty {
+  display: none;
+}
+
+.prompt-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-sm);
+  max-height: min(56vh, 520px);
+  padding: var(--sp-md) var(--sp-md) 10px;
+  background: var(--surface-raised);
+  border: 1px solid var(--hairline);
+  border-radius: 16px;
+  box-shadow: var(--shadow-md);
+  outline: none;
+  animation: prompt-rise 200ms cubic-bezier(0.2, 0.9, 0.3, 1);
+}
+
+/* Keyboard focus on the card itself (Tab from the composer). */
+.prompt-card:focus-visible {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--hairline));
+  box-shadow:
+    var(--shadow-md),
+    0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+@keyframes prompt-rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .prompt-card {
+    animation: prompt-fade 120ms ease-out;
+  }
+}
+
+@keyframes prompt-fade {
+  from {
+    opacity: 0;
+  }
+}
+
+/* The modal fallback (a request no chat claims): the same card, centred. */
+.prompt-card--sheet {
+  width: 560px;
+  max-width: calc(100vw - 2 * var(--sp-xl));
+  max-height: calc(100vh - 2 * var(--sp-xl));
+  box-shadow: var(--shadow-lg);
+}
+
+/* ------------------------------------------------------------- header */
+
+.prompt-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-sm);
+  min-width: 0;
+}
+
+/* Amber, like the "Needs you" badge: something is waiting on you. */
+.prompt-icon {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 14%, transparent);
+}
+
+.prompt-icon--info {
+  color: var(--accent-text);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.prompt-icon--muted {
+  color: var(--text-secondary);
+  background: var(--hover-fill);
+}
+
+.prompt-title {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: var(--fs-body);
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.prompt-title--quiet {
+  font-size: var(--fs-md);
+  font-weight: 500;
+}
+
+.prompt-title-detail {
+  font-weight: 400;
+  color: var(--text-secondary);
+}
+
+.prompt-step,
+.prompt-queue {
+  flex: none;
+  font-size: var(--fs-sm);
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+.prompt-queue {
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--hover-fill);
+  color: var(--text-secondary);
+}
+
+.prompt-close {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: var(--rad-xs);
+  background: none;
+  color: var(--text-tertiary);
+  cursor: pointer;
+}
+
+.prompt-close:hover {
+  background: var(--hover-fill);
+  color: var(--text-primary);
+}
+
+/* --------------------------------------------------------------- body */
+
+/* The part that can grow (a long diff, many options) scrolls; the header
+   and the buttons stay put. */
+.prompt-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-sm);
+  min-height: 0;
+  overflow-y: auto;
+  padding-left: 32px;
+}
+
+.prompt-subject,
+.prompt-note,
+.prompt-question,
+.prompt-caption {
+  margin: 0;
+  font-size: var(--fs-md);
+  line-height: 1.5;
+  color: var(--text-secondary);
+  user-select: text;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.prompt-subject,
+.prompt-question {
+  color: var(--text-primary);
+}
+
+.prompt-question {
+  font-size: var(--fs-body);
+}
+
+.prompt-caption {
+  font-size: var(--fs-sm);
+  color: var(--text-tertiary);
+}
+
+.prompt-eyebrow {
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+.prompt-code {
+  margin: 0;
+  padding: 8px 10px;
+  max-height: 168px;
+  overflow: auto;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-primary);
+  background: var(--surface-sunken);
+  border: 1px solid var(--hairline);
+  border-radius: var(--rad-sm);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+/* A command reads as one typed at a prompt. */
+.prompt-code--shell::before {
+  content: '$ ';
+  color: var(--text-tertiary);
+  user-select: none;
+}
+
+/* The diff preview is the transcript's own, a little tighter. */
+.prompt-body .tr-diff {
+  flex: none;
+}
+
+.prompt-body .tr-diff-body {
+  max-height: 300px;
+  overflow: auto;
+}
+
+/* ------------------------------------------------------------ options */
+
+.prompt-options {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.prompt-option {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  transition:
+    border-color 120ms ease,
+    background 120ms ease;
+}
+
+.prompt-option:hover {
+  background: var(--hover-fill);
+}
+
+.prompt-option--selected,
+.prompt-option--selected:hover {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--hairline));
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+}
+
+.prompt-option-main {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 12px;
+  border: none;
+  border-radius: inherit;
+  background: none;
+  color: var(--text-primary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.prompt-option-main:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -1px;
+}
+
+/* Radio and checkbox, drawn: the native ones don't take the tokens. */
+.prompt-mark {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  margin-top: 2px;
+  border: 1.5px solid var(--text-tertiary);
+  background: var(--surface-raised);
+  color: var(--accent-contrast);
+}
+
+.prompt-mark--radio {
+  border-radius: 50%;
+}
+
+.prompt-mark--check {
+  border-radius: 5px;
+}
+
+.prompt-option--selected .prompt-mark {
+  border-color: var(--accent);
+}
+
+.prompt-option--selected .prompt-mark--radio {
+  box-shadow: inset 0 0 0 3px var(--surface-raised);
+  background: var(--accent);
+}
+
+.prompt-option--selected .prompt-mark--check {
+  background: var(--accent);
+}
+
+.prompt-option-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.prompt-option-label {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: var(--fs-md);
+  font-weight: 500;
+  line-height: 1.45;
+}
+
+.prompt-option-desc {
+  font-size: var(--fs-sm);
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+
+.prompt-pill {
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 14%, transparent);
+}
+
+.prompt-option-kbd {
+  margin-top: 1px;
+}
+
+.prompt-preview-toggle {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: -4px 0 6px 38px;
+  padding: 2px 6px;
+  border: none;
+  border-radius: var(--rad-xs);
+  background: none;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: var(--fs-sm);
+  cursor: pointer;
+}
+
+.prompt-preview-toggle:hover {
+  background: var(--hover-fill);
+  color: var(--text-primary);
+}
+
+.prompt-preview {
+  margin: 0 12px 10px 38px;
+}
+
+.prompt-field {
+  margin: 0 12px 10px 38px;
+  padding: 8px 10px;
+  min-height: 38px;
+  max-height: 160px;
+  /* It grows with its text like the composer (QuestionCard sets the height),
+     then scrolls; no OS resize grip in the corner. */
+  resize: none;
+  overflow-y: auto;
+  font: inherit;
+  font-size: var(--fs-md);
+  line-height: 1.45;
+  color: var(--text-primary);
+  background: var(--canvas);
+  border: 1px solid var(--hairline);
+  border-radius: var(--rad-sm);
+  outline: none;
+}
+
+.prompt-field:focus {
+  border-color: color-mix(in srgb, var(--accent) 50%, var(--hairline));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.prompt-field::placeholder {
+  color: var(--text-tertiary);
+}
+
+/* ------------------------------------------------------------ actions */
+
+.prompt-actions {
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-left: 32px;
+}
+
+.prompt-actions--confirm {
+  align-items: center;
+}
+
+.prompt-actions-spacer {
+  flex: 1;
+}
+
+/* A button and, under it, the CLI's scope for "Always allow". The caption
+   hangs below without widening its column, so the three buttons keep one
+   even gap whether or not it is there; the row makes room for it. */
+.prompt-choice {
+  position: relative;
+  display: flex;
+}
+
+.prompt-actions:has(.prompt-choice-caption) {
+  row-gap: 22px;
+  padding-bottom: 16px;
+}
+
+.prompt-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--rad-sm);
+  background: var(--surface-raised);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: var(--fs-md);
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background 120ms ease,
+    opacity 160ms ease;
+}
+
+.prompt-btn:hover:not(:disabled) {
+  background: var(--hover-fill);
+}
+
+.prompt-btn:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.prompt-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* The composer's send button, as a pill. */
+.prompt-btn--primary {
+  border-color: transparent;
+  background: var(--text-primary);
+  color: var(--canvas);
+}
+
+.prompt-btn--primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--text-primary) 86%, var(--canvas));
+}
+
+/* Disabled reads as "not yet", not as a dimmed ink block. */
+.prompt-btn--primary:disabled {
+  opacity: 1;
+  background: var(--selected-fill);
+  color: var(--text-tertiary);
+}
+
+.prompt-btn--danger {
+  border-color: transparent;
+  background: var(--danger-fill);
+  color: var(--danger-contrast);
+}
+
+.prompt-btn--danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger-fill) 88%, black);
+}
+
+/* Unarmed: the buttons are there to read, not yet to press. */
+.prompt-card:not(.prompt-card--armed) .prompt-actions .prompt-btn {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.prompt-choice-caption {
+  position: absolute;
+  top: calc(100% + 3px);
+  left: 2px;
+  max-width: 260px;
+  font-size: var(--fs-xs);
+  color: var(--text-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.prompt-kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  border-radius: 4px;
+  font-family: var(--font-sans);
+  font-size: 10.5px;
+  font-weight: 500;
+  line-height: 1;
+  color: var(--text-tertiary);
+  background: var(--hover-fill);
+  box-shadow: inset 0 -1px 0 var(--hairline);
+}
+
+.prompt-btn--primary .prompt-kbd {
+  color: color-mix(in srgb, var(--canvas) 75%, transparent);
+  background: color-mix(in srgb, var(--canvas) 16%, transparent);
+  box-shadow: none;
+}
+
+.prompt-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  align-self: center;
+  font-size: var(--fs-sm);
+  color: var(--text-tertiary);
+}
+
+.prompt-link {
+  align-self: center;
+  padding: 4px 6px;
+  border: none;
+  border-radius: var(--rad-xs);
+  background: none;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: var(--fs-sm);
+  cursor: pointer;
+}
+
+.prompt-link:hover {
+  color: var(--text-primary);
+  text-decoration: underline;
+}
+
+.prompt-confirm-text {
+  font-size: var(--fs-md);
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+/* ---------------------------------------------------------- feedback */
+
+.prompt-card--feedback {
+  padding-bottom: var(--sp-md);
+}
+
+.prompt-feedback-row {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--sp-sm);
+  padding-left: 32px;
+}
+
+.prompt-feedback-row .prompt-field {
+  flex: 1;
+  margin: 0;
+  min-height: 34px;
+  resize: none;
+}
+
+.prompt-feedback-row .prompt-btn {
+  height: 34px;
+}
+
+/* ------------------------------------------------------------ fallback */
+
+.prompt-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--scrim);
+  animation: prompt-fade 140ms ease-out;
+}

@@ -7,6 +7,16 @@
 // own tools, driven by the same matcher the CLI uses so the highlight can
 // never promise a mode the run will not enter.
 //
+// A "+500k" budget directive lights the same way, but only when it would be
+// honoured — when workflows are on for the message (budgetDirectivesLive) —
+// so the glow never promises a budget nobody enforces.
+//
+// Under the "Ask first" permission level workflows do not run at all (the CLI
+// refuses them: internal/agent/workflow.go), so the phrase is still marked —
+// it is still what the user asked for — but in a muted, still variant, and
+// the composer says why underneath (WorkflowHint) instead of letting a lit
+// phrase promise a run that will not happen.
+//
 // Two renderers, one look:
 //
 //   * ActivationText — read-only prose (a sent message). Trivial.
@@ -16,6 +26,8 @@
 //     mirror is only honest while the two share every metric that affects
 //     wrapping, which is why they share a class rather than two lists of
 //     matching declarations, and why the mirror is scrolled in lockstep.
+//     The same mirror draws @-mentioned files as chips: a textarea can't hold
+//     an element, so the chip is painted under the mention's own characters.
 
 import { Fragment, useCallback, useEffect, useLayoutEffect, useRef } from 'react'
 import type {
@@ -26,19 +38,39 @@ import type {
   MutableRefObject,
   UIEvent
 } from 'react'
-import { splitOnActivation } from '@shared/workflowActivation'
+import { workflowRequested } from '@shared/workflowActivation'
+import { compactTokens, splitWorkflowInput } from '@shared/workflowBudget'
+import { Icon } from '@renderer/design/icons'
+import { splitMentions } from './mentions'
+import { drift } from './glowDrift'
 import './activation.css'
 
-/** The matched phrases, lit; everything else plain. */
-export function ActivationText({ text }: { text: string }): JSX.Element {
-  const pieces = splitOnActivation(text)
+/**
+ * The matched phrases, lit; everything else plain. `budgets` defaults to what
+ * the text alone decides (a directive counts beside an activating phrase): a
+ * sent message no longer knows whether Ultra was on when it went.
+ */
+export function ActivationText({
+  text,
+  budgets,
+  muted = false
+}: {
+  text: string
+  budgets?: boolean
+  muted?: boolean
+}): JSX.Element {
+  const pieces = splitWorkflowInput(text, budgets ?? workflowRequested(text))
   return (
     <>
       {pieces.map((piece, i) =>
         piece.active ? (
-          <span className="glow" key={i}>
-            {piece.text}
-          </span>
+          muted ? (
+            <span className="glow glow--muted" key={i}>
+              {piece.text}
+            </span>
+          ) : (
+            <LitPhrase text={piece.text} key={i} />
+          )
         ) : (
           // Plain prose needs no element of its own: the glow paints on its own
           // glyphs and never outside them, so there is nothing here to defend
@@ -48,6 +80,20 @@ export function ActivationText({ text }: { text: string }): JSX.Element {
         )
       )}
     </>
+  )
+}
+
+/**
+ * A lit phrase: its band drifts on the shared clock (glowDrift.ts), and
+ * stands still while it is out of sight.
+ */
+function LitPhrase({ text }: { text: string }): JSX.Element {
+  const ref = useRef<HTMLSpanElement>(null)
+  useEffect(() => (ref.current ? drift(ref.current) : undefined), [])
+  return (
+    <span className="glow" ref={ref}>
+      {text}
+    </span>
   )
 }
 
@@ -62,6 +108,17 @@ interface Props {
   onFocus?: () => void
   onBlur?: () => void
   textareaRef?: MutableRefObject<HTMLTextAreaElement | null>
+  /** Light "+500k" directives too (they would be honoured). */
+  budgets?: boolean
+  /** Workflows cannot run right now (Ask first): mark, but quietly. */
+  muted?: boolean
+  /** Project-relative files @-mentioned in the text, drawn as chips. */
+  mentions?: string[]
+  onSelect?: () => void
+  onClick?: () => void
+  /** The input's accessible name. */
+  label?: string
+  testId?: string
 }
 
 export function ActivationTextarea({
@@ -74,7 +131,14 @@ export function ActivationTextarea({
   onPaste,
   onFocus,
   onBlur,
-  textareaRef
+  textareaRef,
+  budgets = false,
+  muted = false,
+  mentions = [],
+  onSelect,
+  onClick,
+  label,
+  testId
 }: Props): JSX.Element {
   const ownRef = useRef<HTMLTextAreaElement>(null)
   const area = textareaRef ?? ownRef
@@ -105,11 +169,14 @@ export function ActivationTextarea({
   // Only mount the mirror when there is something to light. Until then the
   // textarea renders its own text normally, so the overwhelmingly common case
   // pays nothing and cannot be misaligned.
-  const lit = value !== '' && splitOnActivation(value).some((p) => p.active)
+  const lit = value !== '' && splitWorkflowInput(value, budgets).some((p) => p.active)
+  const pieces = value !== '' && mentions.length > 0 ? splitMentions(value, mentions) : []
+  const chips = pieces.some((p) => p.mention)
+  const mirrored = lit || chips
 
   return (
     <div className="glow-wrap">
-      {lit && (
+      {mirrored && (
         <div
           ref={mirrorRef}
           className={`${className} glow-mirror`}
@@ -118,13 +185,25 @@ export function ActivationTextarea({
           // the mirror's height matches the textarea's exactly.
           data-testid="activation-mirror"
         >
-          <ActivationText text={value} />
+          {chips ? (
+            pieces.map((piece, i) =>
+              piece.mention ? (
+                <span className="mention-chip" key={i}>
+                  {piece.text}
+                </span>
+              ) : (
+                <ActivationText key={i} text={piece.text} budgets={budgets} muted={muted} />
+              )
+            )
+          ) : (
+            <ActivationText text={value} budgets={budgets} muted={muted} />
+          )}
           {'\n'}
         </div>
       )}
       <textarea
         ref={area}
-        className={`${className}${lit ? ' glow-input' : ''}`}
+        className={`${className}${mirrored ? ' glow-input' : ''}`}
         rows={rows}
         value={value}
         placeholder={placeholder}
@@ -140,7 +219,55 @@ export function ActivationTextarea({
         onPaste={onPaste}
         onFocus={onFocus}
         onBlur={onBlur}
+        onSelect={onSelect}
+        onClick={onClick}
+        aria-label={label}
+        data-testid={testId}
       />
     </div>
   )
+}
+
+/**
+ * The line under the composer that explains a lit phrase, when there is
+ * something to explain: workflows are off under "Ask first" (with the one-click
+ * way out, when the permission option offers it), or a budget directive will
+ * cap the run's tokens. Renders nothing otherwise.
+ */
+export function WorkflowHint({
+  pausedByAskFirst,
+  budgetTokens,
+  onSwitchPermission
+}: {
+  pausedByAskFirst: boolean
+  budgetTokens: number | null
+  onSwitchPermission?: () => void
+}): JSX.Element | null {
+  if (pausedByAskFirst) {
+    return (
+      <div className="workflow-hint workflow-hint--paused" role="status">
+        <Icon name="pause.circle.fill" size={12} />
+        <span className="workflow-hint-text">
+          Workflows are paused under Ask first — switch permission to run them
+        </span>
+        {onSwitchPermission && (
+          <button type="button" className="workflow-hint-action" onClick={onSwitchPermission}>
+            Switch to Restricted
+          </button>
+        )}
+      </div>
+    )
+  }
+  if (budgetTokens !== null) {
+    return (
+      <div className="workflow-hint" role="status">
+        <Icon name="flowchart" size={12} />
+        <span className="workflow-hint-text">
+          Workflows in this message share a budget of{' '}
+          <strong className="workflow-hint-strong">{compactTokens(budgetTokens)} tokens</strong>
+        </span>
+      </div>
+    )
+  }
+  return null
 }

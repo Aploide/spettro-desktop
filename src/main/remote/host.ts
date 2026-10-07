@@ -82,6 +82,11 @@ export class RemoteHost implements RemoteHostSessionDelegate {
   private pairingTimer: NodeJS.Timeout | null = null
   private pairingURL: string | null = null
   private pairingQR: string | null = null
+  /** When the open pairing code stops working (ms since epoch). */
+  private pairingExpiresAt: number | null = null
+  /** The last code ran out rather than being closed — the pane offers a new
+   *  one instead of quietly disappearing. */
+  private pairingExpired = false
 
   /** Listeners registered on bridge.events, kept for shutdown(). */
   private readonly bridgeListeners: [string, (...args: never[]) => void][] = []
@@ -286,12 +291,19 @@ export class RemoteHost implements RemoteHostSessionDelegate {
       console.error('[remote] could not render pairing QR', error)
       this.pairingQR = null
     }
-    this.pairingTimer = setTimeout(() => this.closePairing(), PAIRING_WINDOW_MS)
+    this.pairingExpired = false
+    this.pairingExpiresAt = Date.now() + PAIRING_WINDOW_MS
+    this.pairingTimer = setTimeout(() => {
+      this.closePairingInternal()
+      this.pairingExpired = true
+      this.publishState()
+    }, PAIRING_WINDOW_MS)
     this.publishState()
   }
 
   closePairing(): void {
     this.closePairingInternal()
+    this.pairingExpired = false
     this.publishState()
   }
 
@@ -303,6 +315,7 @@ export class RemoteHost implements RemoteHostSessionDelegate {
     this.pairingWindow = null
     this.pairingURL = null
     this.pairingQR = null
+    this.pairingExpiresAt = null
   }
 
   // MARK: Devices / identity
@@ -351,6 +364,8 @@ export class RemoteHost implements RemoteHostSessionDelegate {
       pairingOpen: this.openPairingSecret() !== null,
       pairingURL: this.pairingURL,
       pairingQR: this.pairingQR,
+      pairingExpiresAt: this.pairingExpiresAt,
+      pairingExpired: this.pairingExpired,
       devices: this.devices.toDTOs(),
       connectedDeviceIds: [...this.connectedDeviceIds]
     }

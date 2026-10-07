@@ -1,59 +1,305 @@
-/* Port of Spettro/Design/Theme.swift — spacing, radii, semantic colors.
-   Dark is the default appearance; light overrides via prefers-color-scheme.
-   All views reference ONLY these custom properties (never raw colors). */
+/* The design tokens — the one place a colour, size or font is decided.
+   True neutral greys in both schemes (no warm cast), and one accent used
+   sparingly: a soft lilac by default, or Monochrome, where the accent is
+   simply the ink colour and nothing is tinted but the semantic colours. Every
+   view references ONLY these custom properties (never raw colours); a
+   component that needs a variant derives it with color-mix().
+
+   The scheme follows prefers-color-scheme. The in-app System/Light/Dark
+   setting works by setting nativeTheme.themeSource in main, which is what
+   drives that media query — so the visual harness (which flips the same
+   switch) and the app always agree, and there is no data-theme attribute to
+   keep in sync.
+
+   The accent is the one thing an attribute does decide: data-accent on <html>
+   (design/accent.ts), put there by preload before the first paint. Lilac is
+   the unattributed default, so a page that never sets it (the harness) is
+   still complete.
+
+   Layout: one scheme-independent block; the dark palette (the default) and
+   the light palette, each with the lilac accent; then the monochrome accent
+   for each scheme, which overrides only the accent tokens. The palette blocks
+   must declare the same set of tokens, and the two monochrome blocks the same
+   accent tokens; tests/theme.test.ts holds them to that.
+
+   Ultra's fire (--ultra-*) is the one warm colour in the app and belongs to
+   neither accent: the thinking slider's Ultra stop and its meteor burn the
+   same in Lilac and Monochrome. */
 
 :root {
   /* Spacing */
+  --sp-2xs: 2px;
   --sp-xs: 4px;
   --sp-sm: 8px;
   --sp-md: 12px;
   --sp-lg: 16px;
   --sp-xl: 24px;
+  --sp-2xl: 32px;
 
-  /* Radii */
+  /* Radii: rows, buttons, cards, the composer, chat bubbles. */
+  --rad-xs: 6px;
   --rad-sm: 8px;
   --rad-md: 12px;
-  --rad-lg: 18px;
-  --rad-bubble: 16px;
+  --rad-lg: 20px;
+  --rad-bubble: 18px;
 
-  /* Dark appearance (default) */
-  --accent: #6073cc;
-  --agent-accent: #ad7bf9;
-  --diff-added: #40c977;
-  --diff-removed: #fa423e;
-  --canvas: #0e0e0e;
-  --surface-raised: #1c1c1c; /* white 0.11 */
-  --assistant-bubble: #212121; /* white 0.13 */
-  --user-bubble: var(--accent);
-  --hairline: rgba(255, 255, 255, 0.08);
-  --text-primary: rgba(255, 255, 255, 0.92);
-  --text-secondary: rgba(255, 255, 255, 0.55);
+  /* Fonts. System faces only: the CSP allows same-origin fonts, and nothing
+     is bundled. */
+  --font-sans: system-ui, -apple-system, 'Segoe UI', Roboto, 'Noto Sans', Ubuntu, Cantarell,
+    sans-serif;
+  --font-mono: 'SF Mono', SFMono-Regular, ui-monospace, 'Cascadia Mono', 'JetBrains Mono', Menlo,
+    Consolas, monospace;
+
+  /* Type scale */
+  --fs-xs: 11px;
+  --fs-sm: 12px;
+  --fs-md: 13px;
+  --fs-body: 15px;
+  --fs-lg: 17px;
+  --fs-xl: 24px;
+  --lh-body: 1.6;
+
+  /* The reading column's width. */
+  --measure: 760px;
 
   color-scheme: dark light;
 }
 
+/* ------------------------------------------------------------ dark palette */
+
+:root {
+  --canvas: #1c1c1e;
+  --sidebar-bg: #161618;
+  --surface-raised: #2c2c2e;
+  --surface-sunken: #161618;
+  --user-bubble-bg: #2a2a2d;
+
+  /* Each passes AA on --canvas and on --surface-raised. */
+  --text-primary: #f5f5f7;
+  --text-secondary: #aeaeb2;
+  --text-tertiary: #98989d;
+
+  --hairline: rgba(255, 255, 255, 0.1);
+  --hover-fill: rgba(255, 255, 255, 0.055);
+  --selected-fill: rgba(255, 255, 255, 0.09);
+  /* Behind a modal: dims the app without hiding where you were. */
+  --scrim: rgba(0, 0, 0, 0.5);
+
+  /* The accent (lilac here; the monochrome set is at the end of the file).
+     --accent fills (a primary button, the slider, a dot) under
+     --accent-contrast text; --accent-text is the accent as text or an icon
+     on a surface; --accent-soft a tinted background; --focus-ring the
+     keyboard's place; --selection selected text. All literal colours, not
+     color-mix(): the terminal and the meteor read some of them back as
+     concrete values. */
+  --accent: #b9a3f5;
+  --accent-hover: #a993ea;
+  --accent-contrast: #1b1530;
+  --accent-text: #b9a3f5;
+  --accent-soft: rgba(185, 163, 245, 0.16);
+  --focus-ring: rgba(185, 163, 245, 0.6);
+  --selection: rgba(185, 163, 245, 0.32);
+  --agent-accent: #b9a3f5;
+  /* A switch that is on: its track, under an always-white thumb. */
+  --switch-on: #b9a3f5;
+  /* Lilac itself, whatever the accent: the Accent picker's swatch. */
+  --lilac: #b9a3f5;
+
+  --success: #4fbf7a;
+  --danger: #ef6f65;
+  --warning: #e0a43f;
+  /* Text on a filled warning surface — a fixed near-black that stays legible
+     on amber in either scheme. */
+  --warning-contrast: #1a1205;
+  /* A filled danger control (Delete, an armed menu item) and its white
+     label. --danger is tuned to read as text on the dark surfaces, which
+     makes it too light to carry white text (2.9:1), so the fill is a deeper
+     red of its own. */
+  --danger-fill: #d0433a;
+  --danger-contrast: #ffffff;
+
+  --diff-added: var(--success);
+  --diff-removed: var(--danger);
+  --diff-added-bg: color-mix(in srgb, var(--success) 12%, transparent);
+  --diff-removed-bg: color-mix(in srgb, var(--danger) 12%, transparent);
+
+  /* Always white: QR codes must be dark-on-white to scan, whatever the theme. */
+  --paper: #ffffff;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 8px 28px rgba(0, 0, 0, 0.4), 0 1px 3px rgba(0, 0, 0, 0.3);
+  --shadow-lg: 0 24px 80px rgba(0, 0, 0, 0.55), 0 2px 8px rgba(0, 0, 0, 0.3);
+  --shadow-composer: 0 4px 24px rgba(0, 0, 0, 0.28), 0 1px 2px rgba(0, 0, 0, 0.2);
+
+  /* Agent-mode tints (modeColor() in theme.ts resolves names to these), and
+     the TUI's named colours they come from. Plan, coding and ask are the
+     mode chip's; they follow the accent (plan is the lilac itself), and
+     Monochrome turns them into three greys. The named ones identify agents
+     and syntax, which is information rather than decoration, so they stay. */
+  --mode-plan: #b9a3f5;
+  --mode-coding: #6cc79c;
+  --mode-ask: #82b4f2;
+  --mode-blue: #a99af2;
+  --mode-green: #6cc79c;
+  --mode-cyan: #82b4f2;
+  --mode-yellow: #e0a43f;
+  --mode-magenta: #d08ae8;
+  --mode-purple: #c4a1f5;
+  --mode-red: #ef6f65;
+
+  /* Plan tiers (PlanBadge.swift), and the TUI's six-colour rainbow for MAX. */
+  --plan-muted: #98989d;
+  --plan-pro: #c4b5fd;
+  --plan-plus: #86efac;
+  --plan-rainbow: #ff6b6b, #ff9e4f, #ffd93d, #6bcb77, #4d96ff, #c77dff;
+
+  /* Ultra's fire, coolest to hottest: the thinking slider's segment past Max,
+     its lit fill and thumb, and the meteor that arrives there (the canvas
+     reads these same tokens). On dark the sparks add light, so they run up to
+     white. The same in both accents. */
+  --ultra-ember: #e0452b;
+  --ultra-flame: #ff8a3d;
+  --ultra-spark: #ffd36b;
+  --ultra-core: #fffbea;
+  /* Fire as text (the Ultra value, label and chip): the same ramp pulled
+     into AA on the raised surfaces and on the chip's tint. */
+  --ultra-text-ember: #ff8064;
+  --ultra-text-flame: #ffa060;
+
+  /* Aliases kept for one release so views not yet moved to the names above
+     keep rendering. */
+  --assistant-bubble: var(--surface-raised);
+  --user-bubble: var(--user-bubble-bg);
+}
+
+/* ----------------------------------------------------------- light palette */
+
 @media (prefers-color-scheme: light) {
   :root {
-    --accent: #526fff;
-    --canvas: #f9f9f7;
+    --canvas: #fafafa;
+    --sidebar-bg: #f4f4f5;
     --surface-raised: #ffffff;
-    --assistant-bubble: #ffffff;
-    --hairline: rgba(0, 0, 0, 0.08);
-    --text-primary: rgba(0, 0, 0, 0.88);
-    --text-secondary: rgba(0, 0, 0, 0.55);
+    --surface-sunken: #f2f2f3;
+    --user-bubble-bg: #f0f0f2;
+
+    /* Each passes AA on --canvas, --sidebar-bg and --surface-sunken. */
+    --text-primary: #1d1d1f;
+    --text-secondary: #5c5c61;
+    --text-tertiary: #6e6e73;
+
+    --hairline: rgba(0, 0, 0, 0.1);
+    --hover-fill: rgba(0, 0, 0, 0.045);
+    --selected-fill: rgba(0, 0, 0, 0.07);
+    --scrim: rgba(0, 0, 0, 0.25);
+
+    /* White on the fill and the text shade on white both pass AA. */
+    --accent: #7a66c6;
+    --accent-hover: #6d59ba;
+    --accent-contrast: #ffffff;
+    --accent-text: #6852b8;
+    --accent-soft: rgba(122, 102, 198, 0.12);
+    --focus-ring: rgba(122, 102, 198, 0.5);
+    --selection: rgba(122, 102, 198, 0.2);
+    --agent-accent: #6852b8;
+    --switch-on: #7a66c6;
+    --lilac: #7a66c6;
+
+    --success: #237a48;
+    --danger: #c93a30;
+    --warning: #9a6210;
+    --warning-contrast: #1a1205;
+    --danger-fill: #c93a30;
+    --danger-contrast: #ffffff;
+
+    --diff-added: var(--success);
+    --diff-removed: var(--danger);
+    --diff-added-bg: color-mix(in srgb, var(--success) 12%, transparent);
+    --diff-removed-bg: color-mix(in srgb, var(--danger) 12%, transparent);
+
+    --paper: #ffffff;
+
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.06);
+    --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.1), 0 1px 3px rgba(0, 0, 0, 0.06);
+    --shadow-lg: 0 24px 64px rgba(0, 0, 0, 0.16), 0 2px 8px rgba(0, 0, 0, 0.08);
+    --shadow-composer: 0 4px 20px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.05);
+
+    /* The dark set washes out on white; same hues, deepened. */
+    --mode-plan: #6852b8;
+    --mode-coding: #2a8058;
+    --mode-ask: #2f6dbf;
+    --mode-blue: #6150c8;
+    --mode-green: #2a8058;
+    --mode-cyan: #2f6dbf;
+    --mode-yellow: #9a6210;
+    --mode-magenta: #a3449c;
+    --mode-purple: #7b4fc9;
+    --mode-red: #c93a30;
+
+    --plan-muted: #6e6e73;
+    --plan-pro: #6852b8;
+    --plan-plus: #16a34a;
+    --plan-rainbow: #ff6b6b, #ff9e4f, #ffd93d, #6bcb77, #4d96ff, #c77dff;
+
+    /* White-hot vanishes on a white popover, so light fire is a shade deeper
+       and its core stays a pale gold the flame ring can outline. */
+    --ultra-ember: #c2341d;
+    --ultra-flame: #e8641c;
+    --ultra-spark: #f2a516;
+    --ultra-core: #fff1c2;
+    --ultra-text-ember: #c2341d;
+    --ultra-text-flame: #b5470f;
+
+    --assistant-bubble: var(--surface-raised);
+    --user-bubble: var(--user-bubble-bg);
   }
 }
 
-/* Mode tints (Theme.modeColor); resolved in JS via modeColor() below's
-   companion in theme.ts — these are the raw palette values. */
-:root {
-  --mode-blue: #a78bfa;
-  --mode-green: #34d399;
-  --mode-cyan: #60a5fa;
-  --mode-yellow: #f59e0b;
-  --mode-magenta: #c084fc;
-  --mode-purple: #bd93f9;
-  --mode-red: #ef4444;
+/* ---------------------------------------------------- monochrome accent */
+
+/* The accent is the ink: a near-white fill with near-black text on dark, the
+   reverse on light, a neutral focus ring and grey selection. The mode chip's
+   three tints become three greys. Nothing else changes — the neutrals,
+   semantic colours and Ultra's fire are shared. */
+:root[data-accent='mono'] {
+  --accent: #f5f5f7;
+  --accent-hover: #dcdce0;
+  --accent-contrast: #1d1d1f;
+  --accent-text: #f5f5f7;
+  --accent-soft: rgba(255, 255, 255, 0.1);
+  --focus-ring: rgba(255, 255, 255, 0.5);
+  --selection: rgba(255, 255, 255, 0.22);
+  --agent-accent: #aeaeb2;
+  /* Grey, not white: the switch's white thumb has to show on it. */
+  --switch-on: #7c7c80;
+
+  --mode-plan: #f5f5f7;
+  --mode-coding: #c7c7cc;
+  --mode-ask: #aeaeb2;
+
+  /* PRO and PLUS in ink; MAX keeps its rainbow, like Ultra its fire. */
+  --plan-pro: #f5f5f7;
+  --plan-plus: #f5f5f7;
+}
+
+@media (prefers-color-scheme: light) {
+  :root[data-accent='mono'] {
+    --accent: #1d1d1f;
+    --accent-hover: #3a3a3c;
+    --accent-contrast: #ffffff;
+    --accent-text: #1d1d1f;
+    --accent-soft: rgba(0, 0, 0, 0.065);
+    --focus-ring: rgba(0, 0, 0, 0.4);
+    --selection: rgba(0, 0, 0, 0.13);
+    --agent-accent: #5c5c61;
+    --switch-on: #1d1d1f;
+
+    --mode-plan: #1d1d1f;
+    --mode-coding: #48484a;
+    --mode-ask: #636366;
+
+    --plan-pro: #1d1d1f;
+    --plan-plus: #1d1d1f;
+  }
 }
 
 * {
@@ -67,19 +313,15 @@ body,
   margin: 0;
 }
 
+::selection {
+  background: var(--selection);
+}
+
 body {
   background: var(--canvas);
   color: var(--text-primary);
-  font-family:
-    system-ui,
-    -apple-system,
-    'Segoe UI',
-    Roboto,
-    'Noto Sans',
-    Ubuntu,
-    Cantarell,
-    sans-serif;
-  font-size: 13px;
+  font-family: var(--font-sans);
+  font-size: var(--fs-md);
   -webkit-font-smoothing: antialiased;
   user-select: none;
 }
@@ -87,8 +329,7 @@ body {
 code,
 pre,
 .mono {
-  font-family: 'SF Mono', SFMono-Regular, ui-monospace, 'Cascadia Mono', 'Segoe UI Mono',
-    'JetBrains Mono', Menlo, Consolas, monospace;
+  font-family: var(--font-mono);
 }
 
 /* The soft card surface (CardBackground / .card() modifier). */

@@ -1,20 +1,32 @@
 // A typed facade over AcpConnection — the TypeScript port of spettro-apple's
 // ACPAgent.swift (plus the reply encodings of ACPQuestion.swift). Exposes the
 // semantic ACP calls the app uses (initialize, session/new, session/resume,
-// session/prompt, session/cancel, session/set_config_option) and the
-// permission/question replies, hiding method strings and params shapes.
+// session/load, session/list, session/close, session/prompt, session/cancel,
+// session/set_config_option) and the permission/question replies, hiding
+// method strings and params shapes.
 
 import type {
+  ACPAgentCapabilities,
   ACPConfigOption,
   ACPContentBlock,
+  ACPPromptResult,
   ACPQuestionAnswer,
   ACPQuestionRequest,
-  ACPStopReason,
+  ACPSessionInfo,
   JSONValue,
   RPCID
 } from '../../shared/acp'
 import { AcpConnection, AcpError } from './connection'
-import { arrayValue, intValue, objectValue, parseConfigOptions, stringValue } from './parse'
+import {
+  intValue,
+  objectValue,
+  parseAgentCapabilities,
+  parseConfigOptions,
+  parseExtensionMethods,
+  parsePromptResult,
+  parseSessionList,
+  stringValue
+} from './parse'
 
 // Wire keys for questions walked over the permission transport
 // (ACPQuestionMeta in ACPQuestion.swift).
@@ -25,16 +37,36 @@ const QUESTION_ANSWER_META = 'spettro.app/questionAnswer'
  *  would misreport what the user said. */
 const DECLINED: JSONValue = { kind: 'declined' }
 
-const STOP_REASONS: readonly ACPStopReason[] = [
-  'end_turn',
-  'max_tokens',
-  'max_turn_requests',
-  'refusal',
-  'cancelled'
-]
+/** What the app answers a question it is withdrawing with — the turn was
+ *  cancelled under it, so nobody declined anything (question_form.go reads a
+ *  top-level `kind` of "declined" or "cancelled" as ending the form). */
+const CANCELLED: JSONValue = { kind: 'cancelled' }
+
+/** JSON-RPC "method not found". */
+const METHOD_NOT_FOUND = -32601
+
+/** The extension surface this client implements, mirrored to the agent so it
+ *  knows it may call `_spettro/question/ask` on us (ext.go, version 4). */
+const CLIENT_EXTENSIONS = { version: 4, methods: ['_spettro/question/ask'] }
+
+/** Assumed until `initialize` says otherwise: nothing optional. */
+const NO_CAPABILITIES: ACPAgentCapabilities = {
+  loadSession: false,
+  listSessions: false,
+  resumeSession: false,
+  closeSession: false,
+  promptImage: false,
+  promptEmbeddedContext: false
+}
 
 export class AcpAgent {
   readonly connection: AcpConnection
+  /** What `initialize` said the agent can do. Calls an agent didn't
+   *  advertise are skipped instead of tried and failed. */
+  capabilities: ACPAgentCapabilities = { ...NO_CAPABILITIES }
+  /** The `_spettro/*` methods the agent serves, or null when it didn't list
+   *  them (then every method is worth a try). */
+  extensionMethods: string[] | null = null
 
   constructor(connection: AcpConnection) {
     this.connection = connection
@@ -46,7 +78,8 @@ export class AcpAgent {
    *  deliberately empty — we support none of the optional client features
    *  (fs, terminal, auth), so the agent will not call back into us for file
    *  or terminal operations. `_meta` mirrors back the `_spettro/*` methods
-   *  this client serves. */
+   *  this client serves. Records the agent's capabilities and extension
+   *  methods for feature detection. */
   async initialize(
     clientName: string,
     clientVersion: string
@@ -55,15 +88,15 @@ export class AcpAgent {
       protocolVersion: 1,
       clientCapabilities: {},
       clientInfo: { name: clientName, title: null, version: clientVersion },
-      _meta: {
-        'spettro.app/extensions': { version: 3, methods: ['_spettro/question/ask'] }
-      }
+      _meta: { 'spettro.app/extensions': CLIENT_EXTENSIONS }
     }
     const result = await this.connection.request('initialize', params)
     const obj = objectValue(result)
     if (!obj || intValue(obj['protocolVersion']) === null) {
       throw new AcpError('decode', 'malformed initialize result')
     }
+    this.capabilities = parseAgentCapabilities(result)
+    this.extensionMethods = parseExtensionMethods(result)
     const agentInfo = objectValue(obj['agentInfo'])
     return {
       agentVersion: agentInfo ? stringValue(agentInfo['version']) : null,
@@ -101,18 +134,71 @@ export class AcpAgent {
     return { configOptions: parseConfigOptions(objectValue(result)?.['configOptions']) }
   }
 
-  /** Sends a prompt turn. Resolves with the stop reason once the turn
-   *  completes; streamed content arrives via the connection's onSessionUpdate. */
-  async prompt(sessionId: string, blocks: ACPContentBlock[]): Promise<ACPStopReason> {
+  /** Reattaches to a stored session AND replays its conversation: the agent
+   *  streams `user_message_chunk` / `agent_thought_chunk` /
+   *  `agent_message_chunk` updates for it before this resolves (sessions.go
+   *  LoadSession). For importing a conversation the app has no copy of. */
+  async loadSession(
+    sessionId: string,
+    cwd: string
+  ): Promise<{ configOptions: ACPConfigOption[] }> {
+    const result = await this.connection.request('session/load', {
+      sessionId,
+      cwd,
+      mcpServers: []
+    })
+    return { configOptions: parseConfigOptions(objectValue(result)?.['configOptions']) }
+  }
+
+  /** The conversations the agent keeps on disk, newest first, optionally only
+   *  those for one folder. Empty when the agent can't list. */
+  async listSessions(cwd?: string): Promise<ACPSessionInfo[]> {
+    if (!this.capabilities.listSessions) return []
+    const out: ACPSessionInfo[] = []
+    let cursor: string | null = null
+    // spettro answers in one page; the cursor is followed for agents that
+    // don't, with a bound so a looping cursor can't hang the call.
+    for (let page = 0; page < 20; page++) {
+      const params: { [key: string]: JSONValue } = {}
+      if (cwd !== undefined) params['cwd'] = cwd
+      if (cursor !== null) params['cursor'] = cursor
+      const { sessions, nextCursor } = parseSessionList(
+        await this.connection.request('session/list', params)
+      )
+      out.push(...sessions)
+      if (nextCursor === null) break
+      cursor = nextCursor
+    }
+    return out
+  }
+
+  /** Frees a session on the agent: its running turn is cancelled and any
+   *  paused workflow stops (bridge.go CloseSession). The conversation stays
+   *  on the agent's disk. A no-op against an agent that can't close, and an
+   *  agent that turns out not to know the method is not an error. */
+  async closeSession(sessionId: string): Promise<void> {
+    if (!this.capabilities.closeSession) return
+    try {
+      await this.connection.request('session/close', { sessionId })
+    } catch (err) {
+      if (err instanceof AcpError && err.code === METHOD_NOT_FOUND) return
+      throw err
+    }
+  }
+
+  /** Sends a prompt turn. Resolves once the turn completes, with its stop
+   *  reason and, when the agent reports them, its token counts; streamed
+   *  content arrives via the connection's onSessionUpdate. */
+  async prompt(sessionId: string, blocks: ACPContentBlock[]): Promise<ACPPromptResult> {
     const result = await this.connection.request('session/prompt', {
       sessionId,
       prompt: blocks as unknown as JSONValue
     })
-    const raw = stringValue(objectValue(result)?.['stopReason'])
-    if (raw === null) {
+    const parsed = parsePromptResult(result)
+    if (!parsed) {
       throw new AcpError('decode', 'session/prompt response missing stopReason')
     }
-    return (STOP_REASONS as readonly string[]).includes(raw) ? (raw as ACPStopReason) : 'unknown'
+    return parsed
   }
 
   /** Fire-and-forget notification; the in-flight prompt resolves with
@@ -148,6 +234,17 @@ export class AcpAgent {
 
   cancelPermission(rpcId: RPCID): void {
     this.connection.respond(rpcId, { outcome: { outcome: 'cancelled' } })
+  }
+
+  /** Withdraws a question the user never answered because its turn ended —
+   *  in whichever shape its transport reads back. */
+  cancelQuestion(delivered: { rpcId: RPCID; transport: 'ask' | 'permission' }): void {
+    if (delivered.transport === 'ask') {
+      this.connection.respond(delivered.rpcId, CANCELLED)
+      return
+    }
+    this.connection.consumeQuestionCustomOption(delivered.rpcId)
+    this.connection.respond(delivered.rpcId, { outcome: { outcome: 'cancelled' } })
   }
 
   // MARK: Agent questions
@@ -199,6 +296,13 @@ export class AcpAgent {
    *  (`ExtensionCaller`). */
   raw(method: string, params: JSONValue): Promise<JSONValue> {
     return this.connection.request(method, params)
+  }
+
+  /** Whether the agent serves a `_spettro/*` method — the `ExtensionCaller`
+   *  hook that lets an unsupported call fail fast instead of round-tripping
+   *  to a method-not-found. True when the agent didn't list its methods. */
+  supports(method: string): boolean {
+    return this.extensionMethods === null || this.extensionMethods.includes(method)
   }
 }
 

@@ -5,6 +5,7 @@
 
 import type { JSONValue, ACPToolStatus } from '@shared/acp'
 import type { ToolCallItem, ToolDiff } from '@shared/model'
+import { unifiedDiff, type UnifiedDiff } from './unifiedDiff'
 
 // ---------------------------------------------------------------------------
 // JSONValue accessors (port of JSONValue.swift's stringValue/intValue/…)
@@ -56,6 +57,24 @@ export interface ParsedTitle {
  * truncates inline args at 120 chars, often leaving invalid JSON.
  */
 export function parsedTitle(tool: Pick<ToolCallItem, 'title' | 'argsJSON'>): ParsedTitle {
+  // Asked for five to seven times per row drawn, and once per tool call by
+  // every fold of the transcript: one JSON.parse per call, not per question.
+  const known = titles.get(tool)
+  if (known && known.title === tool.title && known.argsJSON === tool.argsJSON) return known.parsed
+  const parsed = parseTitle(tool)
+  titles.set(tool, { title: tool.title, argsJSON: tool.argsJSON, parsed })
+  return parsed
+}
+
+/** Per tool call object (the store replaces one when it changes); what it
+ *  was parsed from is kept too, so an object changed in place is parsed
+ *  again rather than answered stale. */
+const titles = new WeakMap<
+  object,
+  { title: string; argsJSON: string | undefined | null; parsed: ParsedTitle }
+>()
+
+function parseTitle(tool: Pick<ToolCallItem, 'title' | 'argsJSON'>): ParsedTitle {
   let text = tool.title
   let agent: string | null = null
   if (text.startsWith('[')) {
@@ -138,16 +157,29 @@ function capitalized(s: string): string {
     .join(' ')
 }
 
-/** A short verb for the row label, e.g. "Terminal" / "Read". */
+/**
+ * The row's bold verb, Claude Code-style: what the agent did, in one word
+ * where one will do (Read / Edit / Write / Bash / Search / Fetch / Think /
+ * Agent). The ACP kind picks the family (internal/acp/tools.go
+ * builtinToolKinds); the tool's own name tells apart the members that read
+ * differently — a write from an edit, a listing from a search.
+ */
 export function displayName(tool: Pick<ToolCallItem, 'title' | 'argsJSON' | 'kind'>): string {
-  const name = parsedTitle(tool).name
+  const { name, args } = parsedTitle(tool)
+  // ask-user, whose card is titled "Ask the user" (kind other).
+  if (askedQuestion(args) !== null || /^ask[- ](?:the[- ])?user$/i.test(name)) return 'Ask'
   switch (tool.kind) {
     case 'execute':
-      return 'Terminal'
+      if (name.startsWith('pty')) return 'Terminal'
+      return name === 'job-kill' ? 'Stop job' : 'Bash'
     case 'read':
+      if (name === 'view-image') return 'View'
+      if (name === 'skill') return 'Skill'
+      if (name === 'job-output' || name === 'tool-output') return 'Output'
       return 'Read'
     case 'edit':
-      return 'Edit'
+      if (name === 'file-write' || name === 'write') return 'Write'
+      return name === 'rename-symbol' ? 'Rename' : 'Edit'
     case 'delete':
       return 'Delete'
     case 'move':
@@ -155,9 +187,10 @@ export function displayName(tool: Pick<ToolCallItem, 'title' | 'argsJSON' | 'kin
     case 'search':
       return name === 'ls' ? 'List' : 'Search'
     case 'fetch':
-      return 'Fetch'
+      return name === 'web-search' ? 'Web search' : 'Fetch'
     case 'think':
-      return name.startsWith('agent') ? 'Agent' : 'Plan'
+      if (name.startsWith('agent')) return 'Agent'
+      return name === 'todo-write' ? 'Todos' : 'Think'
     case 'switch_mode':
       return 'Mode'
     default:
@@ -194,7 +227,7 @@ export function displayDetail(
     default: {
       const path =
         argString(args, 'path', 'file', 'file_path', 'filename') ??
-        (tool.locations.length > 0 ? tool.locations[0] : null)
+        (tool.locations.length > 0 ? tool.locations[0].path : null)
       if (path !== null) {
         detail = shortPath(path)
         const pattern = argString(args, 'pattern', 'query', 'regex')
@@ -237,9 +270,156 @@ export function displayDetail(
   return detail
 }
 
+/** The last path component ("src/a/b.ts" → "b.ts"); the path itself when it
+ *  has none worth taking. */
+export function baseName(path: string): string {
+  const parts = path.split(/[\\/]/).filter((p) => p !== '')
+  return parts.length > 0 ? parts[parts.length - 1] : path
+}
+
+/**
+ * Shortens text by cutting out its middle: "src/components/…/SaveButton.tsx".
+ * Both ends of a path or a command carry the meaning — where it starts and
+ * which file or flag it ends on — so neither is the one to drop.
+ */
+export function middleTruncate(text: string, max: number): string {
+  const chars = Array.from(text)
+  if (chars.length <= max) return text
+  if (max <= 1) return '…'
+  // The odd character goes to the end: a file's name outranks its folder.
+  const keep = max - 1
+  const head = Math.floor(keep / 2)
+  const tail = keep - head
+  return chars.slice(0, head).join('') + '…' + chars.slice(-tail).join('')
+}
+
+/** Longest argument a row shows before it is cut in the middle. */
+export const ROW_ARGUMENT_MAX = 64
+
+/**
+ * The mono argument after a row's verb: the file's name, the command, the
+ * pattern and where it looked. Unlike `displayDetail` it drops the
+ * `[agent#n]` prefix — a row nested under its agent already says whose it
+ * is — and takes a file's base name, with the full path in the expanded
+ * panel. Cut in the middle at ROW_ARGUMENT_MAX.
+ */
+export function rowArgument(
+  tool: Pick<ToolCallItem, 'title' | 'argsJSON' | 'kind' | 'locations'>
+): string {
+  const { name, args } = parsedTitle(tool)
+  let text: string | null = askedQuestion(args)
+  if (text === null && (tool.kind === 'execute' || name === 'bash' || name === 'shell' || name === 'exec')) {
+    const command = argString(args, 'command', 'cmd')
+    if (command !== null) {
+      const lines = command.trim().split('\n')
+      text = lines.length > 1 ? `${lines[0]} …` : lines[0]
+    }
+  }
+  if (text === null) {
+    const path =
+      argString(args, 'path', 'file', 'file_path', 'filename') ??
+      (tool.locations.length > 0 ? tool.locations[0].path : null)
+    const pattern = argString(args, 'pattern', 'query', 'regex')
+    if (pattern !== null) text = path !== null ? `${pattern} in ${baseName(path)}` : pattern
+    else if (path !== null) text = baseName(path)
+  }
+  if (text === null) {
+    const detail = displayDetail(tool)
+    const { agent } = parsedTitle(tool)
+    const prefix = agent !== null ? `[${agent}] ` : null
+    text = prefix !== null && detail.startsWith(prefix) ? detail.slice(prefix.length) : detail
+  }
+  return middleTruncate(text.split('\n').join(' ⏎ '), ROW_ARGUMENT_MAX)
+}
+
+/** The first question an ask-user call put (its `questions[].question`),
+ *  or null for any other call. */
+function askedQuestion(args: Record<string, unknown> | null | undefined): string | null {
+  const questions = args?.['questions']
+  if (!Array.isArray(questions) || questions.length === 0) return null
+  const first = questions[0] as Record<string, unknown> | null
+  const text = typeof first?.['question'] === 'string' ? first['question'] : null
+  return text !== null && text.trim() !== '' ? text.trim() : null
+}
+
+/** The `[exit status N]` a failed shell command's output ends with
+ *  (internal/agent/llm_runtime_shell.go); null when there is none. */
+export function exitCode(output: string): number | null {
+  // Only the end can match: a command's whole output is not trimmed, copied
+  // and scanned for it on every render of its row.
+  const end = contentEnd(output)
+  const match = /\[?exit status (\d+)\]?$/.exec(output.slice(Math.max(0, end - EXIT_TAIL), end))
+  return match ? Number(match[1]) : null
+}
+
+/** Enough of the end of an output to hold `[exit status N]`. */
+const EXIT_TAIL = 128
+
+const SPACE = /\s/
+
+/** Where `text` ends once trailing whitespace is left off (what trimEnd
+ *  would keep), without copying it. */
+function contentEnd(text: string): number {
+  let end = text.length
+  while (end > 0 && SPACE.test(text[end - 1])) end--
+  return end
+}
+
+/** Whether `text` has anything but whitespace in it. */
+export function hasContent(text: string): boolean {
+  return contentEnd(text) > 0
+}
+
+/** Non-empty lines in a tool's output, counted in place. */
+function outputLines(output: string): number {
+  const end = contentEnd(output)
+  if (end === 0) return 0
+  let lines = 1
+  for (let i = output.indexOf('\n'); i !== -1 && i < end; i = output.indexOf('\n', i + 1)) lines++
+  return lines
+}
+
+/**
+ * The muted note at a row's right edge, besides the diff stat an edit shows:
+ * "exit 1" for a command that failed, "42 lines" for a read, "3 results"
+ * for a search. Null when there is nothing worth saying — a row is calmer
+ * with no note than with a redundant one.
+ */
+export function rowMeta(
+  tool: Pick<ToolCallItem, 'title' | 'argsJSON' | 'kind' | 'status' | 'output' | 'denied'>
+): string | null {
+  const verb = displayName(tool)
+  if (tool.status === 'failed' && tool.denied) return 'denied'
+  if (tool.status === 'failed') {
+    const code = tool.kind === 'execute' ? exitCode(tool.output) : null
+    return code !== null ? `exit ${code}` : 'failed'
+  }
+  if (tool.status !== 'completed') return null
+  if (tool.kind === 'execute') {
+    const code = exitCode(tool.output)
+    return code !== null && code !== 0 ? `exit ${code}` : null
+  }
+  const n = outputLines(tool.output)
+  if (n === 0) return null
+  if (verb === 'Read') return `${n} line${n === 1 ? '' : 's'}`
+  if (verb === 'Search' || verb === 'List') {
+    if (/^\s*no (matches|results|files)/i.test(tool.output)) return 'no results'
+    return `${n} result${n === 1 ? '' : 's'}`
+  }
+  return null
+}
+
 /** Collapses an absolute path to its last few meaningful components:
- *  more than three `/`-separated components → the last three. */
-export function shortPath(path: string): string {
+ *  more than three `/`-separated components → the last three. With the
+ *  chat's project folder, a file inside it is named from there instead
+ *  ("src/app.ts", "hello.txt") — the last three of an absolute path can
+ *  start anywhere ("WP10/proj/hello.txt") and read like a path in the
+ *  project that isn't one. */
+export function shortPath(path: string, projectPath?: string): string {
+  if (projectPath) {
+    const root = projectPath.replace(/\/+$/, '')
+    if (root !== '' && path.startsWith(`${root}/`)) return path.slice(root.length + 1)
+  }
   const parts = path.split('/').filter((p) => p !== '')
   if (parts.length <= 3) return path
   return parts.slice(-3).join('/')
@@ -281,15 +461,29 @@ export interface DiffStat {
   removed: number
 }
 
+/** One diff per ToolDiff object: the store replaces a diff whenever it
+ *  changes and never mutates it, so the object is a safe key, and a row that
+ *  re-renders on every streamed token does not re-diff a whole file. */
+const diffCache = new WeakMap<ToolDiff, UnifiedDiff>()
+
+export function diffOf(diff: ToolDiff): UnifiedDiff {
+  let cached = diffCache.get(diff)
+  if (!cached) {
+    cached = unifiedDiff(diff.oldText, diff.newText)
+    diffCache.set(diff, cached)
+  }
+  return cached
+}
+
 /** Added/removed line counts across this call's diffs; null with no diffs. */
 export function diffStat(tool: Pick<ToolCallItem, 'diffs'>): DiffStat | null {
   if (tool.diffs.length === 0) return null
   let added = 0
   let removed = 0
   for (const diff of tool.diffs) {
-    const { old, new: nw } = changedLines(diff)
-    removed += old.length
-    added += nw.length
+    const d = diffOf(diff)
+    removed += d.removed
+    added += d.added
   }
   return { added, removed }
 }

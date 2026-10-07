@@ -21,21 +21,31 @@
 //     on save teaches you about your typo at the worst moment; one that treats
 //     a mid-keystroke script as an error is just noise. So the compile runs
 //     debounced, and "does not compile yet" is a quiet state, not an alarm.
+//
+// Closing with unsaved edits (Escape, the close button) asks "Save changes?",
+// and deleting a workflow asks first — it's a file in the repo.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { JSX } from 'react'
 import type {
   WorkflowInfo,
   WorkflowList,
+  WorkflowRunInfo,
   WorkflowScope,
   WorkflowValidation
 } from '@shared/extensions'
 import { EMPTY_WORKFLOW_LIST } from '@shared/extensions'
-import { call, useChat } from '@renderer/state/store'
+import { humanizeError } from '@shared/humanize'
+import { call, quietCall, useChat } from '@renderer/state/store'
+import { confirmDialog } from '@renderer/views/common/ConfirmDialog'
+import { askToSave, mayClose, useCloseGuard } from '@renderer/views/common/closeGuard'
 import { groupTranscript } from '@renderer/views/chat/transcript/orchestration'
+import { groupToolRuns } from '@renderer/views/chat/transcript/toolGroups'
 import { TranscriptRowView } from '@renderer/views/chat/transcript/TranscriptItemView'
 import { Icon } from '@renderer/views/chat/transcript/ToolCallView'
 import { SpettroSpinner } from '@renderer/views/chat/transcript/RunTicker'
+import Popover from '@renderer/views/common/Popover'
+import { basename, relativeTime } from '@renderer/views/shell/util'
 import ScriptEditor from './ScriptEditor'
 import './workflows.css'
 
@@ -60,6 +70,9 @@ return results
 
 /** An unsaved draft has no name on disk yet; this is what the list calls it. */
 const DRAFT = '(new workflow)'
+
+/** How many past runs the list shows; the newest are the ones worth a look. */
+const RECENT_RUNS_SHOWN = 6
 
 interface Draft {
   /** The saved name this draft came from, or '' for a brand-new script. */
@@ -87,10 +100,17 @@ export default function WorkflowStudio({
   // empty state for it would invite the user to write one into a CLI that
   // cannot save it.
   const [unsupported, setUnsupported] = useState<string | null>(null)
+  const [runs, setRuns] = useState<WorkflowRunInfo[]>([])
+
+  // Past runs are a footnote to the list: a CLI that can't list them just
+  // shows none.
+  const refreshRuns = useCallback(async () => {
+    setRuns((await quietCall('workflowRuns', chatId).catch(() => null)) ?? [])
+  }, [chatId])
 
   const refresh = useCallback(async () => {
     try {
-      setList(await call('workflowList', chatId))
+      setList(await quietCall('workflowList', chatId))
       setUnsupported(null)
     } catch (err) {
       const message = messageOf(err)
@@ -102,6 +122,12 @@ export default function WorkflowStudio({
   useEffect(() => {
     void refresh()
   }, [refresh])
+
+  // A test run that has just ended is the newest past run.
+  const runBusy = useChat(runChatId ?? '')?.isBusy ?? false
+  useEffect(() => {
+    if (!runBusy) void refreshRuns()
+  }, [runBusy, refreshRuns])
 
   // The scratch chat outlives this component only by accident, so it is torn
   // down on unmount — closing the studio must not leave a fan-out running
@@ -126,9 +152,11 @@ export default function WorkflowStudio({
     }
     let cancelled = false
     const timer = setTimeout(() => {
-      void call('workflowValidate', chatId, script).then((result) => {
-        if (!cancelled) setValidation(result)
-      })
+      void quietCall('workflowValidate', chatId, script)
+        .then((result) => {
+          if (!cancelled) setValidation(result)
+        })
+        .catch(() => undefined)
     }, VALIDATE_DEBOUNCE_MS)
     return () => {
       cancelled = true
@@ -138,6 +166,9 @@ export default function WorkflowStudio({
 
   const open = useCallback(
     async (info: WorkflowInfo) => {
+      // Opening another one replaces the draft: unsaved edits are asked about
+      // first, exactly as closing would.
+      if (!(await mayClose('workflows'))) return
       setError(null)
       setBusy(`Opening ${info.name}…`)
       try {
@@ -152,41 +183,65 @@ export default function WorkflowStudio({
     [chatId]
   )
 
-  const newDraft = useCallback(() => {
+  const newDraft = useCallback(async () => {
+    if (!(await mayClose('workflows'))) return
     setError(null)
     setDraft({ name: '', scope: 'project', script: STARTER_SCRIPT, dirty: true })
   }, [])
 
-  const save = useCallback(async () => {
-    if (!draft) return
+  /** Resolves true once the draft is on disk (false: it isn't, and why is
+   *  on screen), so "Save changes?" knows whether closing is safe. */
+  const save = useCallback(async (): Promise<boolean> => {
+    if (!draft) return true
     // The header's own name is the default, so a script you have only ever
     // named inside meta does not need naming twice.
     const name = draft.name || validation?.name || ''
     if (name === '') {
       setError('Give the workflow a name — in meta.name, or by saving it as one.')
-      return
+      return false
     }
     setError(null)
     setBusy(`Saving ${name}…`)
     try {
-      const saved = await call('workflowWrite', chatId, name, draft.scope, draft.script)
+      const saved = await quietCall('workflowWrite', chatId, name, draft.scope, draft.script)
       if (saved) {
         setDraft({ name: saved.name, scope: saved.scope, script: draft.script, dirty: false })
         await refresh()
+        return true
       }
+      return false
     } catch (err) {
       setError(messageOf(err))
+      return false
     } finally {
       setBusy(null)
     }
   }, [chatId, draft, validation, refresh])
 
+  // Escape (App) and the close button both ask before edits are lost.
+  useCloseGuard('workflows', async () =>
+    draft?.dirty ? askToSave(`“${draft.name || validation?.name || 'the new workflow'}”`, save) : true
+  )
+  const close = async (): Promise<void> => {
+    if (await mayClose('workflows')) onClose()
+  }
+
   const remove = useCallback(
     async (info: WorkflowInfo) => {
+      const answer = await confirmDialog({
+        title: `Delete the workflow “${info.name}”?`,
+        message:
+          info.scope === 'global'
+            ? 'It’s removed from every project on this computer.'
+            : 'Its file is removed from this project.',
+        confirmLabel: 'Delete',
+        destructive: true
+      })
+      if (answer !== 'confirm') return
       setError(null)
       setBusy(`Deleting ${info.name}…`)
       try {
-        await call('workflowDelete', chatId, info.name, info.scope)
+        await quietCall('workflowDelete', chatId, info.name, info.scope)
         if (draft?.name === info.name) setDraft(null)
         await refresh()
       } catch (err) {
@@ -212,7 +267,7 @@ export default function WorkflowStudio({
     if (draft.dirty) {
       setBusy('Saving before the run…')
       try {
-        await call('workflowWrite', chatId, name, draft.scope, draft.script)
+        await quietCall('workflowWrite', chatId, name, draft.scope, draft.script)
         setDraft({ ...draft, name, dirty: false })
         await refresh()
       } catch (err) {
@@ -235,8 +290,8 @@ export default function WorkflowStudio({
           <Icon name="flowchart" size={15} />
           <h2>Workflows</h2>
           <span className="wfs-spacer" />
-          <button className="icon-btn" onClick={onClose} title="Close" aria-label="Close workflows">
-            <Icon name="xmark.circle.fill" size={15} />
+          <button type="button" className="btn" onClick={() => void close()}>
+            Done
           </button>
         </header>
         <div className="wfs-body">
@@ -259,31 +314,36 @@ export default function WorkflowStudio({
       <header className="wfs-head">
         <Icon name="flowchart" size={15} />
         <h2>Workflows</h2>
-        <span className="wfs-cwd" title={list.cwd}>
-          {list.cwd}
-        </span>
+        {/* The project by name, as the sidebar says it; the path is a hover
+            away for whoever needs it. */}
+        {list.cwd !== '' && (
+          <span className="wfs-cwd" title={list.cwd}>
+            {basename(list.cwd)}
+          </span>
+        )}
         <span className="wfs-spacer" />
         {busy && (
           <span className="wfs-busy">
             <SpettroSpinner size={11} /> {busy}
           </span>
         )}
-        <button className="icon-btn" onClick={onClose} title="Close" aria-label="Close workflows">
-          <Icon name="xmark.circle.fill" size={15} />
+        <button type="button" className="btn" onClick={() => void close()}>
+          Done
         </button>
       </header>
 
       <div className="wfs-body">
         <WorkflowList
           list={list}
+          runs={runs}
           draft={draft}
           onOpen={open}
-          onNew={newDraft}
+          onNew={() => void newDraft()}
           onDelete={remove}
         />
 
         {draft === null ? (
-          <EmptyState searchPaths={list.searchPaths} onNew={newDraft} />
+          <EmptyState searchPaths={list.searchPaths} />
         ) : (
           <section className="wfs-main">
             <EditorHeader
@@ -318,12 +378,14 @@ export default function WorkflowStudio({
 
 function WorkflowList({
   list,
+  runs,
   draft,
   onOpen,
   onNew,
   onDelete
 }: {
   list: WorkflowList
+  runs: WorkflowRunInfo[]
   draft: Draft | null
   onOpen: (info: WorkflowInfo) => void
   onNew: () => void
@@ -331,8 +393,9 @@ function WorkflowList({
 }): JSX.Element {
   return (
     <aside className="wfs-list">
-      <button className="wfs-new" type="button" onClick={onNew}>
-        + New workflow
+      <button className="btn wfs-new" type="button" onClick={onNew}>
+        <Icon name="plus" size={11} />
+        New workflow
       </button>
       {draft !== null && draft.name === '' && (
         <div className="wfs-row wfs-row--active wfs-row--draft">
@@ -346,15 +409,20 @@ function WorkflowList({
         >
           <button className="wfs-row-open" type="button" onClick={() => onOpen(info)}>
             <span className="wfs-row-name">{info.name}</span>
-            {info.scope === 'global' && <span className="wfs-pill">global</span>}
+            {info.scope === 'global' && <span className="wfs-pill">All projects</span>}
             {/* A script that does not compile is still listed — hiding it just
                 moves the discovery to whoever runs it next. */}
             {info.error && (
               <span className="wfs-pill wfs-pill--bad" title={info.error}>
-                broken
+                Broken
               </span>
             )}
             {info.description && <span className="wfs-row-desc">{info.description}</span>}
+            {info.whenToUse && (
+              <span className="wfs-row-when" title={info.whenToUse}>
+                {info.whenToUse}
+              </span>
+            )}
             {info.phases.length > 0 && (
               <span className="wfs-row-phases">
                 {info.phases.map((p) => p.title).join(' → ')}
@@ -375,33 +443,60 @@ function WorkflowList({
       {list.workflows.length === 0 && draft === null && (
         <p className="wfs-list-empty">No saved workflows in this project yet.</p>
       )}
+      {runs.length > 0 && <RecentRuns runs={runs.slice(0, RECENT_RUNS_SHOWN)} />}
     </aside>
   )
 }
 
-function EmptyState({
-  searchPaths,
-  onNew
-}: {
-  searchPaths: string[]
-  onNew: () => void
-}): JSX.Element {
+/** The project's last few runs, from the studio or a chat: which workflow,
+ *  whether it finished, how long ago. A run's folder keeps its script, its
+ *  step-by-step journal and its result; clicking one shows it in the file
+ *  manager. */
+function RecentRuns({ runs }: { runs: WorkflowRunInfo[] }): JSX.Element {
+  return (
+    <section className="wfs-runs" aria-label="Recent runs">
+      <h3 className="wfs-list-heading">Recent runs</h3>
+      {runs.map((run) => (
+        <button
+          key={run.runId}
+          type="button"
+          className="wfs-run-row"
+          title={`Show this run’s files\n${run.dir}`}
+          onClick={() => void call('showItemInFolder', run.dir)}
+        >
+          <span
+            className={'wfs-run-dot' + (run.finished ? ' wfs-run-dot--done' : '')}
+            aria-hidden
+          />
+          <span className="wfs-run-name">{run.name || 'Unnamed workflow'}</span>
+          <span className="wfs-run-meta">
+            {run.finished ? 'Finished' : 'Not finished'} · {relativeTime(run.modifiedAt)}
+          </span>
+        </button>
+      ))}
+    </section>
+  )
+}
+
+/** Nothing open. It explains rather than offers: "New workflow" is already
+ *  at the top of the list, and two of the same button on one screen asks the
+ *  reader which one to press. */
+function EmptyState({ searchPaths }: { searchPaths: string[] }): JSX.Element {
   return (
     <section className="wfs-main wfs-main--empty">
       <Icon name="flowchart" size={40} />
       <h3>Write a workflow</h3>
       <p>
-        A workflow decides in ordinary control flow — not by asking a model — which sub-agents run,
-        in what order, and how their results combine.
+        A workflow is a saved recipe that runs several agents in a fixed order — the same steps
+        every time, for jobs too big for one.
       </p>
       {searchPaths.length > 0 && (
-        <p className="wfs-paths">
-          Saved to <code>{searchPaths[0]}</code>, so it is versioned with the project.
+        <p className="wfs-paths" title={searchPaths[0]}>
+          Saved in this project&rsquo;s <code>.spettro/workflows</code> folder, so it&rsquo;s
+          versioned with the code.
         </p>
       )}
-      <button className="wfs-new" type="button" onClick={onNew}>
-        + New workflow
-      </button>
+      <p className="wfs-paths">Choose one on the left, or start a new one there.</p>
     </section>
   )
 }
@@ -429,18 +524,9 @@ function EditorHeader({
   return (
     <div className="wfs-editor-head">
       <span className="wfs-editor-name">{name}</span>
-      {draft.dirty && <span className="wfs-pill">unsaved</span>}
+      {draft.dirty && <span className="wfs-pill">Unsaved</span>}
       <span className="wfs-spacer" />
-      <label className="wfs-scope">
-        <span>Save to</span>
-        <select
-          value={draft.scope}
-          onChange={(e) => onScope(e.target.value as WorkflowScope)}
-        >
-          <option value="project">this project</option>
-          <option value="global">every project</option>
-        </select>
-      </label>
+      <ScopeMenu scope={draft.scope} onScope={onScope} />
       <button className="wfs-btn" type="button" onClick={onSave} disabled={!draft.dirty}>
         Save
       </button>
@@ -454,6 +540,66 @@ function EditorHeader({
         Run
       </button>
     </div>
+  )
+}
+
+const SCOPES: { value: WorkflowScope; name: string; description: string }[] = [
+  { value: 'project', name: 'This project', description: 'Saved with the code, for everyone who works on it' },
+  { value: 'global', name: 'Every project', description: 'Saved on this computer, for all your projects' }
+]
+
+/** Where Save puts the script, as the composer's chips choose things: a
+ *  button naming the choice, and a menu that says what each one means. */
+function ScopeMenu({
+  scope,
+  onScope
+}: {
+  scope: WorkflowScope
+  onScope: (scope: WorkflowScope) => void
+}): JSX.Element {
+  const [open, setOpen] = useState(false)
+  const anchorRef = useRef<HTMLButtonElement>(null)
+  const close = useCallback(() => setOpen(false), [])
+  const current = SCOPES.find((s) => s.value === scope) ?? SCOPES[0]
+  return (
+    <>
+      <button
+        ref={anchorRef}
+        type="button"
+        className="wfs-scope"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+      >
+        Save to {current.name.toLowerCase()}
+        <Icon name="chevron.down" size={8} />
+      </button>
+      <Popover anchorRef={anchorRef} open={open} onClose={close} align="end" className="config-menu">
+        <div className="config-menu-group" role="menu" aria-label="Save to">
+          {SCOPES.map((choice) => (
+            <button
+              type="button"
+              role="menuitemradio"
+              aria-checked={choice.value === scope}
+              key={choice.value}
+              className="config-menu-row"
+              onClick={() => {
+                setOpen(false)
+                if (choice.value !== scope) onScope(choice.value)
+              }}
+            >
+              <span className="config-menu-check">
+                {choice.value === scope && <Icon name="checkmark" size={12} />}
+              </span>
+              <span className="config-menu-texts">
+                <span className="config-menu-name">{choice.name}</span>
+                <span className="config-menu-description">{choice.description}</span>
+              </span>
+            </button>
+          ))}
+        </div>
+      </Popover>
+    </>
   )
 }
 
@@ -494,7 +640,7 @@ function Verdict({ validation }: { validation: WorkflowValidation | null }): JSX
 function RunPane({ chatId }: { chatId: string }): JSX.Element {
   const chat = useChat(chatId)
   const items = chat?.items
-  const rows = useMemo(() => (items ? groupTranscript(items) : []), [items])
+  const rows = useMemo(() => (items ? groupToolRuns(groupTranscript(items)) : []), [items])
   return (
     <section className="wfs-run">
       <header className="wfs-run-head">
@@ -515,8 +661,10 @@ function RunPane({ chatId }: { chatId: string }): JSX.Element {
 }
 
 function messageOf(err: unknown): string {
-  if (err instanceof Error) return err.message
-  return String(err)
+  const human = humanizeError(err)
+  // The unsupported check reads the raw text, so it is kept for that.
+  if (isUnsupported(human.raw)) return human.raw
+  return human.known ? `${human.title}. ${human.detail}` : human.detail
 }
 
 /** The main process raises UnsupportedExtensionError when the CLI answers a

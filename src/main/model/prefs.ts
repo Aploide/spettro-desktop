@@ -9,37 +9,95 @@
 //   lastConfigOptions — last full ACPConfigOption set seen from any session
 //                       (spettro.lastConfigOptions); seeds new chats
 //   recentProjects    — most-recent-first, deduped, capped at 10
-//   cachedCommands    — last available-commands list any agent advertised
-//                       (spettro.cachedCommands); empty updates never wipe it
+//   cachedCommandsByProject
+//                     — the last available-commands list advertised in each
+//                       project folder (skills make it per project); the ''
+//                       key holds the last list seen anywhere, the fallback
+//                       for a folder never opened. Empty updates never wipe
+//                       it. Replaces the single global `cachedCommands`
+//                       (spettro.cachedCommands), which is read once and
+//                       migrated into that fallback.
+//   appearance        — 'system' | 'light' | 'dark'; main applies it to
+//                       nativeTheme.themeSource before the window exists
+//   providerSetupSkipped
+//                     — the user chose "Continue without" on the connect
+//                       step; the setup screen stays away on later launches
+//                       (the no-model bar above the composer remains)
+//   notifyWhenDone    — a system notification when a turn finishes while the
+//                       window is in the background
+//   approvedBroadFolders
+//                     — the home folder (or /) the user said "Continue" for on
+//                       the new-session warning, so it isn't asked again on
+//                       every new session and every launch
+//   pendingDefaults   — shared settings (model, permission, thinking, ultra,
+//                       workflow size) the user changed while no session was
+//                       live; the next session to attach pushes them, once
+//   knownSessionIds   — every CLI session id this app created or imported,
+//                       kept after the chat is deleted: the CLI keeps those
+//                       on disk, and they are not "started in a terminal"
 
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'fs'
 import { dirname, join } from 'path'
 import type { ACPCommand, ACPConfigOption } from '../../shared/acp'
+import { DEFAULT_ACCENT, isAccent, isAppearance, type Accent, type Appearance } from '../../shared/model'
+import { sameJSON } from './sameJSON'
 
 interface PrefsData {
   explicitCLIPath: string
   lastProjectPath: string
   lastConfigOptions: ACPConfigOption[]
   recentProjects: string[]
-  cachedCommands: ACPCommand[]
+  cachedCommandsByProject: Record<string, ACPCommand[]>
+  appearance: Appearance
+  accent: Accent
+  providerSetupSkipped: boolean
+  notifyWhenDone: boolean
+  approvedBroadFolders: string[]
+  pendingDefaults: Record<string, string | boolean>
+  knownSessionIds: string[]
 }
 
-const DEFAULTS: PrefsData = {
-  explicitCLIPath: '',
-  lastProjectPath: '',
-  lastConfigOptions: [],
-  recentProjects: [],
-  cachedCommands: []
-}
+/** The commands-cache key for "the last list seen in any folder". */
+const ANY_PROJECT = ''
 
-function sanitize(raw: unknown): PrefsData {
-  const data: PrefsData = {
+/** Folders whose command lists are remembered, besides the fallback. Oldest
+ *  written goes first, so the file can't grow with every folder ever opened. */
+const MAX_CACHED_PROJECTS = 40
+
+/** Session ids remembered as the app's own; the oldest go first. */
+const MAX_KNOWN_SESSIONS = 2000
+
+/** How long a burst of option or command updates may wait to be written. */
+const SAVE_DELAY_MS = 1000
+
+function defaults(): PrefsData {
+  return {
     explicitCLIPath: '',
     lastProjectPath: '',
     lastConfigOptions: [],
     recentProjects: [],
-    cachedCommands: []
+    cachedCommandsByProject: {},
+    appearance: 'system',
+    accent: DEFAULT_ACCENT,
+    providerSetupSkipped: false,
+    notifyWhenDone: true,
+    approvedBroadFolders: [],
+    pendingDefaults: {},
+    knownSessionIds: []
   }
+}
+
+function isCommandList(value: unknown): value is ACPCommand[] {
+  return (
+    Array.isArray(value) &&
+    value.every(
+      (c) => typeof c === 'object' && c !== null && typeof (c as ACPCommand).name === 'string'
+    )
+  )
+}
+
+function sanitize(raw: unknown): PrefsData {
+  const data = defaults()
   if (typeof raw !== 'object' || raw === null) return data
   const obj = raw as Record<string, unknown>
   if (typeof obj.explicitCLIPath === 'string') data.explicitCLIPath = obj.explicitCLIPath
@@ -50,8 +108,29 @@ function sanitize(raw: unknown): PrefsData {
   if (Array.isArray(obj.recentProjects)) {
     data.recentProjects = obj.recentProjects.filter((p): p is string => typeof p === 'string')
   }
-  if (Array.isArray(obj.cachedCommands)) {
-    data.cachedCommands = obj.cachedCommands as ACPCommand[]
+  if (typeof obj.cachedCommandsByProject === 'object' && obj.cachedCommandsByProject !== null) {
+    for (const [path, commands] of Object.entries(obj.cachedCommandsByProject)) {
+      if (isCommandList(commands)) data.cachedCommandsByProject[path] = commands
+    }
+  }
+  // Migration: the old single list becomes the any-folder fallback.
+  if (data.cachedCommandsByProject[ANY_PROJECT] === undefined && isCommandList(obj.cachedCommands)) {
+    if (obj.cachedCommands.length > 0) data.cachedCommandsByProject[ANY_PROJECT] = obj.cachedCommands
+  }
+  if (isAppearance(obj.appearance)) data.appearance = obj.appearance
+  if (isAccent(obj.accent)) data.accent = obj.accent
+  if (typeof obj.providerSetupSkipped === 'boolean') data.providerSetupSkipped = obj.providerSetupSkipped
+  if (typeof obj.notifyWhenDone === 'boolean') data.notifyWhenDone = obj.notifyWhenDone
+  if (Array.isArray(obj.approvedBroadFolders)) {
+    data.approvedBroadFolders = obj.approvedBroadFolders.filter((p): p is string => typeof p === 'string')
+  }
+  if (typeof obj.pendingDefaults === 'object' && obj.pendingDefaults !== null) {
+    for (const [id, value] of Object.entries(obj.pendingDefaults)) {
+      if (typeof value === 'string' || typeof value === 'boolean') data.pendingDefaults[id] = value
+    }
+  }
+  if (Array.isArray(obj.knownSessionIds)) {
+    data.knownSessionIds = obj.knownSessionIds.filter((id): id is string => typeof id === 'string')
   }
   return data
 }
@@ -69,13 +148,20 @@ export class Prefs {
     try {
       return sanitize(JSON.parse(readFileSync(this.file, 'utf8')))
     } catch {
-      return { ...DEFAULTS, lastConfigOptions: [], recentProjects: [], cachedCommands: [] }
+      return defaults()
     }
   }
+
+  /** A write waiting for the end of a burst of changes (see saveSoon). */
+  private saveTimer: ReturnType<typeof setTimeout> | null = null
 
   /** Atomic (tmp + rename) whole-file rewrite; failures are silent, matching
    *  the fail-silent UserDefaults semantics of the macOS app. */
   private save(): void {
+    if (this.saveTimer) {
+      clearTimeout(this.saveTimer)
+      this.saveTimer = null
+    }
     try {
       mkdirSync(dirname(this.file), { recursive: true })
       const tmp = `${this.file}.tmp`
@@ -84,6 +170,21 @@ export class Prefs {
     } catch {
       // Unwritable prefs must never crash the app.
     }
+  }
+
+  /** save(), once, after the burst. For the keys the CLI rewrites in
+   *  bursts — the option set (with its model catalog) arrives with every
+   *  config reply and with every other live session's update, the commands
+   *  with every session that attaches — where a write each time would be
+   *  the whole file rewritten on the main thread several times a click. */
+  private saveSoon(): void {
+    if (this.saveTimer) return
+    this.saveTimer = setTimeout(() => this.save(), SAVE_DELAY_MS)
+  }
+
+  /** Writes a change still waiting (saveSoon) now — before quitting. */
+  flush(): void {
+    if (this.saveTimer) this.save()
   }
 
   get explicitCLIPath(): string {
@@ -113,8 +214,17 @@ export class Prefs {
   set lastConfigOptions(options: ACPConfigOption[]) {
     // Empty option sets are never persisted (rememberConfig semantics).
     if (options.length === 0) return
+    if (sameJSON(this.data.lastConfigOptions, options)) return
     this.data.lastConfigOptions = structuredClone(options)
-    this.save()
+    this.saveSoon()
+  }
+
+  /** The seed itself, uncopied, for reading only (an app-state snapshot,
+   *  sent on the spot): the getter's copy is for callers that change it.
+   *  The setter replaces the array rather than changing it, so a snapshot
+   *  holding this one never sees it move. */
+  get lastConfigOptionsReadonly(): ACPConfigOption[] {
+    return this.data.lastConfigOptions
   }
 
   get recentProjects(): string[] {
@@ -128,15 +238,111 @@ export class Prefs {
     this.save()
   }
 
-  get cachedCommands(): ACPCommand[] {
-    return structuredClone(this.data.cachedCommands)
+  removeRecentProject(path: string): void {
+    const next = this.data.recentProjects.filter((p) => p !== path)
+    if (next.length === this.data.recentProjects.length) return
+    this.data.recentProjects = next
+    this.save()
   }
 
-  set cachedCommands(commands: ACPCommand[]) {
+  /** The commands to show in a chat that hasn't heard from the agent yet:
+   *  the folder's own last list, else the last list seen anywhere. */
+  cachedCommands(projectPath: string): ACPCommand[] {
+    const byProject = this.data.cachedCommandsByProject
+    return structuredClone(byProject[projectPath] ?? byProject[ANY_PROJECT] ?? [])
+  }
+
+  setCachedCommands(projectPath: string, commands: ACPCommand[]): void {
     // saveCache ignores empty lists, so a transient empty update can't wipe
     // the cache (appendix C).
     if (commands.length === 0) return
-    this.data.cachedCommands = structuredClone(commands)
+    const known = this.data.cachedCommandsByProject
+    const order = Object.keys(known)
+    // Already the newest list, for this folder and as the fallback: nothing
+    // to write. (Every session attaching announces its commands.)
+    if (
+      order[order.length - 1] === projectPath &&
+      sameJSON(known[projectPath], commands) &&
+      sameJSON(known[ANY_PROJECT], commands)
+    ) {
+      return
+    }
+    const byProject = { ...this.data.cachedCommandsByProject }
+    // Re-inserted so the key order is oldest-written first.
+    delete byProject[projectPath]
+    byProject[projectPath] = structuredClone(commands)
+    byProject[ANY_PROJECT] = structuredClone(commands)
+    const folders = Object.keys(byProject).filter((k) => k !== ANY_PROJECT)
+    for (const stale of folders.slice(0, Math.max(0, folders.length - MAX_CACHED_PROJECTS))) {
+      delete byProject[stale]
+    }
+    this.data.cachedCommandsByProject = byProject
+    this.saveSoon()
+  }
+
+  get appearance(): Appearance {
+    return this.data.appearance
+  }
+
+  set appearance(value: Appearance) {
+    this.data.appearance = value
+    this.save()
+  }
+
+  get accent(): Accent {
+    return this.data.accent
+  }
+
+  set accent(value: Accent) {
+    this.data.accent = value
+    this.save()
+  }
+
+  get providerSetupSkipped(): boolean {
+    return this.data.providerSetupSkipped
+  }
+
+  set providerSetupSkipped(value: boolean) {
+    this.data.providerSetupSkipped = value
+    this.save()
+  }
+
+  get notifyWhenDone(): boolean {
+    return this.data.notifyWhenDone
+  }
+
+  set notifyWhenDone(value: boolean) {
+    this.data.notifyWhenDone = value
+    this.save()
+  }
+
+  get approvedBroadFolders(): string[] {
+    return [...this.data.approvedBroadFolders]
+  }
+
+  approveBroadFolder(path: string): void {
+    if (this.data.approvedBroadFolders.includes(path)) return
+    this.data.approvedBroadFolders = [...this.data.approvedBroadFolders, path]
+    this.save()
+  }
+
+  /** Shared settings waiting for a live session to carry them to the CLI. */
+  get pendingDefaults(): Record<string, string | boolean> {
+    return { ...this.data.pendingDefaults }
+  }
+
+  set pendingDefaults(values: Record<string, string | boolean>) {
+    this.data.pendingDefaults = { ...values }
+    this.save()
+  }
+
+  isKnownSession(id: string): boolean {
+    return this.data.knownSessionIds.includes(id)
+  }
+
+  rememberSession(id: string): void {
+    if (this.data.knownSessionIds.includes(id)) return
+    this.data.knownSessionIds = [...this.data.knownSessionIds, id].slice(-MAX_KNOWN_SESSIONS)
     this.save()
   }
 }

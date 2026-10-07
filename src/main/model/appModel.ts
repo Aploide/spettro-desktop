@@ -17,28 +17,39 @@
 
 import { EventEmitter } from 'events'
 import { randomUUID } from 'crypto'
-import { statSync } from 'fs'
+import { mkdirSync, statSync } from 'fs'
+import { access, readFile } from 'fs/promises'
 import { homedir } from 'os'
+import { basename, join } from 'path'
 import type {
   ACPConfigOption,
   ACPContentBlock,
   ACPPermissionRequest,
+  ACPPromptResult,
   ACPQuestionAnswer,
   ACPQuestionRequest,
   ACPSessionUpdate,
+  ACPToolCallEvent,
+  ACPToolStatus,
   JSONValue,
   RPCID
 } from '../../shared/acp'
 import type { MainEvent } from '../../shared/ipc'
 import type {
+  Accent,
+  Appearance,
   AppStateDTO,
   ChatDetail,
   CLIInfo,
+  CLISessionEntry,
   ImageAttachmentDTO,
+  InstallState,
   Phase,
   RemoteHostState,
-  SubscriptionState
+  SubscriptionState,
+  TurnSummary
 } from '../../shared/model'
+import { isAccent, isAppearance, PROJECTS_FOLDER } from '../../shared/model'
 import type {
   ConnectResult,
   LocalProbeResult,
@@ -53,12 +64,16 @@ import type {
 import { EMPTY_WORKFLOW_LIST } from '../../shared/extensions'
 import type { UpdateState } from '../../shared/update'
 import { ExtensionMethod } from '../../shared/extensions'
+import { humanSentence } from '../../shared/humanize'
 import { AcpAgent, AcpConnection, AcpError } from '../acp'
+import type { WorkflowTarget } from '../acp/extensions'
 import { ChatSession, type ConfigValue } from './chatSession'
-import { CLIInstaller } from './cliInstaller'
-import { locateCLI } from './cliLocator'
+import { CLIInstaller, type InstallFailure } from './cliInstaller'
+import { checkExplicitCLI, EXPLICIT_CLI_PROBLEM, locateCLI } from './cliLocator'
 import { ExtensionStores } from './extensionStores'
 import { Prefs } from './prefs'
+import { newProjectPath } from './projectFolder'
+import { cleanMention, promptBlocks, type PromptAttachment } from './promptBlocks'
 import { SessionStore } from './sessionStore'
 import { SubscriptionStore } from './subscriptionStore'
 import { UpdateManager } from './updater'
@@ -67,6 +82,10 @@ interface PendingPermission {
   request: ACPPermissionRequest
   rpcId: RPCID
   raw: JSONValue
+  /** What the request's card showed before the request turned it "pending",
+   *  put back if the request goes away unanswered. Null when the request
+   *  itself created the card (a `perm-N` with nothing open to attach to). */
+  priorToolStatus: ACPToolStatus | null
 }
 
 interface PendingQuestion {
@@ -76,10 +95,7 @@ interface PendingQuestion {
   transport: 'ask' | 'permission'
 }
 
-export interface PromptAttachment {
-  data: string
-  mimeType: string
-}
+export type { PromptAttachment }
 
 /** How long the agent gets to answer `initialize` before we give up on it. */
 const HANDSHAKE_TIMEOUT_MS = 20_000
@@ -87,6 +103,45 @@ const HANDSHAKE_TIMEOUT_MS = 20_000
 /** Crash-loop guard window: a second death within this many ms of the last
  *  restart surfaces a failure instead of restarting again. */
 const CRASH_LOOP_WINDOW_MS = 10_000
+
+/** Whether the CLI keeps config option `id` for every session rather than
+ *  per session. Only the mode is a session's own; the model, permission,
+ *  thinking level, Ultra and the workflow size live in ~/.spettro, shared
+ *  by every session and by a TUI running alongside (bridge.go
+ *  sharedSettings), so for those the CLI, not a chat, is the truth. */
+function isSharedConfig(id: string): boolean {
+  return id !== 'mode'
+}
+
+/** How many past workflow runs the studio asks the CLI for. */
+const RECENT_WORKFLOW_RUNS = 20
+
+/** How long the sessions file may lag behind the chats (see persist). */
+const PERSIST_DELAY_MS = 1000
+
+/** The longest the main thread spends encoding stored JSON in one go. */
+const ENCODE_SLICE_MS = 6
+
+/** Fills in what a run's folder says about it (internal/agent workflow.go
+ *  writes meta.json as the run starts, workflow_live_run.go result.json once
+ *  it settles). The CLI runs on this machine, so the folder is readable here;
+ *  a run whose folder can't be read is listed as it came. */
+async function describeWorkflowRun(run: WorkflowRunInfo): Promise<WorkflowRunInfo> {
+  if (run.dir === '') return run
+  let name = run.name
+  try {
+    const meta: unknown = JSON.parse(await readFile(join(run.dir, 'meta.json'), 'utf8'))
+    const metaName = (meta as { name?: unknown } | null)?.name
+    if (typeof metaName === 'string') name = metaName
+  } catch {
+    // No meta.json (or not JSON): the run stays unnamed.
+  }
+  const finished = await access(join(run.dir, 'result.json')).then(
+    () => true,
+    () => false
+  )
+  return { ...run, name, finished }
+}
 
 export class AppModel extends EventEmitter {
   // -- Published state ------------------------------------------------------
@@ -97,6 +152,9 @@ export class AppModel extends EventEmitter {
   sessions: ChatSession[] = []
   selectedSessionId: string | null = null
   banner: string | null = null
+  /** Bumped per banner, so the same text twice is shown twice. */
+  private bannerNonce = 0
+  install: InstallState = { stage: 'idle', failure: null }
   installLog: string[] = []
   /** Last ≤50 stderr lines from the CLI process. */
   agentLog: string[] = []
@@ -124,15 +182,40 @@ export class AppModel extends EventEmitter {
   private liveConnectionToken = 0
   private handshakeTimedOut = false
   private lastAgentRestart: number | null = null
+  /** 'reconnecting' while the engine restarts under a shell already on
+   *  screen — see AppStateDTO.connection. */
+  private connectionState: 'ok' | 'reconnecting' = 'ok'
+  /** Set once the sidebar-and-chat shell (or the provider step) has been
+   *  shown. From then on a restart keeps it on screen instead of falling
+   *  back to the loading screen, which would unmount every draft. */
+  private shellShown = false
 
   private sessionsByACPID = new Map<string, ChatSession>()
   /** In-flight ACP attaches, keyed by chat id — see ensureLiveSession. */
   private ensureInFlight = new Map<string, Promise<string | null>>()
+  /** The connect under way, so a second caller waits for it instead of
+   *  giving up on an agent that is seconds from ready. */
+  private connectInFlight: Promise<void> | null = null
+  /** Prompts out per chat — the turn plus any steers sent into it — each
+   *  holding its own token, so a prompt of a torn-down agent unwinding late
+   *  can't count out one sent since. The chat stays busy until the last one
+   *  settles. */
+  private promptsInFlight = new Map<string, Set<symbol>>()
+  /** Per chat, settles once the running turn's own prompt is on the wire. A
+   *  steer waits for it — sent first, the steer would start a turn of its
+   *  own and the turn's prompt would become the steer. */
+  private turnLaunched = new Map<string, Promise<void>>()
+  /** How the latest real turn of a chat ended, held until its last prompt
+   *  settles, which is when paired phones hear that the chat went idle. */
+  private turnOutcome = new Map<string, { stopReason: string; notice: TurnNotice | null }>()
   private readonly installer = new CLIInstaller()
   private readonly store: SessionStore
   private readonly prefs: Prefs
   private readonly subscriptionStore: SubscriptionStore
   private readonly appVersion: string
+  /** Hands an appearance change to the window layer (nativeTheme lives in
+   *  Electron, which this class deliberately doesn't import). */
+  private readonly applyAppearance: (mode: Appearance) => void
   private shuttingDown = false
 
   /** Account, providers, and models, all driven over the CLI's `_spettro/*`
@@ -142,10 +225,6 @@ export class AppModel extends EventEmitter {
   /** App + CLI release checks. Owned here because updating the CLI means
    *  restarting the agent, which only this class can do. */
   readonly updates: UpdateManager
-  /** Set once the user chooses to continue without finishing setup, so the
-   *  gate doesn't pull them back on the next refresh. */
-  private providerSetupSkipped = false
-
   constructor(opts: {
     userDataDir: string
     appVersion: string
@@ -153,10 +232,13 @@ export class AppModel extends EventEmitter {
     isPackaged?: boolean
     /** Quits the app once an update installer has been handed off. */
     quit?: () => void
+    /** Applies a changed appearance (main sets nativeTheme.themeSource). */
+    applyAppearance?: (mode: Appearance) => void
   }) {
     super()
     this.setMaxListeners(100)
     this.appVersion = opts.appVersion
+    this.applyAppearance = opts.applyAppearance ?? ((): void => undefined)
     // Built before the stores: getState() reads it, and a store that emitted
     // during its own construction would otherwise find it undefined.
     this.updates = new UpdateManager({
@@ -169,7 +251,8 @@ export class AppModel extends EventEmitter {
       // Whatever was running is the old binary — restart onto the new one.
       onCLIInstalled: () => this.reconnect(),
       onChange: () => this.emitAppState(),
-      quit: opts.quit ?? ((): void => undefined)
+      quit: opts.quit ?? ((): void => undefined),
+      waitForIdle: () => this.waitForIdle()
     })
     this.prefs = new Prefs(opts.userDataDir)
     this.store = new SessionStore(opts.userDataDir)
@@ -200,15 +283,16 @@ export class AppModel extends EventEmitter {
 
   private setPhase(phase: Phase): void {
     this.phase = phase
+    if (phase.kind === 'ready' || phase.kind === 'needsProvider') this.shellShown = true
     this.emitAppState()
   }
 
-  private emitHostState(shuttingDown = false): void {
+  private emitHostState(shuttingDown = false, message?: string): void {
     const state: { agentReady: boolean; shuttingDown: boolean; message?: string } = {
       agentReady: this.agentReady(),
       shuttingDown
     }
-    if (this.banner) state.message = this.banner
+    if (message) state.message = message
     this.emit('host-state', state)
   }
 
@@ -227,12 +311,15 @@ export class AppModel extends EventEmitter {
   getState(): AppStateDTO {
     return {
       phase: this.phase,
+      connection: this.connectionState,
       cli: this.cli,
       agentVersion: this.agentVersion,
       selectedSessionId: this.selectedSessionId,
       // Scratch runs are the studio's business, not the sidebar's.
       sessions: this.sessions.filter((s) => !s.isScratch).map((s) => s.summary()),
       banner: this.banner,
+      bannerNonce: this.bannerNonce,
+      install: this.install,
       installLog: [...this.installLog],
       agentLog: [...this.agentLog],
       subscription: this.subscription,
@@ -241,8 +328,97 @@ export class AppModel extends EventEmitter {
       remote: this.remote,
       lastProjectPath: this.prefs.lastProjectPath || null,
       defaultProjectPath: this.defaultProjectPath,
-      recentProjects: this.prefs.recentProjects
+      recentProjects: this.prefs.recentProjects,
+      missingProjects: this.missingProjects(),
+      homePath: homedir(),
+      appearance: this.prefs.appearance,
+      accent: this.prefs.accent,
+      noModel: this.noModel,
+      providerSetupSkipped: this.prefs.providerSetupSkipped,
+      notifyWhenDone: this.prefs.notifyWhenDone,
+      approvedBroadFolders: this.prefs.approvedBroadFolders,
+      defaultConfigOptions: this.prefs.lastConfigOptionsReadonly,
+      busyTasks: this.busyCount()
     }
+  }
+
+  /** Chats with a turn running (studio test runs included): what quitting,
+   *  updating or restarting the engine would stop. */
+  busyCount(): number {
+    return this.sessions.filter((s) => s.isBusy).length
+  }
+
+  /** Resolves once no chat is working — Update when finished, Quit When
+   *  Finished. */
+  waitForIdle(): Promise<void> {
+    return new Promise((resolve) => {
+      const check = (): void => {
+        if (this.busyCount() === 0 || this.shuttingDown) resolve()
+        else setTimeout(check, 500)
+      }
+      check()
+    })
+  }
+
+  get notifyWhenDone(): boolean {
+    return this.prefs.notifyWhenDone
+  }
+
+  setNotifyWhenDone(on: boolean): void {
+    this.prefs.notifyWhenDone = on === true
+    this.emitAppState()
+  }
+
+  /** A one-off message from outside the model (the quit guard). */
+  notify(text: string): void {
+    this.showBanner(text)
+  }
+
+  /** A message for the user, shown once (see AppStateDTO.bannerNonce). It is
+   *  cleared as soon as it has been sent, so later snapshots — and paired
+   *  phones, which get it once in their host state — never repeat a stale
+   *  one. */
+  private showBanner(text: string): void {
+    this.banner = text
+    this.bannerNonce += 1
+    this.emitAppState()
+    this.banner = null
+  }
+
+  /** Recent and session folders that no longer exist. Sessions count too: a
+   *  project's "+" (or New session from one of its chats) points the
+   *  new-session view at that chat's folder, which may be long gone. */
+  private missingProjects(): string[] {
+    const paths = new Set(this.prefs.recentProjects)
+    for (const s of this.sessions) if (!s.isScratch) paths.add(s.projectPath)
+    return [...paths].filter((p) => !isDirectory(p))
+  }
+
+  /** The persisted colour scheme. Read by main before the window exists, so
+   *  the first paint is already in the right scheme. */
+  get appearance(): Appearance {
+    return this.prefs.appearance
+  }
+
+  setAppearance(mode: Appearance): void {
+    if (!isAppearance(mode)) return
+    this.prefs.appearance = mode
+    this.applyAppearance(mode)
+    this.emitAppState()
+  }
+
+  /** The persisted accent. Read by main when it builds the window, so the
+   *  renderer has it before its first paint. */
+  get accent(): Accent {
+    return this.prefs.accent
+  }
+
+  /** Purely a renderer concern (data-accent on <html>), so there is nothing
+   *  for main to apply: the new value reaches the page in app-state. */
+  setAccent(accent: Accent): void {
+    if (!isAccent(accent) || accent === this.prefs.accent) return
+    this.prefs.accent = accent
+    this.emitAppState()
   }
 
   getChatDetail(chatId: string): ChatDetail | null {
@@ -262,7 +438,10 @@ export class AppModel extends EventEmitter {
    *  the process is running and answering, the local user is just parked on
    *  the setup screen (remoteAgentReady in AppModel+RemoteHost.swift). */
   agentReady(): boolean {
-    return this.phase.kind === 'ready' || this.phase.kind === 'needsProvider'
+    return (
+      (this.phase.kind === 'ready' || this.phase.kind === 'needsProvider') &&
+      this.connectionState === 'ok'
+    )
   }
 
   /** The folder new chats open in by default: the selected chat's own folder,
@@ -301,7 +480,7 @@ export class AppModel extends EventEmitter {
     // up) must not drop the UI back onto the loading screen.
     if (this.agent || this.phase.kind === 'connecting') return
     this.setPhase({ kind: 'locating' })
-    const found = locateCLI(this.prefs.explicitCLIPath || null)
+    const found = await locateCLI(this.prefs.explicitCLIPath || null)
     if (found) {
       this.cli = { path: found.path, version: found.version, isDev: found.isDev }
       // Land on the home screen (no chat selected) but start the agent
@@ -326,7 +505,9 @@ export class AppModel extends EventEmitter {
   private loadPersistedSessions(): void {
     if (this.sessions.length > 0) return
     this.sessions = this.store.load().map((stored) => {
-      const session = ChatSession.restore(stored)
+      // The palette shows the folder's last known commands until the agent
+      // announces its own on resume.
+      const session = ChatSession.restore(stored, this.prefs.cachedCommands(stored.projectPath))
       this.attachSessionCallbacks(session)
       return session
     })
@@ -336,15 +517,58 @@ export class AppModel extends EventEmitter {
   private attachSessionCallbacks(session: ChatSession): void {
     session.onItem = (s, item) => this.pushEvent({ type: 'chat-item', chatId: s.id, item })
     session.onMeta = (s, meta) => this.pushEvent({ type: 'chat-meta', chatId: s.id, meta })
+    session.onConfigValue = (s, configId, value) =>
+      this.pushEvent({ type: 'chat-config-value', chatId: s.id, configId, value })
   }
 
+  /** Marks the sessions file out of date and says so in app-state. The
+   *  write itself follows within PERSIST_DELAY_MS, once for however many
+   *  changes landed meanwhile: one slider release alone persists once per
+   *  live chat (the CLI tells each of them), and rewriting every chat that
+   *  many times, on the thread that also presents the window, is what made
+   *  the app freeze. Quitting writes whatever is still pending
+   *  (flushPersistence). */
   private persist(): void {
-    // Sessions that have never received a prompt (and never failed to
-    // connect) are not conversations — don't store them.
-    this.store.save(
-      this.sessions.filter((s) => !s.isPristine && !s.isScratch).map((s) => s.snapshot())
-    )
+    this.persistDirty = true
+    if (!this.persistTimer) {
+      this.persistTimer = setTimeout(() => {
+        this.persistTimer = null
+        void this.writeSessions()
+      }, PERSIST_DELAY_MS)
+    }
     this.emitAppState()
+  }
+
+  private persistDirty = false
+  private persistTimer: NodeJS.Timeout | null = null
+
+  /** Sessions that have never received a prompt (and never failed to
+   *  connect) are not conversations — don't store them. */
+  private storedSessions(): ChatSession[] {
+    return this.sessions.filter((s) => !s.isPristine && !s.isScratch)
+  }
+
+  private async writeSessions(): Promise<void> {
+    this.persistDirty = false
+    // What has no stored JSON yet is encoded a slice at a time, the window
+    // getting the main thread back between slices; then the write itself
+    // is off the thread (SessionStore.saveParts).
+    for (const session of this.storedSessions()) {
+      while (!session.encodeStoredItems(performance.now() + ENCODE_SLICE_MS)) {
+        await new Promise((resolve) => setImmediate(resolve))
+      }
+    }
+    await this.store.saveParts(this.storedSessions().map((s) => s.persistParts()))
+  }
+
+  /** Writes any pending change to the sessions file now; resolves once it
+   *  is on disk. */
+  flushPersistence(): Promise<void> {
+    if (this.persistTimer) {
+      clearTimeout(this.persistTimer)
+      this.persistTimer = null
+    }
+    return this.persistDirty ? this.writeSessions() : Promise.resolve()
   }
 
   // -------------------------------------------------------------------------
@@ -353,22 +577,39 @@ export class AppModel extends EventEmitter {
 
   /** Establishes the shared ACP connection and performs the handshake.
    *  `rootedAt` is the folder the agent process itself starts in; each
-   *  session still passes its own cwd when it is created. */
-  private async connect(rootedAt?: string): Promise<void> {
-    // A connect is already in flight (or the agent is live): don't spawn a
-    // second CLI process.
-    if (this.agent || this.phase.kind === 'connecting') return
+   *  session still passes its own cwd when it is created. A call while a
+   *  connect is under way waits for that one rather than spawning a second
+   *  CLI process. */
+  private connect(rootedAt?: string): Promise<void> {
+    if (this.agent) return Promise.resolve()
+    if (this.connectInFlight) return this.connectInFlight
+    const attempt = this.runConnect(rootedAt).finally(() => {
+      if (this.connectInFlight === attempt) this.connectInFlight = null
+    })
+    this.connectInFlight = attempt
+    return attempt
+  }
+
+  private async runConnect(rootedAt?: string): Promise<void> {
     // Never cache a stale locator result: if the CLI path changed (or the
     // binary moved) since `cli` was set, a reconnect must re-resolve, or
     // we'd happily "connect" to the wrong binary.
-    const found = locateCLI(this.prefs.explicitCLIPath || null)
+    const found = await locateCLI(this.prefs.explicitCLIPath || null)
     if (!found) {
       this.cli = null
+      this.connectionState = 'ok'
       this.setPhase({ kind: 'needsSetup' })
       return
     }
     this.cli = { path: found.path, version: found.version, isDev: found.isDev }
-    this.setPhase({ kind: 'connecting' })
+    // With the shell already up, the restart happens underneath it: only the
+    // header's "Reconnecting…" and a waiting Send say so.
+    if (this.shellShown && this.phase.kind !== 'failed') {
+      this.connectionState = 'reconnecting'
+      this.emitAppState()
+    } else {
+      this.setPhase({ kind: 'connecting' })
+    }
 
     this.connectionToken += 1
     const token = this.connectionToken
@@ -380,9 +621,11 @@ export class AppModel extends EventEmitter {
     const agent = new AcpAgent(connection)
     this.pendingConnection = connection
 
+    let answered = false
     try {
       await connection.start()
       const info = await this.handshake(agent, connection)
+      answered = true
       // A teardown landed while we were waiting: this process is no longer
       // the one the app wants. Kill it and leave the phase to whoever
       // superseded us.
@@ -406,16 +649,29 @@ export class AppModel extends EventEmitter {
       // subscription backend.
       await this.extensions.refreshProviders()
       if (token !== this.connectionToken) return
+      this.connectionState = 'ok'
       this.setPhase(this.isProviderSetupNeeded ? { kind: 'needsProvider' } : { kind: 'ready' })
       void this.extensions.refreshAccount()
       this.emitHostState()
-      await this.resumePersistedSessions()
+      // Chats re-attach lazily, each as it is opened or sent to — at most the
+      // one on screen now. Resuming every saved chat here held startup on one
+      // round trip per chat, archived ones included.
+      this.warmSelected()
     } catch (err) {
       // Never leave a half-started process behind: it would hold the CLI's
       // session lock and keep answering nothing.
       connection.stop()
       if (token !== this.connectionToken) return
-      this.setPhase({ kind: 'failed', message: errMessage(err) })
+      this.connectionState = 'ok'
+      // Gone before it said a word: not a crash worth one more try — the file
+      // is not Spettro (any executable can be chosen), or a damaged copy.
+      const quitEarly = !answered && err instanceof AcpError && (err.kind === 'terminated' || err.kind === 'transport')
+      this.setPhase({
+        kind: 'failed',
+        message: quitEarly
+          ? `${errMessage(err)} It quit before answering — it may not be Spettro.`
+          : errMessage(err)
+      })
     } finally {
       if (this.pendingConnection === connection) this.pendingConnection = null
     }
@@ -448,9 +704,20 @@ export class AppModel extends EventEmitter {
    *  a CLI path change want, since connect() refuses to displace a live agent. */
   async reconnect(): Promise<void> {
     this.teardownAgent()
-    this.setPhase({ kind: 'locating' })
+    this.enterReconnecting()
     const selected = this.selectedSessionId ? this.sessionById(this.selectedSessionId) : null
     await this.connect(selected?.projectPath ?? this.defaultProjectPath)
+  }
+
+  /** The "engine is restarting" state: under a shell already on screen it
+   *  is a flag the header shows; before that, the loading screen. */
+  private enterReconnecting(): void {
+    if (this.shellShown && this.phase.kind !== 'failed') {
+      this.connectionState = 'reconnecting'
+      this.emitAppState()
+    } else {
+      this.setPhase({ kind: 'locating' })
+    }
   }
 
   /** Stops the current agent and drops every reference to it, without going
@@ -464,6 +731,7 @@ export class AppModel extends EventEmitter {
     const starting = this.pendingConnection
     this.connection = null
     this.pendingConnection = null
+    this.connectInFlight = null
     this.agent = null
     // Stops the login poller and forgets whether providers ever loaded: an
     // agent that isn't there tells us nothing about what's configured.
@@ -471,14 +739,18 @@ export class AppModel extends EventEmitter {
     live?.stop()
     starting?.stop()
     // Nothing is left waiting on these answers: the turn that asked them died
-    // with the process.
-    if (this.pendingQuestions.length > 0) {
-      this.pendingQuestions = []
-      this.emitQuestions()
-    }
+    // with the process. Answering them would reach a new process under ids
+    // it never issued.
+    this.withdrawPrompts(() => true, false)
     for (const session of this.sessions) {
       session.setBusy(false)
     }
+    // The prompts those turns were waiting on died with the process too; their
+    // runTurn calls unwind through the rejected requests and find nothing to
+    // count down.
+    this.promptsInFlight.clear()
+    this.turnLaunched.clear()
+    this.turnOutcome.clear()
     // The process is gone and its ACP sessions with it. Keep each session's
     // id (it's what session/resume needs) but drop the routing entries, so
     // nothing is prompted into the void before it's re-attached.
@@ -506,17 +778,19 @@ export class AppModel extends EventEmitter {
     // failure rather than crash-looping.
     const now = Date.now()
     if (this.lastAgentRestart !== null && now - this.lastAgentRestart < CRASH_LOOP_WINDOW_MS) {
-      let message = `The Spettro agent keeps stopping (exit ${code}).`
-      const tail = this.agentLog.slice(-6).join('\n')
-      if (tail !== '') message += `\n\nAgent output:\n${tail}`
-      this.setPhase({ kind: 'failed', message })
+      // The failure screen shows the agent's own output behind "Show
+      // details"; the message only says what happened.
+      this.connectionState = 'ok'
+      this.setPhase({ kind: 'failed', message: `The Spettro agent keeps stopping (exit ${code}).` })
       return
     }
     this.lastAgentRestart = now
-    this.banner = `The Spettro agent stopped (exit ${code}) — restarting…`
-    this.setPhase({ kind: 'locating' })
-    // Because every session kept its acpSessionId and transcript, the
-    // reconnect transparently re-resumes them all.
+    const notice = 'Spettro’s engine stopped unexpectedly. Restarting it…'
+    this.emitHostState(false, notice)
+    this.showBanner(notice)
+    this.enterReconnecting()
+    // Every session kept its acpSessionId and transcript, so each is
+    // transparently resumed the next time it is opened or sent to.
     void this.connect()
   }
 
@@ -526,15 +800,21 @@ export class AppModel extends EventEmitter {
       this.handleUpdate(sessionId, update, raw)
     }
     connection.onPermissionRequest = ({ rpcId, request, raw }) => {
-      this.pendingPermissions.push({ request, rpcId, raw })
+      const priorToolStatus = this.adoptPermission(request)
+      this.pendingPermissions.push({ request, rpcId, raw, priorToolStatus })
       this.emitPermissions()
-      this.emit('permission-ask', request.id, this.chatIdForACPSession(request.sessionId), raw)
+      this.emit('permission-ask', request.id, request.chatId, raw)
     }
     connection.onQuestionRequest = ({ rpcId, request, raw, transport }) => {
+      request.chatId = request.sessionId ? this.chatIdForACPSession(request.sessionId) : null
       this.pendingQuestions.push({ request, rpcId, raw, transport })
       this.emitQuestions()
-      const chatId = request.sessionId ? this.chatIdForACPSession(request.sessionId) : null
-      this.emit('question-ask', request.id, chatId, raw)
+      this.emit('question-ask', request.id, request.chatId, raw)
+    }
+    connection.onCancelRequest = (rpcId) => {
+      // The agent stopped waiting (the tool's timeout passed, or its turn was
+      // cancelled): the prompt on screen would answer nothing.
+      this.withdrawPrompts((p) => p.rpcId === rpcId, false)
     }
     connection.onExtensionNotification = (method, params) => {
       // Attached phones run the same account and provider screens, so they get
@@ -570,62 +850,24 @@ export class AppModel extends EventEmitter {
   // Cold → live: resume vs. new session
   // -------------------------------------------------------------------------
 
-  /** Reconnects each restored session to the live agent. Uses session/resume
-   *  so the agent restores its memory of the conversation WITHOUT replaying
-   *  the transcript (we already display our persisted copy — session/load
-   *  would duplicate every message on each relaunch). */
-  private async resumePersistedSessions(): Promise<void> {
-    const agent = this.agent
-    if (!agent) return
-    for (const session of [...this.sessions]) {
-      const acpId = session.acpSessionId
-      if (!acpId) {
-        await this.startFreshSession(session)
-        continue
-      }
-      try {
-        const displayed = session.displayedConfigValues()
-        const result = await agent.resumeSession(acpId, session.projectPath)
-        // Register only after a successful resume: updates emitted before
-        // this point belong to no session the UI should show.
-        this.sessionsByACPID.set(acpId, session)
-        if (result.configOptions.length > 0) session.setConfigOptions(result.configOptions)
-        await this.syncDisplayedConfig(session, displayed, acpId)
-      } catch {
-        session.appendNotice(
-          "Couldn't restore this chat's earlier context — starting fresh.",
-          false
-        )
-        await this.startFreshSession(session)
-      }
-    }
-    this.persist()
+  /** Brings the chat on screen live, so its chips and slash palette are the
+   *  session's own. Every other chat waits until it is opened or sent to. */
+  private warmSelected(): void {
+    const selected = this.selectedSessionId ? this.sessionById(this.selectedSessionId) : null
+    if (selected) this.warmSession(selected)
   }
 
-  /** Attaches a new live ACP session to an existing (cold or degraded) chat. */
-  private async startFreshSession(session: ChatSession): Promise<void> {
-    const agent = this.agent
-    if (!agent) return
-    const oldId = session.acpSessionId
-    if (oldId) this.sessionsByACPID.delete(oldId)
-    try {
-      const displayed = session.displayedConfigValues()
-      const result = await agent.newSession(session.projectPath)
-      session.setAcpSessionId(result.sessionId)
-      session.setConfigOptions(result.configOptions)
-      this.sessionsByACPID.set(result.sessionId, session)
-      await this.syncDisplayedConfig(session, displayed, result.sessionId)
-    } catch (err) {
-      session.setAcpSessionId(null)
-      session.appendNotice(`Couldn't start a session: ${errMessage(err)}`, true)
-    }
-  }
-
-  /** Pushes the config the user was shown (plus any changes queued while the
-   *  chat was cold) onto a freshly attached live session, so the displayed
-   *  model/mode/permission is exactly what the agent runs with. Values that
-   *  no longer exist in the live option set are skipped, and the agent's
-   *  refreshed options become the new display state after each push. */
+  /** Brings a freshly attached live session in line with what the user
+   *  chose: the chat's own mode as it was shown, plus every change the user
+   *  made that hasn't reached the CLI yet (queued in this chat while it was
+   *  cold, or a default set while nothing was live). Shared settings the chat
+   *  merely *showed* are never pushed: that display can be days old, and
+   *  pushing it would rewrite ~/.spettro for every session and the TUI —
+   *  opening an old chat could quietly turn YOLO back on. For those the
+   *  session's own options are the truth, and they are passed on to every
+   *  other chat. Values that no longer exist in the live option set are
+   *  skipped, and the agent's refreshed options become the new display state
+   *  after each push. */
   private async syncDisplayedConfig(
     session: ChatSession,
     previouslyDisplayed: Record<string, ConfigValue>,
@@ -633,11 +875,20 @@ export class AppModel extends EventEmitter {
   ): Promise<void> {
     const agent = this.agent
     if (!agent) return
+    const own = Object.entries(previouslyDisplayed).filter(([id]) => !isSharedConfig(id))
+    const queuedDefaults = this.prefs.pendingDefaults
     const desired: Record<string, ConfigValue> = {
-      ...previouslyDisplayed,
+      ...Object.fromEntries(own),
+      ...queuedDefaults,
       ...session.pendingConfigChanges
     }
+    // What the user chose rather than merely saw: it supersedes whatever the
+    // other chats have queued for the same settings.
+    const chosen = new Set(
+      [...Object.keys(queuedDefaults), ...Object.keys(session.pendingConfigChanges)].filter(isSharedConfig)
+    )
     session.pendingConfigChanges = {}
+    if (Object.keys(queuedDefaults).length > 0) this.prefs.pendingDefaults = {}
 
     // The CLI's own default for "mode" is Plan mode, but the coding agent is
     // what's actually used most, so steer fresh sessions (no prior mode
@@ -659,6 +910,7 @@ export class AppModel extends EventEmitter {
 
     if (Object.keys(desired).length === 0) {
       this.rememberConfig(session.configOptions)
+      this.spreadSharedConfig(session, chosen)
       return
     }
 
@@ -675,10 +927,11 @@ export class AppModel extends EventEmitter {
           session.setConfigOptions(await agent.setConfigOption(acpId, live.id, want))
         }
       } catch (err) {
-        session.appendNotice(`Couldn't restore ${live.name}: ${errMessage(err)}`, false)
+        session.appendNotice(`Couldn't restore ${live.name}. ${humanSentence(err)}`, false)
       }
     }
     this.rememberConfig(session.configOptions)
+    this.spreadSharedConfig(session, chosen)
     this.persist()
   }
 
@@ -687,12 +940,46 @@ export class AppModel extends EventEmitter {
     this.prefs.lastConfigOptions = options
   }
 
+  /** Shows `source`'s shared settings (see isSharedConfig) in every other
+   *  chat. The CLI tells only its live sessions when one changes; a cold
+   *  chat still showing the old value would be wrong on screen, and a chip
+   *  change there would start from it. A chat's own queued choice for a
+   *  setting stays on screen, unless that setting is in `changed`: a newer
+   *  choice made elsewhere has superseded it. */
+  private spreadSharedConfig(source: ChatSession, changed: ReadonlySet<string> = new Set()): void {
+    const values = Object.entries(source.displayedConfigValues()).filter(([id]) => isSharedConfig(id))
+    if (values.length === 0) return
+    for (const other of this.sessions) {
+      if (other === source || other.isScratch) continue
+      const shown = other.displayedConfigValues()
+      for (const [id, value] of values) {
+        if (changed.has(id)) delete other.pendingConfigChanges[id]
+        else if (other.pendingConfigChanges[id] !== undefined) continue
+        if (shown[id] !== undefined && shown[id] !== value) other.applyLocalConfigValue(id, value)
+      }
+    }
+  }
+
+  /** The shared settings whose shown value differs between two snapshots
+   *  of displayedConfigValues(). */
+  private changedSharedConfig(
+    before: Record<string, ConfigValue>,
+    after: Record<string, ConfigValue>
+  ): Set<string> {
+    return new Set(
+      Object.keys(after).filter(
+        (id) => isSharedConfig(id) && before[id] !== undefined && before[id] !== after[id]
+      )
+    )
+  }
+
   // -------------------------------------------------------------------------
   // Installation / explicit path
   // -------------------------------------------------------------------------
 
   installCLI(): void {
     this.phase = { kind: 'installing' }
+    this.install = { stage: 'checking', failure: null }
     this.installLog = ['Downloading and running the Spettro installer…']
     this.emitAppState()
     this.installer.install((event) => {
@@ -701,17 +988,43 @@ export class AppModel extends EventEmitter {
         this.emitAppState()
         return
       }
-      const found = event.success ? locateCLI(null) : null
-      if (event.success && found) {
-        this.cli = { path: found.path, version: found.version, isDev: found.isDev }
-        this.installLog.push(`Installed at ${found.path}`)
-        this.setPhase({ kind: 'locating' })
-        void this.connect()
-      } else {
-        this.installLog.push('Installation did not complete.')
-        this.setPhase({ kind: 'needsSetup' })
+      if (event.type === 'phase') {
+        this.install = { stage: event.phase, failure: null }
+        this.emitAppState()
+        return
       }
+      if (event.success) {
+        void this.finishInstall()
+        return
+      }
+      this.installLog.push('Installation did not complete.')
+      this.install = installFailureState(event.failure)
+      this.setPhase({ kind: 'needsSetup' })
     })
+  }
+
+  /** The script exited cleanly: find what it installed and start it. */
+  private async finishInstall(): Promise<void> {
+    const found = await locateCLI(null)
+    if (!found) {
+      this.installLog.push('The installer finished, but Spettro wasn’t found where it installs to.')
+      this.install = { stage: 'failed', failure: { kind: 'failed' } }
+      this.setPhase({ kind: 'needsSetup' })
+      return
+    }
+    // Installing means "use the copy Spettro installs": a file chosen earlier
+    // (perhaps the wrong one) must not keep winning at launch.
+    this.prefs.explicitCLIPath = ''
+    this.cli = { path: found.path, version: found.version, isDev: found.isDev }
+    this.installLog.push(`Installed at ${found.path}`)
+    this.install = { stage: 'done', failure: null }
+    this.setPhase({ kind: 'locating' })
+    void this.connect()
+  }
+
+  /** Setup's Cancel: the install stops and setup is back where it began. */
+  cancelInstall(): void {
+    this.installer.cancel()
   }
 
   // -------------------------------------------------------------------------
@@ -724,25 +1037,29 @@ export class AppModel extends EventEmitter {
   }
 
   /** Downloads this platform's installer and hands the app over to it. */
-  installAppUpdate(): Promise<void> {
-    return this.updates.installApp()
+  installAppUpdate(whenIdle = false): Promise<void> {
+    return this.updates.installApp(whenIdle === true)
   }
 
   /** Re-runs the CLI install script, then restarts the agent on the new
    *  binary. Chats keep their transcripts; their ACP sessions are re-attached
    *  by the reconnect, exactly as they are after a crash-restart. */
-  installCLIUpdate(): Promise<void> {
-    return this.updates.installCLI()
+  installCLIUpdate(whenIdle = false): Promise<void> {
+    return this.updates.installCLI(whenIdle === true)
   }
 
   async useExplicitPath(path: string): Promise<void> {
-    const found = locateCLI(path)
-    if (!found) {
-      this.banner = 'No executable Spettro CLI at that path.'
-      this.emitAppState()
+    // Checked here, and never swapped for another copy: an invalid choice is
+    // said in words and nothing changes. (Any executable used to pass, and a
+    // path with nothing at it fell through to whichever spettro the search
+    // found, saved as the choice while another binary ran.)
+    const checked = await checkExplicitCLI(path)
+    if (!checked.ok) {
+      this.showBanner(EXPLICIT_CLI_PROBLEM[checked.problem])
       return
     }
-    this.prefs.explicitCLIPath = path
+    const found = checked.cli
+    this.prefs.explicitCLIPath = found.path
     this.cli = { path: found.path, version: found.version, isDev: found.isDev }
     // Pointing at a different binary means the running one has to go: a
     // plain connect() would decline to displace it and strand the UI.
@@ -761,6 +1078,44 @@ export class AppModel extends EventEmitter {
     this.newChat(path)
   }
 
+  /** The new-session view's folder menu: the user chose where the next
+   *  session will work, without starting one yet. Remembered exactly like
+   *  chooseProject (default folder + recents), so the choice survives a
+   *  relaunch. */
+  rememberProject(path: string): void {
+    if (path === '') return
+    this.prefs.lastProjectPath = path
+    this.prefs.addRecentProject(path)
+    this.emitAppState()
+  }
+
+  /** "Continue" on the new-session warning about working in the home folder
+   *  (or /): remembered for that folder, so it is asked once, not on every
+   *  new session and every launch. */
+  approveBroadFolder(path: string): void {
+    this.prefs.approveBroadFolder(path)
+    this.emitAppState()
+  }
+
+  /** "New project folder…": someone with nothing to open yet ("a website for
+   *  my bakery") gets a folder of its own, ~/Spettro Projects/<name>, chosen
+   *  for the next session like any other. A name already taken gets a
+   *  number rather than mixing two projects in one folder. */
+  createProjectFolder(name: string): string {
+    const path = newProjectPath(join(homedir(), PROJECTS_FOLDER), name)
+    mkdirSync(path, { recursive: true })
+    this.rememberProject(path)
+    return path
+  }
+
+  /** "Remove from recents". Only the shortcut goes: chats in that folder and
+   *  the folder itself are untouched. */
+  removeRecentProject(path: string): void {
+    this.prefs.removeRecentProject(path)
+    if (this.prefs.lastProjectPath === path) this.prefs.lastProjectPath = ''
+    this.emitAppState()
+  }
+
   /** Creates a chat locally only: no ACP session is requested yet. The
    *  conversation becomes real (on the agent and on disk) when the first
    *  prompt is sent, so untouched empty chats are never persisted. */
@@ -772,16 +1127,17 @@ export class AppModel extends EventEmitter {
     // Inherit the last-used config so the ConfigBar is populated (and the
     // attach-time sync makes the agent match it) from the very first turn.
     session.configOptions = this.prefs.lastConfigOptions
-    session.commands = this.prefs.cachedCommands
+    session.commands = this.prefs.cachedCommands(projectPath)
     this.attachSessionCallbacks(session)
     this.sessions.unshift(session)
     this.selectedSessionId = session.id
     this.pushEvent({ type: 'chat-reset', chat: session.detail() })
     this.emitAppState()
     // If the agent isn't running (first launch, or it died), boot it rooted
-    // in this chat's folder. Either way the chat is warmed as soon as there
-    // is an agent, so its config chips are the session's own.
-    if (!this.agent && this.phase.kind !== 'connecting') {
+    // in this chat's folder — or wait for the boot already under way. Either
+    // way the chat is warmed as soon as there is an agent, so its config
+    // chips are the session's own.
+    if (!this.agent) {
       void this.connect(projectPath).then(() => this.warmSession(session))
     } else {
       this.warmSession(session)
@@ -795,9 +1151,10 @@ export class AppModel extends EventEmitter {
     const session = this.sessionById(chatId)
     if (!session) return
     this.selectedSessionId = chatId
+    session.unread = false
     this.pushEvent({ type: 'chat-reset', chat: session.detail() })
     this.emitAppState()
-    if (!this.agent && this.phase.kind !== 'connecting') {
+    if (!this.agent) {
       void this.connect(session.projectPath).then(() => this.warmSession(session))
     } else {
       this.warmSession(session)
@@ -806,12 +1163,29 @@ export class AppModel extends EventEmitter {
 
   selectSession(chatId: string | null): void {
     this.selectedSessionId = chatId
+    const session = chatId ? this.sessionById(chatId) : null
+    if (session) session.unread = false
     this.emitAppState()
   }
 
+  /** Sidebar / header rename. Persisted with the rest of the snapshot; an
+   *  untouched chat isn't on disk yet, and takes the new title with it when
+   *  its first prompt makes it real. */
+  renameChat(chatId: string, title: string): void {
+    const session = this.sessionById(chatId)
+    if (!session || !session.rename(title)) return
+    this.persist()
+    this.emit('chat-state', session.summary())
+  }
+
+  /** Deletes a chat. Its ACP session is closed too — a turn still running
+   *  would otherwise keep going (and asking for permissions nobody can see),
+   *  and a paused workflow would sit there until the CLI's idle reaper. The
+   *  CLI keeps the conversation on its own disk. Archiving doesn't close. */
   closeChat(chatId: string): void {
     const session = this.sessionById(chatId)
     if (!session) return
+    this.releaseSession(session)
     if (session.acpSessionId) this.sessionsByACPID.delete(session.acpSessionId)
     this.sessions = this.sessions.filter((s) => s.id !== chatId)
     if (this.selectedSessionId === chatId) {
@@ -860,17 +1234,28 @@ export class AppModel extends EventEmitter {
 
   /** The only prompt entry point, local and remote alike. `sourceDeviceId`
    *  is set when the prompt arrived from a paired device, so the echo of the
-   *  user's own message skips the screen that already drew it. */
+   *  user's own message skips the screen that already drew it.
+   *
+   *  A message sent while the chat is busy steers the running turn instead of
+   *  waiting for it: the CLI queues it for the agent's next step and answers
+   *  that prompt at once (bridge.go steerRunningTurn). The message carries
+   *  its steering state, and the chat stays busy for the turn it steers.
+   *
+   *  `mentions` are the project-relative files the user @-mentioned; each
+   *  one still in the text goes to the agent as a resource link in its
+   *  place (promptBlocks). */
   send(
     chatId: string,
     text: string,
     attachments: PromptAttachment[],
-    sourceDeviceId: string | null = null
+    sourceDeviceId: string | null = null,
+    mentions: string[] = []
   ): void {
     const session = this.sessionById(chatId)
     if (!session) return
     const trimmed = text.trim()
-    if ((trimmed === '' && attachments.length === 0) || session.isBusy) return
+    if (trimmed === '' && attachments.length === 0) return
+    const steering = session.isBusy
 
     const dtos: ImageAttachmentDTO[] = attachments.map((a) => ({
       id: randomUUID(),
@@ -879,7 +1264,20 @@ export class AppModel extends EventEmitter {
       width: 0,
       height: 0
     }))
-    session.appendUserMessage(trimmed, dtos)
+    // Only real project files are kept (and sent): see cleanMention.
+    const kept = [
+      ...new Set(
+        mentions
+          .map((m) => cleanMention(session.projectPath, m))
+          .filter((m): m is string => m !== null)
+      )
+    ]
+    const message = session.appendUserMessage(
+      trimmed,
+      dtos,
+      steering ? 'sending' : undefined,
+      kept
+    )
     session.setBusy(true)
     this.persist()
     // The user's own message is not an agent update, so it never comes back
@@ -892,70 +1290,176 @@ export class AppModel extends EventEmitter {
     this.emit('chat-user', session.id, trimmed, wireAttachments, Date.now(), sourceDeviceId)
     this.emit('chat-state', session.summary())
 
-    const blocks: ACPContentBlock[] = []
-    if (trimmed !== '') blocks.push({ type: 'text', text: trimmed })
-    for (const a of attachments) {
-      blocks.push({ type: 'image', data: a.data, mimeType: a.mimeType })
-    }
-    void this.runTurn(session, blocks)
+    const blocks = promptBlocks(trimmed, attachments, kept, session.projectPath)
+    void this.runTurn(session, blocks, steering ? message.id : null)
   }
 
-  private async runTurn(session: ChatSession, blocks: ACPContentBlock[]): Promise<void> {
-    const acpId = await this.ensureLiveSession(session)
-    // What the user is looking at must be what the turn runs. A fresh attach
-    // already synced (and cleared) its queue; anything still pending here was
-    // queued while the agent was down or was rejected mid-session, so it is
-    // replayed before the prompt goes out rather than after.
-    if (acpId && Object.keys(session.pendingConfigChanges).length > 0) {
-      await this.syncDisplayedConfig(session, session.displayedConfigValues(), acpId)
-    }
-    if (!acpId) {
-      session.setBusy(false)
-      this.persist()
-      this.emit('chat-state', session.summary(), { stopReason: 'error' })
-      return
-    }
-    let stopReason = 'end_turn'
-    // Mirrors whatever inline notice the local transcript gets, so a remote
-    // screen ends the turn in the same visible state.
-    let notice: { text: string; isError: boolean } | null = null
-    try {
-      const reason = this.agent ? await this.agent.prompt(acpId, blocks) : 'end_turn'
-      session.endStreaming()
-      stopReason = reason
-      switch (reason) {
-        case 'refusal':
-          notice = { text: 'The agent declined to continue.', isError: true }
-          break
-        case 'max_tokens':
-        case 'max_turn_requests':
-          notice = { text: 'The turn hit a limit before finishing.', isError: false }
-          break
-        case 'cancelled':
-          notice = { text: 'Turn cancelled.', isError: false }
-          break
-        default:
-          // end_turn / unknown are silent.
-          break
-      }
-      if (notice) session.appendNotice(notice.text, notice.isError)
-    } catch (err) {
-      session.endStreaming()
-      stopReason = 'error'
-      const message = errMessage(err)
-      notice = { text: message, isError: true }
-      session.appendNotice(message, true)
-    }
-    session.setBusy(false)
-    this.persist()
-    this.emit(
-      'chat-state',
-      session.summary(),
-      notice ? { stopReason, notice } : { stopReason }
+  /** Nothing can run a prompt: no provider, no local model, not signed in. */
+  private get noModel(): boolean {
+    return this.extensions.needsProviderSetup && !this.extensions.isSignedIn
+  }
+
+  /** "Try again" on a turn that failed: sends the newest prompt again,
+   *  images and @-mentioned files and all, as a new message — the failed attempt stays above it,
+   *  so the transcript still says what happened. Does nothing while a turn
+   *  is running: that would steer it, which is not what the button says. */
+  retryLast(chatId: string): void {
+    const session = this.sessionById(chatId)
+    if (!session || session.isBusy) return
+    // With no model connected the retry can only fail the same way, adding
+    // another copy of the message and the error under it each time.
+    if (this.noModel) return
+    const last = session.items.findLast(
+      (item) => item.kind === 'message' && item.message.role === 'user'
+    )
+    if (last?.kind !== 'message') return
+    const { text, attachments, mentions } = last.message
+    this.send(
+      chatId,
+      text,
+      attachments.map((a) => ({ data: a.data, mimeType: a.mimeType })),
+      null,
+      mentions ?? []
     )
   }
 
-  /** Lazily attaches a live ACP session the first time a chat is prompted,
+  /**
+   * One `session/prompt`, start to finish: a turn, or with `steerId` (the
+   * id of the message it carries) a steer into the turn already running.
+   *
+   * Every prompt counts itself in and out of `promptsInFlight`, and the chat
+   * goes idle — unread mark, final persist, the phone's "chat-state" — only
+   * when the last one settles. A steer the agent queued answers with an
+   * immediate end_turn that ends nothing, so it neither clears busy nor
+   * leaves a stop notice. One that arrived after the turn it meant to steer
+   * had already finished ran as a turn of its own, and is treated as one.
+   */
+  private async runTurn(
+    session: ChatSession,
+    blocks: ACPContentBlock[],
+    steerId: string | null = null
+  ): Promise<void> {
+    const chatId = session.id
+    const token = Symbol('prompt')
+    const inFlight = this.promptsInFlight.get(chatId) ?? new Set<symbol>()
+    inFlight.add(token)
+    this.promptsInFlight.set(chatId, inFlight)
+    let launched = (): void => undefined
+    if (steerId !== null) {
+      await this.turnLaunched.get(chatId)
+    } else {
+      this.turnLaunched.set(chatId, new Promise<void>((resolve) => (launched = resolve)))
+    }
+
+    let result: ACPPromptResult | null = null
+    let failure: string | null = null
+    let reachedAgent = false
+    let startedAt = Date.now()
+    try {
+      const acpId = await this.ensureLiveSession(session)
+      // What the user is looking at must be what the turn runs. A fresh
+      // attach already synced (and cleared) its queue; anything still pending
+      // here was queued while the agent was down or was rejected mid-session,
+      // so it is replayed before the prompt goes out rather than after.
+      if (acpId && Object.keys(session.pendingConfigChanges).length > 0) {
+        await this.syncDisplayedConfig(session, session.displayedConfigValues(), acpId)
+      }
+      const agent = this.agent
+      if (acpId && agent) {
+        startedAt = Date.now()
+        reachedAgent = true
+        const prompt = agent.prompt(acpId, blocks)
+        launched()
+        result = await prompt
+      }
+    } catch (err) {
+      failure = errMessage(err)
+    } finally {
+      launched()
+    }
+
+    inFlight.delete(token)
+    const current = this.promptsInFlight.get(chatId)
+    if (current === inFlight && inFlight.size === 0) this.promptsInFlight.delete(chatId)
+    // A teardown since this prompt went out may have made way for prompts of
+    // a new agent; while they run, this one has no business idling the chat.
+    const left = current !== undefined && current !== inFlight ? current.size : inFlight.size
+
+    const steerState = steerId !== null ? session.messageById(steerId)?.steering : undefined
+    const steered = steerState === 'queued' || steerState === 'delivered'
+    if (steerId !== null && !steered) session.setSteering(steerId, undefined)
+
+    if (!reachedAgent && failure === null) {
+      // Nothing was sent: ensureLiveSession has already said why in the chat.
+      this.turnOutcome.set(chatId, { stopReason: 'error', notice: null })
+    } else if (steerId !== null && !steered && left > 0) {
+      // Answered beside the turn it meant to steer, which is still running:
+      // a slash command the CLI handles at once (bridge.go Prompt answers
+      // those before it ever tries to steer), or a steer that failed. Ending
+      // the stream, filing a turn or withdrawing prompts here would all hit
+      // the running turn instead, so only a failure is worth a line.
+      if (failure !== null) session.appendNotice(humanSentence(failure), true, false, failure)
+    } else if (!(steered && result?.stopReason === 'end_turn')) {
+      this.finishTurn(session, result, failure, Date.now() - startedAt)
+    }
+
+    if (left > 0) {
+      this.persist()
+      return
+    }
+    // A steer the agent never got to read (the turn was interrupted first)
+    // is just a message now; leaving it "queued" would wait forever.
+    session.clearPendingSteering()
+    this.turnLaunched.delete(chatId)
+    const outcome = this.turnOutcome.get(chatId) ?? { stopReason: 'end_turn', notice: null }
+    this.turnOutcome.delete(chatId)
+    session.setBusy(false)
+    // Finished out of sight: mark it so the sidebar can say so. The selected
+    // chat is on screen, and the user has already seen it end.
+    if (this.selectedSessionId !== chatId) session.unread = true
+    this.persist()
+    const { stopReason, notice } = outcome
+    this.emit('chat-state', session.summary(), notice ? { stopReason, notice } : { stopReason })
+  }
+
+  /** The end of a real turn in the transcript: streaming stops, a stop
+   *  reason worth mentioning becomes a notice, and the turn's tokens are
+   *  filed. A failed turn's prompts go with it. */
+  private finishTurn(
+    session: ChatSession,
+    result: ACPPromptResult | null,
+    failure: string | null,
+    durationMs: number
+  ): void {
+    session.endStreaming()
+    const stopReason: TurnSummary['stopReason'] =
+      failure !== null ? 'error' : (result?.stopReason ?? 'end_turn')
+    if (stopReason === 'end_turn') session.markContextCleared()
+    // Mirrors whatever inline notice the local transcript gets, so a remote
+    // screen ends the turn in the same visible state.
+    // A failure is said in words (shared/humanize.ts), with the error as it
+    // arrived kept behind the notice's "Show details".
+    const notice: TurnNotice | null =
+      failure !== null ? { text: humanSentence(failure), isError: true } : stopNotice(stopReason)
+    if (notice) session.appendNotice(notice.text, notice.isError, failure !== null, failure ?? undefined)
+    if (failure !== null) {
+      // The turn is gone; whatever it was asking can't be answered usefully.
+      const acpId = session.acpSessionId
+      this.withdrawPrompts((p) => p.sessionId === acpId, true)
+    }
+    const usage = result?.usage
+    session.recordTurn({
+      stopReason,
+      inputTokens: usage?.inputTokens ?? 0,
+      outputTokens: usage?.outputTokens ?? 0,
+      cachedReadTokens: usage?.cachedReadTokens ?? 0,
+      totalTokens: usage?.totalTokens ?? result?.tokensUsed ?? 0,
+      durationMs
+    })
+    this.turnOutcome.set(session.id, { stopReason, notice })
+  }
+
+  /** Lazily attaches a live ACP session when a chat is opened or prompted,
    *  bringing the agent back up first if it died. */
   private ensureLiveSession(session: ChatSession, silent = false): Promise<string | null> {
     // The stored id only counts if it still routes to a live ACP session:
@@ -963,9 +1467,11 @@ export class AppModel extends EventEmitter {
     // new process until it has been resumed.
     const liveId = this.liveACPSessionId(session)
     if (liveId) return Promise.resolve(liveId)
-    // One attach at a time per chat: warming (below) and the first prompt can
-    // race, and two session/new calls would strand the first ACP session —
-    // its streamed updates would route to a chat that no longer claims it.
+    // One attach at a time per chat: warming (below) and the first prompt
+    // race, and the prompt must wait for the resume rather than start a
+    // session/new of its own — that would strand the conversation's context,
+    // and two session/new calls would strand the first ACP session, its
+    // streamed updates routed to a chat that no longer claims it.
     const inFlight = this.ensureInFlight.get(session.id)
     if (inFlight) return inFlight
     const attach = this.attachLiveSession(session, silent).finally(() => {
@@ -976,45 +1482,77 @@ export class AppModel extends EventEmitter {
   }
 
   /** Warms a chat the moment it is on screen: attaching the ACP session is
-   *  what produces the real config options, so the chips under the composer
-   *  show what the session will actually run instead of staying empty (or
-   *  showing only the last chat's cached set) until the first prompt. */
+   *  what produces the real config options and slash commands, so the chips
+   *  and the palette show what the session will actually run instead of the
+   *  last chat's cached set until the first prompt. */
   private warmSession(session: ChatSession): void {
     if (!this.agent) return
     if (this.liveACPSessionId(session)) return
     void this.ensureLiveSession(session, true)
   }
 
+  /** Resumes the chat's stored ACP session — the agent restores its memory
+   *  of the conversation without replaying it (session/load would duplicate
+   *  every message we already show) — or, for a chat that never had one or
+   *  whose session is gone, starts a new one. */
   private async attachLiveSession(session: ChatSession, silent: boolean): Promise<string | null> {
-    if (!this.agent) {
-      await this.connect(session.projectPath)
-      // Connecting resumes the persisted chats; if this one came back, keep
-      // its context instead of starting over.
-      const resumed = this.liveACPSessionId(session)
-      if (resumed) return resumed
-    }
+    if (!this.agent) await this.connect(session.projectPath)
     const agent = this.agent
     if (!agent) {
       if (!silent) {
-        session.appendNotice("The agent isn't running yet — try again in a moment.", true)
+        session.appendNotice("Spettro's engine isn't running yet. Try again in a moment.", true, true)
       }
       return null
     }
+    const storedId = session.acpSessionId
+    if (storedId) {
+      try {
+        const result = await agent.resumeSession(storedId, session.projectPath)
+        // The agent this resumed on was replaced meanwhile: the id routes to
+        // nothing live.
+        if (agent !== this.agent) return null
+        // What the chat shows now, not when the resume was asked for. Only
+        // its mode is pushed back (syncDisplayedConfig); a default changed
+        // while the resume was in flight is queued and goes too.
+        const displayed = session.displayedConfigValues()
+        // Register only after a successful resume: updates emitted before
+        // this point belong to no session the UI should show.
+        this.sessionsByACPID.set(storedId, session)
+        if (result.configOptions.length > 0) session.setConfigOptions(result.configOptions)
+        await this.syncDisplayedConfig(session, displayed, storedId)
+        return storedId
+      } catch {
+        if (agent !== this.agent) return null
+        // A chat that only ever ran the CLI's own slash commands (/help…)
+        // has no session the CLI saved, and no context to lose either.
+        if (session.hasModelTurns()) {
+          session.appendNotice("Couldn't restore this chat's earlier context — starting fresh.", false)
+        }
+      }
+    }
     try {
-      const displayed = session.displayedConfigValues()
       const result = await agent.newSession(session.projectPath)
+      if (agent !== this.agent) return null
+      const displayed = session.displayedConfigValues()
       session.setAcpSessionId(result.sessionId)
       session.setConfigOptions(result.configOptions)
       this.sessionsByACPID.set(result.sessionId, session)
+      this.prefs.rememberSession(result.sessionId)
       // Push the config the user was shown before prompting, so the first
       // message already runs with the displayed settings.
       await this.syncDisplayedConfig(session, displayed, result.sessionId)
       return result.sessionId
     } catch (err) {
+      if (storedId) session.setAcpSessionId(null)
       // A background warm must not spray notices into an empty chat; the
       // prompt path reports the same failure when the user actually sends.
       if (!silent) {
-        session.appendNotice(`Couldn't start a session: ${errMessage(err)}`, true)
+        session.appendNotice(
+          `Couldn't start this session. ${humanSentence(err)}`,
+          true,
+          true,
+          errMessage(err)
+        )
       }
       return null
     }
@@ -1028,11 +1566,97 @@ export class AppModel extends EventEmitter {
   }
 
   /** Fire-and-forget session/cancel; the in-flight prompt resolves with
-   *  'cancelled' and unwinds through the normal turn cleanup. */
+   *  'cancelled' and unwinds through the normal turn cleanup. Anything the
+   *  turn was waiting on the user for goes with it, answered "cancelled". */
   cancel(chatId: string): void {
     const session = this.sessionById(chatId)
-    if (!session || !this.agent || !session.acpSessionId) return
-    this.agent.cancel(session.acpSessionId)
+    if (!session || !session.acpSessionId) return
+    const acpId = session.acpSessionId
+    if (this.agent && this.liveACPSessionId(session)) this.agent.cancel(acpId)
+    this.withdrawPrompts((p) => p.sessionId === acpId, true)
+  }
+
+  /** Lets go of a chat's live ACP session before the chat itself goes: a
+   *  running turn is cancelled, then the session is closed on the agent,
+   *  which also stops any workflow paused in it. */
+  private releaseSession(session: ChatSession): void {
+    // The CLI keeps the conversation on disk (it can't delete one), so it
+    // must not come back as a session "started in a terminal".
+    if (session.acpSessionId) this.prefs.rememberSession(session.acpSessionId)
+    const acpId = this.liveACPSessionId(session)
+    if (session.isBusy) this.cancel(session.id)
+    const agent = this.agent
+    if (!acpId || !agent) return
+    agent.closeSession(acpId).catch((err) => {
+      this.agentLog.push(`session/close failed: ${errMessage(err)}`)
+    })
+  }
+
+  // -------------------------------------------------------------------------
+  // Sessions the CLI has that no chat is linked to
+  // -------------------------------------------------------------------------
+
+  /** Conversations the CLI keeps for `projectPath` that no chat here is
+   *  linked to — started in the terminal, say — newest first. Sessions this
+   *  app started are never among them, even once their chat (or a Workflow
+   *  Studio run's scratch chat) is deleted. Empty when the agent isn't
+   *  running or can't list. */
+  async listCLISessions(projectPath: string): Promise<CLISessionEntry[]> {
+    const agent = this.agent
+    if (!agent || !agent.capabilities.listSessions) return []
+    const linked = new Set(this.sessions.map((s) => s.acpSessionId).filter((id) => id !== null))
+    const entries = await agent.listSessions(projectPath)
+    return entries
+      .filter((e) => !linked.has(e.sessionId) && !this.prefs.isKnownSession(e.sessionId))
+      .map(({ sessionId, title, updatedAt }) => ({ sessionId, title, updatedAt }))
+  }
+
+  /** Opens one of those as a chat: `session/load` replays its conversation,
+   *  which streams in as ordinary updates — user messages included, the one
+   *  time the agent sends those. Resolves to the new chat's id (or the
+   *  existing one's, when it is already linked), or null when the agent can't
+   *  load sessions; rejects with the agent's reason when the load fails. */
+  async importCLISession(sessionId: string, projectPath: string): Promise<string | null> {
+    const existing = this.sessions.find((s) => s.acpSessionId === sessionId && !s.isScratch)
+    if (existing) {
+      this.openChat(existing.id)
+      return existing.id
+    }
+    if (!this.agent) await this.connect(projectPath)
+    const agent = this.agent
+    if (!agent || !agent.capabilities.loadSession) return null
+
+    const session = new ChatSession(projectPath)
+    session.configOptions = this.prefs.lastConfigOptions
+    session.commands = this.prefs.cachedCommands(projectPath)
+    session.acpSessionId = sessionId
+    this.attachSessionCallbacks(session)
+    // Routed before the call: the replay arrives before session/load answers.
+    this.sessionsByACPID.set(sessionId, session)
+    session.isReplaying = true
+    this.prefs.rememberSession(sessionId)
+    let configOptions: ACPConfigOption[]
+    try {
+      configOptions = (await agent.loadSession(sessionId, projectPath)).configOptions
+    } catch (err) {
+      if (this.sessionsByACPID.get(sessionId) === session) this.sessionsByACPID.delete(sessionId)
+      throw err
+    } finally {
+      session.isReplaying = false
+      session.endStreaming()
+    }
+    if (agent !== this.agent) return null
+    if (configOptions.length > 0) session.setConfigOptions(configOptions)
+    // A loaded session comes back in the CLI's default mode (Plan); steer it
+    // like any fresh session.
+    await this.syncDisplayedConfig(session, {}, sessionId)
+    session.isEmpty = false
+    this.sessions.unshift(session)
+    this.selectedSessionId = session.id
+    this.pushEvent({ type: 'chat-reset', chat: session.detail() })
+    this.persist()
+    this.emit('chat-state', session.summary())
+    return session.id
   }
 
   // -------------------------------------------------------------------------
@@ -1040,10 +1664,11 @@ export class AppModel extends EventEmitter {
   //
   // Scoped by chat rather than globally: a workflow lives in the repo it
   // automates, so "which workflows exist" is a question about a project, and
-  // the chat is what knows which project. Each call resolves the chat's live
-  // ACP session and lets the CLI derive the folder from it — the app never
-  // sends a path, so a script cannot land in the wrong repo because the two
-  // sides disagreed about the working directory.
+  // the chat is what knows which project. A live chat names its ACP session
+  // and lets the CLI derive the folder from it, so a script cannot land in
+  // the wrong repo because the two sides disagreed about the working
+  // directory. A cold chat names its own folder (the CLI takes an absolute
+  // `cwd` just as well) rather than showing the studio an empty project.
   //
   // Unlike the account calls these return their result instead of folding it
   // into app-state. The studio is one screen reading files it is about to
@@ -1051,27 +1676,26 @@ export class AppModel extends EventEmitter {
   // TUI, or the agent itself, wrote one.
   // -------------------------------------------------------------------------
 
-  /** The chat's live ACP session, or null when the chat is cold. */
-  private workflowSession(chatId: string): string | null {
+  /** Where a chat's workflows live: its live ACP session, else its folder. */
+  private workflowTarget(chatId: string): WorkflowTarget | null {
     const session = this.sessionById(chatId)
     if (!session) return null
-    return this.liveACPSessionId(session)
+    const acpId = this.liveACPSessionId(session)
+    return acpId ? { sessionId: acpId } : { cwd: session.projectPath }
   }
 
   async listWorkflows(chatId: string): Promise<WorkflowList> {
     const client = this.extensions.client
-    const acpId = this.workflowSession(chatId)
-    // A cold chat has no session to scope by. An empty list is the honest
-    // answer — the alternative is guessing at a project.
-    if (!client || !acpId) return EMPTY_WORKFLOW_LIST
-    return client.listWorkflows(acpId)
+    const target = this.workflowTarget(chatId)
+    if (!client || !target) return EMPTY_WORKFLOW_LIST
+    return client.listWorkflows(target)
   }
 
   async readWorkflow(chatId: string, name: string): Promise<WorkflowSource | null> {
     const client = this.extensions.client
-    const acpId = this.workflowSession(chatId)
-    if (!client || !acpId) return null
-    return client.readWorkflow(acpId, name)
+    const target = this.workflowTarget(chatId)
+    if (!client || !target) return null
+    return client.readWorkflow(target, name)
   }
 
   async writeWorkflow(
@@ -1081,23 +1705,23 @@ export class AppModel extends EventEmitter {
     script: string
   ): Promise<WorkflowInfo | null> {
     const client = this.extensions.client
-    const acpId = this.workflowSession(chatId)
-    if (!client || !acpId) return null
-    return client.writeWorkflow(acpId, name, scope, script)
+    const target = this.workflowTarget(chatId)
+    if (!client || !target) return null
+    return client.writeWorkflow(target, name, scope, script)
   }
 
   async deleteWorkflow(chatId: string, name: string, scope: WorkflowScope): Promise<boolean> {
     const client = this.extensions.client
-    const acpId = this.workflowSession(chatId)
-    if (!client || !acpId) return false
-    return client.deleteWorkflow(acpId, name, scope)
+    const target = this.workflowTarget(chatId)
+    if (!client || !target) return false
+    return client.deleteWorkflow(target, name, scope)
   }
 
   async validateWorkflow(chatId: string, script: string): Promise<WorkflowValidation | null> {
     const client = this.extensions.client
-    const acpId = this.workflowSession(chatId)
-    if (!client || !acpId) return null
-    return client.validateWorkflow(acpId, script)
+    const target = this.workflowTarget(chatId)
+    if (!client || !target) return null
+    return client.validateWorkflow(target, script)
   }
 
   /**
@@ -1136,23 +1760,27 @@ export class AppModel extends EventEmitter {
   }
 
   /** Drops a scratch chat once the studio is done with it. Anything still
-   *  running is cancelled first, so closing the editor cannot leave a fan-out
-   *  burning tokens against a session nobody is watching. */
+   *  running is cancelled and the session closed first, so closing the
+   *  editor cannot leave a fan-out burning tokens against a session nobody
+   *  is watching. */
   discardScratchChat(chatId: string): void {
     const session = this.sessionById(chatId)
     if (!session || !session.isScratch) return
-    if (session.isBusy) this.cancel(chatId)
+    this.releaseSession(session)
     this.sessions = this.sessions.filter((s) => s.id !== chatId)
     const acpId = session.acpSessionId
     if (acpId) this.sessionsByACPID.delete(acpId)
     this.pushEvent({ type: 'chat-removed', chatId })
   }
 
+  /** The project's recent workflow runs, newest first, each with the name
+   *  and outcome its folder records (the CLI lists only the folders). */
   async listWorkflowRuns(chatId: string): Promise<WorkflowRunInfo[]> {
     const client = this.extensions.client
-    const acpId = this.workflowSession(chatId)
-    if (!client || !acpId) return []
-    return client.listWorkflowRuns(acpId)
+    const target = this.workflowTarget(chatId)
+    if (!client || !target) return []
+    const runs = await client.listWorkflowRuns(target, RECENT_WORKFLOW_RUNS)
+    return Promise.all(runs.map(describeWorkflowRun))
   }
 
   // -------------------------------------------------------------------------
@@ -1160,11 +1788,14 @@ export class AppModel extends EventEmitter {
   // -------------------------------------------------------------------------
 
   async setConfigValue(chatId: string, configId: string, value: ConfigValue): Promise<void> {
+    // No chat yet: the new-session composer, whose chips show the seed.
+    if (chatId === '') return this.setDraftOption(configId, value)
     const session = this.sessionById(chatId)
     if (!session) return
     // What the agent last told us this option was — the value to fall back to
     // if it turns out the agent won't take the new one.
-    const previous = session.displayedConfigValues()[configId]
+    const before = session.displayedConfigValues()
+    const previous = before[configId]
     // Reflect the choice in the UI immediately; the agent is synced below,
     // or when a live session attaches if there isn't one yet.
     session.applyLocalConfigValue(configId, value)
@@ -1181,16 +1812,24 @@ export class AppModel extends EventEmitter {
       const options = await agent.setConfigOption(acpId, configId, value)
       session.setConfigOptions(options)
       this.rememberConfig(options)
+      // The CLI tells its other live sessions; the cold chats hear it here.
+      const changed = this.changedSharedConfig(before, session.displayedConfigValues())
+      if (isSharedConfig(configId)) changed.add(configId)
+      this.spreadSharedConfig(session, changed)
       this.persist()
     } catch (err) {
-      session.appendNotice(`Couldn't change ${configId}: ${errMessage(err)}`, true)
+      // Named as the user knows it ("Model"), not by its wire id.
+      const label = session.configOptions.find((o) => o.id === configId)?.name ?? configId
+      session.appendNotice(`Couldn't change ${label}. ${humanSentence(err)}`, true, false, errMessage(err))
       // Two very different failures arrive here, and they want opposite
       // treatment.
       //
       // A *refusal* — the agent answered, and the answer was no (a JSON-RPC
-      // error; kind 'rpc'). Ultra under the "Ask first" permission level is
-      // the canonical case: the CLI will reject it every single time until
-      // Permission changes. Retrying that before the next turn achieves
+      // error; kind 'rpc'). A value the CLI does not offer (a model a provider
+      // has since dropped, say) is the canonical case: it will be rejected
+      // every single time. (Ultra under "Ask first" is not one: the CLI saves
+      // it and only suspends it, saying so in the option's description.)
+      // Retrying that before the next turn achieves
       // nothing except another notice, forever, and leaving the optimistic
       // value on screen is a lie about what the agent is running with — so we
       // roll the chip back to the value the agent actually reports and drop
@@ -1205,11 +1844,77 @@ export class AppModel extends EventEmitter {
       if (refused) {
         if (previous !== undefined) session.applyLocalConfigValue(configId, previous)
         delete session.pendingConfigChanges[configId]
+        // Settings may already have shown the refused value in every chat.
+        if (isSharedConfig(configId)) this.spreadSharedConfig(session)
       } else {
         session.pendingConfigChanges[configId] = value
       }
       this.persist()
     }
+  }
+
+  /** Settings' defaults (the permission level). The CLI keeps these for
+   *  every session, so changing one through a live session changes it
+   *  everywhere — the selected chat's if it is live, else any live one. The
+   *  seed new chats start with is updated either way; with nothing live the
+   *  change waits in prefs.pendingDefaults for the next chat to attach. */
+  async setDefaultOption(configId: string, value: ConfigValue): Promise<void> {
+    this.setSeedValue(configId, value)
+
+    const selected = this.selectedSessionId ? this.sessionById(this.selectedSessionId) : null
+    const target =
+      (selected && this.liveACPSessionId(selected) ? selected : null) ??
+      this.sessions.find((s) => !s.isScratch && this.liveACPSessionId(s) !== null) ??
+      null
+    // Every other chat shows the new value too, and any change one of them
+    // had queued for this setting is superseded.
+    for (const session of this.sessions) {
+      if (session === target || session.isScratch) continue
+      if (!session.configOptions.some((o) => o.id === configId)) continue
+      session.applyLocalConfigValue(configId, value)
+      delete session.pendingConfigChanges[configId]
+    }
+    if (target) {
+      await this.setConfigValue(target.id, configId, value)
+    } else {
+      if (isSharedConfig(configId)) {
+        this.prefs.pendingDefaults = { ...this.prefs.pendingDefaults, [configId]: value }
+      }
+      this.persist()
+    }
+  }
+
+  /** A choice made in the new-session composer, before its chat exists. It
+   *  changes the seed that chat starts from (prefs.lastConfigOptions), and
+   *  the chat pushes what it shows onto its session when it attaches — so the
+   *  first message runs with what the user saw. The mode is the session's
+   *  own; the rest the CLI shares across sessions, so those go through as a
+   *  default, like Settings' permission. */
+  private async setDraftOption(configId: string, value: ConfigValue): Promise<void> {
+    if (configId === 'mode') {
+      this.setSeedValue(configId, value)
+      this.emitAppState()
+      return
+    }
+    // Applying a default through a live chat makes that chat's options the
+    // seed (rememberConfig), its own mode included; the draft keeps its own.
+    const mode = this.prefs.lastConfigOptions.find((o) => o.id === 'mode')
+    await this.setDefaultOption(configId, value)
+    if (mode?.kind.type === 'select' && mode.kind.currentValue !== null) {
+      this.setSeedValue('mode', mode.kind.currentValue)
+    }
+    this.emitAppState()
+  }
+
+  /** Sets one value in the seed new chats start from; unknown ids are left
+   *  alone (the seed only ever holds options a session reported). */
+  private setSeedValue(configId: string, value: ConfigValue): void {
+    const seed = this.prefs.lastConfigOptions
+    const option = seed.find((o) => o.id === configId)
+    if (option?.kind.type === 'select' && typeof value === 'string') option.kind.currentValue = value
+    else if (option?.kind.type === 'boolean' && typeof value === 'boolean') option.kind.currentValue = value
+    else return
+    this.prefs.lastConfigOptions = seed
   }
 
   // -------------------------------------------------------------------------
@@ -1221,6 +1926,10 @@ export class AppModel extends EventEmitter {
     if (index < 0) return
     const entry = this.pendingPermissions[index]
     this.agent?.replyPermission(entry.rpcId, optionId)
+    const kind = entry.request.options.find((o) => o.optionId === optionId)?.kind ?? ''
+    if (kind.startsWith('reject') && entry.request.chatId && entry.request.toolCallId) {
+      this.sessionById(entry.request.chatId)?.markDenied(entry.request.toolCallId)
+    }
     this.pendingPermissions.splice(index, 1)
     this.emitPermissions()
     this.emit('permission-resolved', requestId, resolvedBy)
@@ -1254,6 +1963,99 @@ export class AppModel extends EventEmitter {
     this.emit('question-resolved', requestId, resolvedBy)
   }
 
+  /**
+   * Fills in what an incoming permission request leaves to the app, and
+   * marks its card. Returns the card's status before the request turned it
+   * "pending" (null when the request made the card).
+   *
+   * spettro attaches a request to the card it is already drawing and then
+   * sends only the card's id, the pending status and the content — no title,
+   * no kind (permission.go requestApproval) — so the chat, the title and the
+   * kind come from that card here. A request with nothing open to attach to
+   * names a fresh `perm-N` card and describes it in full; that card is put in
+   * the transcript now, as the spec says to treat the request's toolCall, so
+   * the settle update that follows the answer lands on a titled card instead
+   * of creating an untitled one. The compaction prompt approves no tool and
+   * gets no settle update, so it gets no card.
+   */
+  private adoptPermission(request: ACPPermissionRequest): ACPToolStatus | null {
+    const session = this.sessionsByACPID.get(request.sessionId) ?? null
+    request.chatId = session?.id ?? null
+    const toolCallId = request.toolCallId
+    const card = session && toolCallId ? session.toolById(toolCallId) : null
+    if (request.toolKind === undefined && card?.kind !== undefined) request.toolKind = card.kind
+    if (request.title === '') request.title = card?.title || permissionSentence(request)
+    if (!session || !toolCallId || request.variant === 'compact') return null
+    if (card) {
+      // From here on the request names the card by the id it is filed
+      // under, which differs from the wire id once an earlier turn used it
+      // (ChatSession.turnStart) — the renderer marks the card by it.
+      request.toolCallId = card.id
+      return session.setToolStatus(card.id, 'pending')
+    }
+    const event: ACPToolCallEvent = {
+      toolCallId,
+      title: request.title,
+      status: 'pending',
+      texts: [],
+      diffs: [],
+      images: [],
+      locations: request.locations
+    }
+    if (request.toolKind !== undefined) event.kind = request.toolKind
+    if (request.rawInput !== undefined) event.rawInput = request.rawInput
+    session.applyToolEvent(event, true)
+    request.toolCallId = session.toolById(toolCallId)?.id ?? toolCallId
+    return null
+  }
+
+  /**
+   * Takes every queued permission and question that `match`es off screen —
+   * because the agent withdrew it, its turn was cancelled or failed, or the
+   * agent itself is gone — and tells paired phones it is resolved. With
+   * `answer`, each is also answered "cancelled", so a CLI still waiting on
+   * it stops waiting. A card a permission marked "pending" goes back to what
+   * it was, or to failed when the request made it: the CLI counts an
+   * unanswered request as a denial.
+   */
+  private withdrawPrompts(
+    match: (prompt: { rpcId: RPCID; sessionId: string | undefined }) => boolean,
+    answer: boolean
+  ): void {
+    const agent = answer ? this.agent : null
+    const permissions = this.pendingPermissions.filter((p) =>
+      match({ rpcId: p.rpcId, sessionId: p.request.sessionId })
+    )
+    const questions = this.pendingQuestions.filter((q) =>
+      match({ rpcId: q.rpcId, sessionId: q.request.sessionId })
+    )
+    if (permissions.length > 0) {
+      this.pendingPermissions = this.pendingPermissions.filter((p) => !permissions.includes(p))
+      for (const entry of permissions) {
+        agent?.cancelPermission(entry.rpcId)
+        this.releasePromptCard(entry)
+      }
+      this.emitPermissions()
+      for (const entry of permissions) this.emit('permission-resolved', entry.request.id, null)
+    }
+    if (questions.length > 0) {
+      this.pendingQuestions = this.pendingQuestions.filter((q) => !questions.includes(q))
+      for (const entry of questions) agent?.cancelQuestion(entry)
+      this.emitQuestions()
+      for (const entry of questions) this.emit('question-resolved', entry.request.id, null)
+    }
+  }
+
+  /** Undoes the "pending" a withdrawn permission put on its card, unless an
+   *  update has moved the card on since. */
+  private releasePromptCard(entry: PendingPermission): void {
+    const { chatId, toolCallId } = entry.request
+    const session = chatId ? this.sessionById(chatId) : null
+    if (!session || !toolCallId) return
+    if (session.toolById(toolCallId)?.status !== 'pending') return
+    session.setToolStatus(toolCallId, entry.priorToolStatus ?? 'failed')
+  }
+
   // -------------------------------------------------------------------------
   // Provider gate (needsProvider)
   // -------------------------------------------------------------------------
@@ -1266,7 +2068,7 @@ export class AppModel extends EventEmitter {
    *  "we don't know", and an unknown answer must never cost someone access to
    *  the rest of the app. */
   private get isProviderSetupNeeded(): boolean {
-    if (this.providerSetupSkipped) return false
+    if (this.prefs.providerSetupSkipped) return false
     if (!this.extensions.needsProviderSetup) return false
     // Being signed in is itself proof there's a way to run a model, even when
     // the plan details haven't loaded yet.
@@ -1300,7 +2102,7 @@ export class AppModel extends EventEmitter {
     if (this.phase.kind === 'needsProvider') {
       this.setPhase({ kind: 'ready' })
       this.emitHostState()
-      await this.resumePersistedSessions()
+      this.warmSelected()
     }
   }
 
@@ -1309,7 +2111,9 @@ export class AppModel extends EventEmitter {
    *  make — being unable to reach settings, sessions, or the sidebar is not a
    *  reasonable price for an unfinished setup step. */
   skipProviderSetup(): void {
-    this.providerSetupSkipped = true
+    // Remembered: the setup screen doesn't come back on the next launch. The
+    // composer's "Connect a model" bar keeps the way back in view.
+    this.prefs.providerSetupSkipped = true
     if (this.phase.kind === 'needsProvider') {
       this.setPhase({ kind: 'ready' })
       this.emitHostState()
@@ -1402,11 +2206,19 @@ export class AppModel extends EventEmitter {
     if (!session) return
     // Relay before applying: a remote screen rendering the same stream should
     // not wait on the local view work, and the payload is identical either
-    // way. Re-keyed by the app's own chat id.
-    this.emit('chat-update-raw', session.id, raw)
+    // way. Re-keyed by the app's own chat id. A load replay isn't relayed:
+    // the chat it fills isn't anyone's yet, and phones get it whole once the
+    // import finishes.
+    if (!session.isReplaying) this.emit('chat-update-raw', session.id, raw)
     switch (update.kind) {
       case 'agent_message_chunk':
+        if (session.isReplaying && this.replayedTurnNote(session, update.text)) break
         session.appendAssistant(update.text)
+        break
+      case 'user_message_chunk':
+        // Only ever legitimate inside session/load; anywhere else it would be
+        // the agent putting words in the user's mouth.
+        if (session.isReplaying) session.appendReplayedUserMessage(update.text)
         break
       case 'agent_thought_chunk':
         session.appendReasoning(update.text)
@@ -1419,14 +2231,25 @@ export class AppModel extends EventEmitter {
         break
       case 'available_commands_update':
         session.setCommands(update.commands)
-        this.prefs.cachedCommands = update.commands
+        this.prefs.setCachedCommands(session.projectPath, update.commands)
         break
       case 'config_option_update':
         if (update.options.length > 0) {
+          const before = session.displayedConfigValues()
           session.setConfigOptions(update.options)
           this.rememberConfig(update.options)
+          // A change made in another session or by a slash command
+          // (/permission, /thinking, /ultra): the cold chats show it too.
+          this.spreadSharedConfig(session, this.changedSharedConfig(before, session.displayedConfigValues()))
           this.persist()
         }
+        break
+      case 'current_mode_update':
+        // Spettro reports its mode as the "mode" config option; an agent that
+        // also speaks ACP's session modes moves the same chip.
+        delete session.pendingConfigChanges['mode']
+        session.applyLocalConfigValue('mode', update.modeId)
+        this.persist()
         break
       case 'plan':
         session.setPlan(update.entries)
@@ -1439,6 +2262,20 @@ export class AppModel extends EventEmitter {
     }
   }
 
+  /** A turn that ended without an answer is stored by the CLI as the
+   *  assistant line "[turn failed: <reason>]" or "[turn interrupted]"
+   *  (bridge.go Prompt), and session/load replays it as text. Shown as the
+   *  notice the turn got when it ran here; true when `text` was one. */
+  private replayedTurnNote(session: ChatSession, text: string): boolean {
+    const note = /^\[turn (?:failed: ([\s\S]+)|interrupted)\]$/.exec(text.trim())
+    if (!note) return false
+    session.endStreaming()
+    const reason = note[1]
+    if (reason !== undefined) session.appendNotice(humanSentence(reason), true, false, reason)
+    else session.appendNotice('Interrupted', false)
+    return true
+  }
+
   // -------------------------------------------------------------------------
   // Shutdown
   // -------------------------------------------------------------------------
@@ -1449,13 +2286,18 @@ export class AppModel extends EventEmitter {
     if (this.shuttingDown) return
     this.shuttingDown = true
     this.emitHostState(true)
+    this.installer.cancel()
     this.teardownAgent()
     this.extensions.dispose()
     this.subscriptionStore.stop()
     this.updates.shutdown()
-    this.store.save(
-      this.sessions.filter((s) => !s.isPristine && !s.isScratch).map((s) => s.snapshot())
-    )
+    if (this.persistTimer) {
+      clearTimeout(this.persistTimer)
+      this.persistTimer = null
+    }
+    this.persistDirty = false
+    this.store.savePartsSync(this.storedSessions().map((s) => s.persistParts()))
+    this.prefs.flush()
   }
 }
 
@@ -1469,4 +2311,72 @@ function isDirectory(path: string): boolean {
 
 function errMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
+}
+
+/** An inline notice the transcript gets at a turn's end, mirrored to phones. */
+interface TurnNotice {
+  text: string
+  isError: boolean
+}
+
+/** The muted line a turn's stop reason earns, if any. end_turn (and a reason
+ *  this build doesn't know) end silently. */
+function stopNotice(reason: TurnSummary['stopReason']): TurnNotice | null {
+  switch (reason) {
+    case 'max_tokens':
+      return { text: 'The reply hit the length limit.', isError: false }
+    case 'refusal':
+      return { text: 'The model declined this request.', isError: false }
+    case 'max_turn_requests':
+      return { text: 'The turn reached its step limit.', isError: false }
+    case 'cancelled':
+      return { text: 'Interrupted', isError: false }
+    default:
+      return null
+  }
+}
+
+/** A title for a permission request that came with none and whose card we
+ *  don't have — written from the tool kind, naming the file when there is
+ *  one. */
+function permissionSentence(request: ACPPermissionRequest): string {
+  const path = request.content.diffs[0]?.path ?? request.locations[0]?.path
+  const file = path ? basename(path) : null
+  switch (request.variant ?? request.toolKind) {
+    case 'compact':
+      return 'Compact the conversation'
+    case 'execute':
+      return 'Run a command'
+    case 'edit':
+      return file ? `Edit ${file}` : 'Edit a file'
+    case 'delete':
+      return file ? `Delete ${file}` : 'Delete a file'
+    case 'move':
+      return file ? `Move ${file}` : 'Move a file'
+    case 'read':
+      return file ? `Read ${file}` : 'Read a file'
+    case 'search':
+      return 'Search the project'
+    case 'fetch':
+      return 'Open a web page'
+    default:
+      return 'Allow this action'
+  }
+}
+
+/** What setup shows for an install that ended without a CLI. A cancelled
+ *  one is no failure: setup just goes back to its first screen. */
+function installFailureState(failure: InstallFailure): InstallState {
+  switch (failure.kind) {
+    case 'cancelled':
+      return { stage: 'idle', failure: null }
+    case 'missing-tool':
+      return { stage: 'failed', failure: { kind: 'missing-tool', tool: failure.tool } }
+    case 'timeout':
+      return { stage: 'failed', failure: { kind: 'timeout' } }
+    case 'launch':
+      return { stage: 'failed', failure: { kind: 'launch' } }
+    case 'failed':
+      return { stage: 'failed', failure: { kind: 'failed' } }
+  }
 }

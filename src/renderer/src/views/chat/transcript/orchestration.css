@@ -69,6 +69,18 @@
   color: var(--diff-removed);
 }
 
+/* Waiting at a checkpoint: amber, the colour of "needs an answer", and still
+   — anything that moved here would say the run is working. */
+.orch-glyph--paused {
+  color: var(--warning);
+}
+
+/* Ended on purpose and not yet started: both neutral, neither a result. */
+.orch-glyph--stopped,
+.orch-glyph--pending {
+  color: var(--text-tertiary);
+}
+
 /* ------------------------------------------------------------------------- */
 /* Counts label                                                               */
 /* ------------------------------------------------------------------------- */
@@ -119,7 +131,7 @@
 
 .orch-pill--replayed {
   background: color-mix(in srgb, var(--accent) 16%, transparent);
-  color: color-mix(in srgb, var(--accent) 80%, var(--text-primary));
+  color: var(--accent-text);
 }
 
 /* ------------------------------------------------------------------------- */
@@ -167,8 +179,7 @@
 }
 
 .orch-member-detail {
-  font-family: 'SF Mono', SFMono-Regular, ui-monospace, 'Cascadia Mono', 'Segoe UI Mono',
-    'JetBrains Mono', Menlo, Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 11.5px;
   color: var(--tr-tertiary);
   flex: 1 1 auto;
@@ -214,7 +225,19 @@
   min-width: 0;
   margin-bottom: var(--sp-sm);
   border-left: 1px solid var(--hairline);
-  padding-left: var(--sp-xs);
+  padding-left: var(--sp-md);
+}
+
+/* Tool rows inside a member sit in a dense card whose own lines are 12px:
+   a step down from the transcript's rows keeps them reading as the
+   member's detail rather than shouting over it. */
+.orch-nested .tr-tool-header {
+  min-height: 24px;
+  font-size: var(--fs-md);
+}
+
+.orch-nested .tr-tool-arg {
+  font-size: var(--fs-sm);
 }
 
 .orch-nested:last-child {
@@ -235,8 +258,7 @@
   border-radius: var(--rad-sm);
   background: color-mix(in srgb, var(--text-secondary) 8%, transparent);
   border: 1px solid var(--hairline);
-  font-family: 'SF Mono', SFMono-Regular, ui-monospace, 'Cascadia Mono', 'Segoe UI Mono',
-    'JetBrains Mono', Menlo, Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 11px;
   line-height: 1.55;
   color: var(--text-secondary);
@@ -286,7 +308,7 @@
 .orch-script-icon {
   display: inline-flex;
   flex: none;
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .orch-script-title {

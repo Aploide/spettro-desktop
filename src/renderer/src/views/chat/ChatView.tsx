@@ -21,6 +21,7 @@ import { isBroadFolder } from '@renderer/views/shell/util'
 import { TranscriptRowView } from './transcript/TranscriptItemView'
 import { activeRuns, groupTranscript, type WorkflowRun } from './transcript/orchestration'
 import { groupToolRuns } from './transcript/toolGroups'
+import { useTailFirst } from './transcript/tailFirst'
 import {
   TranscriptActionsProvider,
   transcriptAnchors,
@@ -79,6 +80,9 @@ function ChatView({ chatId }: { chatId: string }): JSX.Element {
   const items = chat?.items
   const rows = useMemo(() => (items ? groupTranscript(items) : []), [items])
   const displayRows = useMemo(() => groupToolRuns(rows), [rows])
+  // A long chat opens on its last rows; the rest follow a frame later.
+  const heldAbove = useTailFirst(displayRows.length)
+  const drawnRows = heldAbove > 0 ? displayRows.slice(heldAbove) : displayRows
   const live = useMemo(() => activeRuns(rows), [rows])
   const runsById = useMemo(() => {
     const out = new Map<string, WorkflowRun>()
@@ -276,7 +280,7 @@ function ChatView({ chatId }: { chatId: string }): JSX.Element {
                 />
               )}
               <TranscriptActionsProvider value={actions}>
-                {displayRows.map((row) => (
+                {drawnRows.map((row) => (
                   <TranscriptRowView row={row} key={row.id} />
                 ))}
               </TranscriptActionsProvider>

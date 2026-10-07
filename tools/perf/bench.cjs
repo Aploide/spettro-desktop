@@ -869,11 +869,16 @@ S.switch = async (app, d) => {
         await d.ev(`document.querySelector('[data-testid="sidebar-row-${id}"]')?.scrollIntoView({ block: 'center' })`)
         await L.sleep(120)
         const settle = d.settle(300, 15000)
+        // The frame that first holds the new chat's transcript (the chat view
+        // is keyed by chat, so a new one is a new element): what the reader
+        // sees, even if rows above the fold are still being added after it.
+        await d.ev(`(() => { const old = document.querySelector('.chat-view'); const t0 = performance.now(); window.__perfShown = null; const check = (t) => { const v = document.querySelector('.chat-view'); if (v && v !== old && v.querySelector('.chat-transcript-inner > *')) { window.__perfShown = t; return } if (performance.now() - t0 < 10000) requestAnimationFrame(check) }; requestAnimationFrame(check); return 1 })()`)
         const before = await d.ev('performance.now()')
         await d.click(`[data-testid="sidebar-row-${id}"] .chat-row-open`)
         const s = await settle
+        const shown = await d.ev('window.__perfShown')
         const items = app.profile.sessions.find((x) => x.id === id).items
-        switches.push({ id, items, toFirstFrameMs: L.round((s.firstFrame ?? s.frame) - before, 1), toSettledFrameMs: L.round(s.settled - before, 1), mutations: s.mutations, timedOut: s.timedOut })
+        switches.push({ id, items, toFirstFrameMs: L.round((s.firstFrame ?? s.frame) - before, 1), toChatShownMs: shown === null ? null : L.round(shown - before, 1), toSettledFrameMs: L.round(s.settled - before, 1), mutations: s.mutations, timedOut: s.timedOut })
         await L.sleep(300)
       }
       return {}
@@ -885,6 +890,7 @@ S.switch = async (app, d) => {
   r.toFirstFrameMs = L.dist(switches.map((s) => s.toFirstFrameMs))
   r.toLongChatMs = L.dist(switches.filter((s) => s.id === long).map((s) => s.toSettledFrameMs))
   r.toShortChatMs = L.dist(switches.filter((s) => s.id !== long).map((s) => s.toSettledFrameMs))
+  r.toLongChatShownMs = L.dist(switches.filter((s) => s.id === long && s.toChatShownMs !== null).map((s) => s.toChatShownMs))
   return [r]
 }
 

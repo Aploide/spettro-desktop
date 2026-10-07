@@ -71,6 +71,7 @@ const HEADLINES = [
   ['Switching chats (10 switches)', 'switch-chats', 'click → settled frame p50 / p95 / max', ['toSettledFrameMs.p50', 'toSettledFrameMs.p95', 'toSettledFrameMs.max'], 'ms'],
   ['', 'switch-chats', 'click → first changed frame p50 / max', ['toFirstFrameMs.p50', 'toFirstFrameMs.max'], 'ms'],
   ['', 'switch-chats', 'to the 800-item chat / to a short chat (p50)', ['toLongChatMs.p50', 'toShortChatMs.p50'], 'ms'],
+  ['', 'switch-chats', 'click → the 800-item chat on screen p50 / max', ['toLongChatShownMs.p50', 'toLongChatShownMs.max'], 'ms'],
   ['', 'switch-chats', 'IPC main→renderer volume (10 switches)', '_switchMB', 'MB'],
   ['', 'switch-chats', 'main event-loop delay max', 'main.loopDelayMs.max', 'ms'],
   ['', 'switch-chats', 'long tasks (count / max)', ['longTasks.count', 'longTasks.maxMs'], ''],

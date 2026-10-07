@@ -279,3 +279,49 @@ describe('what the stylesheets keep off the main thread', () => {
     expect(css('views/chat/Composer.tsx')).not.toMatch(/scrollHeight/)
   })
 })
+
+describe('opening a long chat', () => {
+  it('draws its last rows in the first frame, and the rest above them a batch a task after', async () => {
+    const { useTailFirst, TAIL_FIRST, BATCH } = await import('@renderer/views/chat/transcript/tailFirst')
+    const { createRoot } = await import('react-dom/client')
+    const { flushSync } = await import('react-dom')
+    const env = globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }
+    const wasAct = env.IS_REACT_ACT_ENVIRONMENT
+    env.IS_REACT_ACT_ENVIRONMENT = false
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'requestAnimationFrame', 'cancelAnimationFrame'] })
+    const held: number[] = []
+    function Probe({ count }: { count: number }): null {
+      held.push(useTailFirst(count))
+      return null
+    }
+    const host = document.createElement('div')
+    const root = createRoot(host)
+    try {
+      flushSync(() => root.render(<Probe count={800} />))
+      // The first frame: the last TAIL_FIRST rows only.
+      expect(held.at(-1)).toBe(800 - TAIL_FIRST)
+      const steps = [held.at(-1)]
+      for (let i = 0; i < 20 && held.at(-1) !== 0; i++) {
+        vi.advanceTimersByTime(20)
+        await Promise.resolve()
+        if (held.at(-1) !== steps.at(-1)) steps.push(held.at(-1))
+      }
+      expect(steps.at(-1)).toBe(0)
+      // A batch at a time, each no bigger than BATCH.
+      for (let i = 1; i < steps.length; i++) expect((steps[i - 1] ?? 0) - (steps[i] ?? 0)).toBeLessThanOrEqual(BATCH)
+      flushSync(() => root.render(<Probe count={20} />))
+    } finally {
+      root.unmount()
+      vi.useRealTimers()
+      env.IS_REACT_ACT_ENVIRONMENT = wasAct
+    }
+    // A short chat is drawn whole.
+    const short: number[] = []
+    function Short(): null {
+      short.push(useTailFirst(30))
+      return null
+    }
+    render(<Short />)
+    expect(short.at(-1)).toBe(0)
+  })
+})

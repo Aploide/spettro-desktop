@@ -309,7 +309,14 @@
       let first = null
       let firstFrame = null
       let framePending = false
-      const mo = new MutationObserver((list) => {
+      const mo = new MutationObserver((records) => {
+        // A lit phrase's drift (glowDrift.ts) is a running decoration, like
+        // a CSS animation: its steps are style writes, and counting them a
+        // chat holding one never settled (15 s timeouts on switching).
+        const list = records.filter(
+          (m) => !(m.type === 'attributes' && m.attributeName === 'style' && m.target.classList && m.target.classList.contains('glow'))
+        )
+        if (list.length === 0) return
         mutations += list.length
         last = now()
         if (first === null) first = last

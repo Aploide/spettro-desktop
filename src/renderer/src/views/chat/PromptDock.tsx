@@ -4,7 +4,7 @@
 // field for what Spettro should do instead, sent as the next message, or as
 // guidance the running turn reads at its next step.
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import type { JSX } from 'react'
 import type { ACPPermissionRequest } from '@shared/acp'
 import type { ChatDetail } from '@shared/model'
@@ -25,7 +25,19 @@ function lastUserMessageId(chat: ChatDetail): string | null {
   return null
 }
 
-export default function PromptDock({ chat }: { chat: ChatDetail }): JSX.Element | null {
+/** Memoised: the chat view hands it a chat that changes only when more than
+ *  the transcript does, and the newest user message's id on its own. */
+export default memo(PromptDock)
+
+function PromptDock({
+  chat,
+  lastUserId
+}: {
+  chat: ChatDetail
+  /** The newest user message's id, when the caller already knows it (its
+   *  `chat` may then hold an older transcript); found in `chat` otherwise. */
+  lastUserId?: string | null
+}): JSX.Element | null {
   const permissions = useStore((s) => s.permissions)
   const questions = useStore((s) => s.questions)
   const mine = useMemo(
@@ -62,7 +74,7 @@ export default function PromptDock({ chat }: { chat: ChatDetail }): JSX.Element 
   }, [hasCard])
 
   // The offer lapses once the user has said something anyway.
-  const lastUser = lastUserMessageId(chat)
+  const lastUser = lastUserId !== undefined ? lastUserId : lastUserMessageId(chat)
   useEffect(() => {
     if (denied && lastUser !== denied.after) setDenied(null)
   }, [lastUser, denied])

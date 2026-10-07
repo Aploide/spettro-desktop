@@ -23,7 +23,7 @@
 // reconnecting the field stays open; only Send waits. With no model
 // connected at all, a bar above the card says so and leads to Settings.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { JSX, ReactNode } from 'react'
 import { ActivationTextarea, WorkflowHint } from './ActivationGlow'
 import type { ACPCommand, ACPConfigOption } from '@shared/acp'
@@ -117,7 +117,11 @@ export function draftChat(projectPath: string, configOptions: ACPConfigOption[] 
   }
 }
 
-export default function Composer({ chat, promptSeed, dock, onSubmit }: ComposerProps): JSX.Element {
+/** Memoised: a streamed chunk changes the transcript, which the composer
+ *  doesn't show (the chat view hands it a chat steady across those). */
+export default memo(Composer)
+
+function Composer({ chat, promptSeed, dock, onSubmit }: ComposerProps): JSX.Element {
   const app = useApp()
   // The chat's unsent text, kept across chat switches, reconnects and
   // relaunches. The composer is remounted per chat (ChatView is keyed), so

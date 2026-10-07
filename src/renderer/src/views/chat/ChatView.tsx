@@ -14,6 +14,7 @@
 
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { JSX } from 'react'
+import type { ChatDetail } from '@shared/model'
 import { call, ensureChatLoaded, useApp, useChat, useStore } from '@renderer/state/store'
 import { setTerminalVisible, useShell } from '@renderer/state/shell'
 import TerminalDrawer from '@renderer/views/terminal/TerminalDrawer'
@@ -50,8 +51,29 @@ const PIN_THRESHOLD = 64
  *  whole transcript under it — has nothing to redraw for one. */
 export default memo(ChatView)
 
+/**
+ * The chat as the chrome around the transcript (header, composer, prompt
+ * dock) sees it: the same object until something other than the transcript
+ * changes. A streamed chunk is a new chat with new items and nothing else
+ * new, and redrew the whole toolbar with it. Its `items` may be stale, so
+ * only what doesn't read them may be handed it.
+ */
+function useChromeChat(chat: ChatDetail | null): ChatDetail | null {
+  const steady = useRef(chat)
+  const was = steady.current
+  if (chat !== was && !(chat && was && sameButItems(chat, was))) steady.current = chat
+  return steady.current
+}
+
+function sameButItems(a: ChatDetail, b: ChatDetail): boolean {
+  const keys = Object.keys(a) as (keyof ChatDetail)[]
+  if (keys.length !== Object.keys(b).length) return false
+  return keys.every((key) => key === 'items' || a[key] === b[key])
+}
+
 function ChatView({ chatId }: { chatId: string }): JSX.Element {
   const chat = useChat(chatId)
+  const chrome = useChromeChat(chat)
   const scrollRef = useRef<HTMLDivElement>(null)
   const pinnedRef = useRef(true)
   const manualPauseRef = useRef(false)
@@ -228,6 +250,10 @@ function ChatView({ chatId }: { chatId: string }): JSX.Element {
     [chatId, lastUserMessageId, retryNoticeId]
   )
   const closeTerminal = useCallback(() => setTerminalVisible(false), [])
+  const dock = useMemo(
+    () => (chrome ? <PromptDock chat={chrome} lastUserId={lastUserMessageId} /> : null),
+    [chrome, lastUserMessageId]
+  )
 
   // Esc interrupts a running turn from the composer or the transcript —
   // never from inside a menu or popover (they take Escape for themselves),
@@ -256,7 +282,7 @@ function ChatView({ chatId }: { chatId: string }): JSX.Element {
   return (
     <ProjectPathContext.Provider value={chat.projectPath}>
       <div className="chat-view" onKeyDown={onKeyDown}>
-        <ChatHeader chat={chat} />
+        <ChatHeader chat={chrome ?? chat} />
 
         <div className="chat-body">
           <div
@@ -317,7 +343,7 @@ function ChatView({ chatId }: { chatId: string }): JSX.Element {
           </aside>
         </div>
 
-        <Composer chat={chat} promptSeed={promptSeed} dock={<PromptDock chat={chat} />} />
+        <Composer chat={chrome ?? chat} promptSeed={promptSeed} dock={dock} />
 
         <TerminalDrawer
           projectPath={chat.projectPath}

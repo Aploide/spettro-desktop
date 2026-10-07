@@ -7,7 +7,7 @@
 // a "Reconnecting…" pill sits in the bar — the only sign of it besides Send
 // waiting; nothing on screen is unmounted.
 
-import { useEffect, useRef, useState } from 'react'
+import { memo, useEffect, useRef, useState } from 'react'
 import type { ACPUsage } from '@shared/acp'
 import type { ChatDetail, GitStat, TurnSummary } from '@shared/model'
 import { call, useApp, useStore } from '@renderer/state/store'
@@ -27,7 +27,11 @@ export function projectName(projectPath: string): string {
  *  already know from their editor. */
 export const TERMINAL_SHORTCUT = 'Ctrl+`'
 
-export default function ChatHeader({ chat }: { chat: ChatDetail }): JSX.Element {
+/** Memoised: a streamed chunk changes the transcript, which the header
+ *  doesn't show (the chat view hands it a chat steady across those). */
+export default memo(ChatHeader)
+
+function ChatHeader({ chat }: { chat: ChatDetail }): JSX.Element {
   const git = useGitStat(chat.projectPath, chat.isBusy)
   const name = projectName(chat.projectPath)
   const [renaming, setRenaming] = useState(false)

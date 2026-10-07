@@ -17,7 +17,7 @@
 // vanishing two seconds later. Closing a tab that is still running a command
 // asks first, and a terminal that can't be opened says why.
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import { Terminal, type ITheme } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { humanizeError } from '@shared/humanize'
@@ -132,7 +132,11 @@ function terminalFont(): string {
   )
 }
 
-export default function TerminalDrawer({
+/** Memoised: its props are a path, a flag and a stable callback, and the
+ *  chat view around it re-renders for every streamed chunk. */
+export default memo(TerminalDrawer)
+
+function TerminalDrawer({
   projectPath,
   visible,
   onClose

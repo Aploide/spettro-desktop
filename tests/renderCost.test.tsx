@@ -17,6 +17,14 @@ import type { ChatDetail, ToolCallItem, TranscriptItem } from '@shared/model'
 
 vi.mock('@renderer/views/terminal/TerminalDrawer', () => ({ default: () => null }))
 
+/** The composer's toolbar, by renders. */
+const chrome = { configBar: 0 }
+vi.mock('@renderer/views/chat/ConfigBar', () => ({
+  default: () => {
+    chrome.configBar++
+    return null
+  }
+}))
 /** How many times each message's markdown was drawn, by its text. */
 const drawn: string[] = []
 vi.mock('@renderer/views/chat/transcript/MarkdownText', () => ({
@@ -194,6 +202,23 @@ describe('a streamed chunk in a long chat', () => {
     act(() => push({ type: 'chat-meta', chatId: 'c1', meta: { isBusy: false } }))
     expect(drawn).toEqual([])
     expect(store.getState().chats.c1.isBusy).toBe(false)
+  })
+
+  it('leaves the composer and the header alone too', async () => {
+    await freshStore()
+    const { default: ChatView } = await import('@renderer/views/chat/ChatView')
+    act(() => push({ type: 'chat-reset', chat: longChat(40) }))
+    const { container } = render(<ChatView chatId="c1" />)
+    expect(chrome.configBar).toBeGreaterThan(0)
+    chrome.configBar = 0
+    for (let i = 0; i < 5; i++) {
+      act(() => push({ type: 'chat-item', chatId: 'c1', item: message('a39', 'assistant', `answer 39${'.'.repeat(i)}`) }))
+    }
+    expect(chrome.configBar).toBe(0)
+    // What they do show still reaches them.
+    act(() => push({ type: 'chat-meta', chatId: 'c1', meta: { title: 'Renamed' } }))
+    expect(chrome.configBar).toBeGreaterThan(0)
+    expect(container.querySelector('.chat-header-title')?.textContent).toBe('Renamed')
   })
 
   it('leaves the transcript alone when only the shell around it changes', async () => {

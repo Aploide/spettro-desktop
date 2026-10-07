@@ -9,7 +9,7 @@
 // user wrote, with the path made absolute. Sending the mention's text *as
 // well* would put it in the prompt twice.
 
-import { isAbsolute, join, normalize } from 'path'
+import { join, posix, win32 } from 'path'
 import { pathToFileURL } from 'url'
 import type { ACPContentBlock } from '../../shared/acp'
 
@@ -35,12 +35,15 @@ const PATH_CHAR = /[A-Za-z0-9_\-/\\~+@]/
  * A renderer-supplied mention, kept only when it names a file inside the
  * project: relative, no `..` climbing out, no NUL. Anything else is dropped
  * — the text still says "@whatever", the agent just isn't handed a file.
+ * The path stays in forward slashes on every OS (as projectFiles.ts lists
+ * it), so it matches the "@path" typed in the text; a backslash is read as
+ * one too, since Windows would climb out through it.
  */
 export function cleanMention(projectPath: string, mention: unknown): string | null {
   if (typeof mention !== 'string' || mention === '' || mention.includes('\0')) return null
-  if (isAbsolute(mention)) return null
-  const rel = normalize(mention)
-  if (rel === '..' || rel.startsWith('../') || rel.startsWith('..\\')) return null
+  if (posix.isAbsolute(mention) || win32.isAbsolute(mention)) return null
+  const rel = posix.normalize(mention.replace(/\\/g, '/'))
+  if (rel === '..' || rel.startsWith('../')) return null
   return projectPath === '' ? null : rel
 }
 

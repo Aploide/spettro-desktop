@@ -219,6 +219,22 @@ describe('a tool row’s derived facts', () => {
     ...over
   }) as ToolCallItem
 
+  it('folds a plain call without classifying it again, but sees one changed in place', async () => {
+    const { groupTranscript } = await import('@renderer/views/chat/transcript/orchestration')
+    const t = tool({ id: 'workflow-wf_1_ab', title: 'bash {"command":"ls"}' })
+    const plainTool = tool({ id: 't2' })
+    const items: TranscriptItem[] = [
+      { kind: 'tool', tool: plainTool },
+      { kind: 'tool', tool: tool({ id: 't3', title: 'read {"path":"a.ts"}', kind: 'read' }) }
+    ]
+    expect(groupTranscript(items).map((r) => r.kind)).toEqual(['item', 'item'])
+    expect(groupTranscript(items).map((r) => r.kind)).toEqual(['item', 'item'])
+    // Changed in place into a workflow's card: a run row, not a stale "plain".
+    plainTool.title = 'workflow {"workflow":"review"}'
+    expect(groupTranscript(items)[0].kind).toBe('run')
+    expect(groupTranscript([{ kind: 'tool', tool: t }])[0].kind).toBe('run')
+  })
+
   it('parses a call’s arguments once, however often it is asked', async () => {
     const { parsedTitle } = await import('@renderer/views/chat/transcript/toolPresentation')
     const t = tool({ argsJSON: '{"command":"npm test"}' })

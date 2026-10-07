@@ -1118,6 +1118,23 @@ function claimScript(
   return null
 }
 
+/** Calls the fold found to be plain tool calls, with what it read them from
+ *  (an object changed in place is looked at again, as parsedTitle does). */
+const plain = new WeakMap<
+  ToolCallItem,
+  { title: string; argsJSON: ToolCallItem['argsJSON']; workflow: ToolCallItem['workflow'] }
+>()
+
+function knownPlain(tool: ToolCallItem): boolean {
+  const seen = plain.get(tool)
+  return (
+    seen !== undefined &&
+    seen.title === tool.title &&
+    seen.argsJSON === tool.argsJSON &&
+    seen.workflow === tool.workflow
+  )
+}
+
 /**
  * Folds a flat transcript into rows: workflow runs absorb their members,
  * members absorb their own tool calls, everything else passes through
@@ -1153,6 +1170,9 @@ export function groupTranscript(items: TranscriptItem[]): TranscriptRow[] {
   for (const item of items) {
     if (item.kind !== 'tool') continue
     const tool = item.tool
+    // Most calls are none of the kinds below; once found so, a call is not
+    // asked again on every fold (one per streamed frame).
+    if (knownPlain(tool)) continue
     const { agent: prefix, name, args } = parsedTitle(tool)
 
     if (isWorkflowScriptTool(name, args)) {
@@ -1201,7 +1221,12 @@ export function groupTranscript(items: TranscriptItem[]): TranscriptRow[] {
       continue
     }
 
-    if (subAgentCall(tool) === null) continue
+    if (subAgentCall(tool) === null) {
+      // Not a script, a card, a member's child nor a member: none of that
+      // can change while the call object is the same.
+      if (prefix === null) plain.set(tool, { title: tool.title, argsJSON: tool.argsJSON, workflow: tool.workflow })
+      continue
+    }
 
     const member = newMember(tool, args)
     if (member.instance !== '') members.set(member.instance, member)

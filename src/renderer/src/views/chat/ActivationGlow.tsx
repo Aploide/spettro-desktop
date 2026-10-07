@@ -42,6 +42,7 @@ import { workflowRequested } from '@shared/workflowActivation'
 import { compactTokens, splitWorkflowInput } from '@shared/workflowBudget'
 import { Icon } from '@renderer/design/icons'
 import { splitMentions } from './mentions'
+import { drift } from './glowDrift'
 import './activation.css'
 
 /**
@@ -83,32 +84,17 @@ export function ActivationText({
 }
 
 /**
- * A lit phrase, which stands still while it is out of sight. A sent
- * message's glow scrolled off the top of a long chat kept restyling and
- * repainting its text every frame for as long as the chat was open.
+ * A lit phrase: its band drifts on the shared clock (glowDrift.ts), and
+ * stands still while it is out of sight.
  */
 function LitPhrase({ text }: { text: string }): JSX.Element {
   const ref = useRef<HTMLSpanElement>(null)
-  useEffect(() => watchSight(ref.current), [])
+  useEffect(() => (ref.current ? drift(ref.current) : undefined), [])
   return (
     <span className="glow" ref={ref}>
       {text}
     </span>
   )
-}
-
-/** One observer for every lit phrase: marks the ones out of sight
- *  (`data-unseen`, which activation.css pauses). */
-let sight: IntersectionObserver | null = null
-
-function watchSight(el: HTMLElement | null): (() => void) | undefined {
-  if (!el || typeof IntersectionObserver !== 'function') return undefined
-  sight ??= new IntersectionObserver((entries) => {
-    for (const entry of entries) entry.target.toggleAttribute('data-unseen', !entry.isIntersecting)
-  })
-  const observer = sight
-  observer.observe(el)
-  return () => observer.unobserve(el)
 }
 
 interface Props {

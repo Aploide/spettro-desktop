@@ -101,32 +101,13 @@ textarea.glow-input::selection {
   /* Weight does the work the pill used to: a lit phrase is heavier than the
      prose around it even where the hue happens to sit close to it. */
   font-weight: 600;
-  /* In steps of 30 a second: the band moves about a pixel a step, too little
-     to see as one, and the text is repainted a quarter as often as on every
-     frame of a 120 Hz display. */
-  animation: glow-drift 7s steps(210) infinite;
-}
-
-/* Out of sight (ActivationGlow.tsx watches): it stands still. */
-.glow[data-unseen] {
-  animation-play-state: paused;
-}
-
-/* Unhurried on purpose. This sits under the cursor while someone is typing,
-   and anything fast enough to notice as motion is fast enough to distract —
-   the same reasoning as the TUI's 7s drift. */
-@keyframes glow-drift {
-  to {
-    background-position: -200% 0;
-  }
-}
-
-/* Someone who has asked not to see motion still gets the colour — the point of
-   the effect is that the phrase is special, and that survives being still. */
-@media (prefers-reduced-motion: reduce) {
-  .glow {
-    animation: none;
-  }
+  /* The band drifts across it once every 7 s, unhurried on purpose: this
+     sits under the cursor while someone is typing, and anything fast enough
+     to notice as motion is fast enough to distract (the TUI's 7 s drift).
+     glowDrift.ts moves it, in steps of 30 a second and only while the phrase
+     can be seen: as an animation here, the main thread restyled it on every
+     display frame. Under reduced motion it stays where it starts — the
+     colour still says the phrase is special. */
 }
 
 /* Under "Ask first" workflows do not run, so the phrase is marked but not

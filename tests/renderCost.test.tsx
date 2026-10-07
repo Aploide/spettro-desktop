@@ -257,10 +257,7 @@ describe('what the stylesheets keep off the main thread', () => {
     )
   })
 
-  it('pauses a lit phrase out of sight, and steps the moving text it draws', () => {
-    const activation = css('views/chat/activation.css')
-    expect(activation).toMatch(/\.glow\[data-unseen\] \{\s*animation-play-state: paused;/)
-    expect(activation).toMatch(/animation: glow-drift 7s steps\(\d+\) infinite/)
+  it('steps the moving text it draws (the lit phrase: idleCost.test.tsx)', () => {
     expect(css('views/chat/transcript/transcript.css')).toMatch(/animation: tr-shimmer 2s steps\(\d+\) infinite/)
     expect(css('views/chat/chat.css')).toMatch(/animation: todo-shimmer 2\.4s steps\(\d+\) infinite/)
   })

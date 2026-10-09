@@ -85,10 +85,12 @@ phone knows what it may rely on:
 | `mentions` | `chats/prompt` takes `mentions` (project-relative paths) |
 | `rename` | `chats/rename {chatID, title}` |
 | `projectFiles` | `projects/files {projectPath}` → `{files}` (≤ 5000) |
-| `snapshotV2` | `chats/open` keeps the transcript fields the Swift store lacks (see `transcriptItemToWire`) |
+| `snapshotV2` | `chats/open` keeps the transcript fields the Swift store lacks (see `transcriptItemToWire`); a thought's `startedAt`/`endedAt` keep their milliseconds |
 
 A phone's first `host/state` follows the auth reply, never the other way
-round. Workflow Studio's scratch chats never reach a phone
+round. A goodbye `host/state` (`shuttingDown`) leaves `remoteHost` out,
+which means unchanged; only `""` clears it. Workflow Studio's scratch
+chats never reach a phone, nor does a removed chat's late `chat/state`
 (`remoteBridge.ts`).
 
 ## CLI discovery

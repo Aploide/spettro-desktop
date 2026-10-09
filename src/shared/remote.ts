@@ -66,7 +66,8 @@ export type RemoteFeatureName = (typeof RemoteFeature)[keyof typeof RemoteFeatur
 export const REMOTE_HOST_FEATURES: readonly RemoteFeatureName[] = [
   RemoteFeature.configResult,
   RemoteFeature.notices,
-  RemoteFeature.pendingReplay
+  RemoteFeature.pendingReplay,
+  RemoteFeature.snapshotV2
 ]
 
 /** Bonjour service type ("_spettro-remote._tcp" on the wire; bonjour-service
@@ -412,9 +413,21 @@ export function chatSummaryToWire(s: ChatSummary): RemoteChatSummaryWire {
   }
 }
 
+/** Images a stored tool carries on the wire, as on screen. */
+const MAX_WIRE_TOOL_IMAGES = 4
+
 /** One TranscriptItem → Swift StoredItem synthesized-enum encoding:
- *  `{"message":{"_0":{...}}}` / `{"tool":{"_0":{...}}}`. Field names and
- *  presence mirror SessionStore.swift's StoredMessage/StoredTool exactly. */
+ *  `{"message":{"_0":{...}}}` / `{"tool":{"_0":{...}}}`. The fields
+ *  SessionStore.swift's StoredMessage/StoredTool have come first, named and
+ *  present exactly as there.
+ *
+ *  After them, the ones the Swift store never had (`snapshotV2`), each left
+ *  out when it says nothing — Codable ignores keys it doesn't know:
+ *    message: steering, isStreaming (true), startedAt/endedAt (RFC3339,
+ *             reasoning), mentions, plain (true), contextCleared (true),
+ *             endsTurn (true)
+ *    tool:    workflow (the `_meta["spettro.app/workflow"]` object),
+ *             rawOutput, denied (true), images ([{data, mimeType}], ≤4) */
 export function transcriptItemToWire(item: TranscriptItem): JSONValue {
   if (item.kind === 'message') {
     const m = item.message
@@ -433,6 +446,14 @@ export function transcriptItemToWire(item: TranscriptItem): JSONValue {
         mimeType: a.mimeType
       }))
     }
+    if (m.steering !== undefined) stored.steering = m.steering
+    if (m.isStreaming) stored.isStreaming = true
+    if (m.startedAt !== undefined) stored.startedAt = rfc3339(m.startedAt)
+    if (m.endedAt !== undefined) stored.endedAt = rfc3339(m.endedAt)
+    if (m.mentions !== undefined && m.mentions.length > 0) stored.mentions = [...m.mentions]
+    if (m.plain) stored.plain = true
+    if (m.contextCleared) stored.contextCleared = true
+    if (m.endsTurn) stored.endsTurn = true
     return { message: { _0: stored } }
   }
   const t = item.tool
@@ -452,6 +473,14 @@ export function transcriptItemToWire(item: TranscriptItem): JSONValue {
   }
   if (t.kind !== undefined) stored.kind = t.kind
   if (t.argsJSON !== undefined) stored.argsJSON = t.argsJSON
+  if (t.workflow !== undefined) stored.workflow = t.workflow
+  if (t.rawOutput !== undefined) stored.rawOutput = t.rawOutput
+  if (t.denied) stored.denied = true
+  if (t.images !== undefined && t.images.length > 0) {
+    stored.images = t.images
+      .slice(0, MAX_WIRE_TOOL_IMAGES)
+      .map((image) => ({ data: image.data, mimeType: image.mimeType }))
+  }
   return { tool: { _0: stored } }
 }
 

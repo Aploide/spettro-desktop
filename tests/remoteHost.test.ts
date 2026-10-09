@@ -20,7 +20,7 @@ import type { RemoteBridge } from '@main/remote/bridge'
 import { RemoteHost } from '@main/remote/host'
 import { base64urlDecode, computeProof } from '@main/remote/pairing'
 import type { JSONValue } from '@shared/acp'
-import type { ChatSummary } from '@shared/model'
+import type { ChatSummary, StoredSession, TranscriptItem } from '@shared/model'
 import { REMOTE_HOST_FEATURES, RemoteFeature, RemoteMethod } from '@shared/remote'
 import { FakeAgent, Reply, settle as settleAll } from './fakeAgent'
 import { configOptionUpdate, configOptions, initializeResult, permissionAttached, rpcError } from './wire'
@@ -521,5 +521,82 @@ describe('prompts waiting when a phone attaches', () => {
     expect((replayed[0].params as Frame).chatID).toBe(chat.id)
     // Attaching phone-2 tells phone-1 nothing new.
     expect(early.notifications(RemoteMethod.permissionAsk)).toHaveLength(1)
+  })
+})
+
+describe('chats/open', () => {
+  const CHAT = '00000000-0000-4000-8000-0000000000e1'
+  const T = 1_700_000_000_000
+
+  function snapshot(items: TranscriptItem[]): StoredSession {
+    return {
+      id: CHAT,
+      acpSessionId: 's1',
+      projectPath: '/project',
+      title: 'A chat',
+      createdAt: T,
+      updatedAt: T,
+      isPinned: false,
+      isArchived: false,
+      items,
+      configOptions: [],
+      pendingConfigChanges: {}
+    } as StoredSession
+  }
+
+  async function opened(items: TranscriptItem[]): Promise<Frame[]> {
+    makeHost({
+      openChat: () => ({ chat: snapshot(items), configOptions: [], commands: [], plan: [], usage: null, isBusy: true })
+    })
+    const socket = await attached()
+    const reply = await call(socket, RemoteMethod.chatOpen, { chatID: CHAT })
+    return ((reply.result as Frame).chat as Frame).items as Frame[]
+  }
+
+  const message = (extra: object): TranscriptItem =>
+    ({
+      kind: 'message',
+      message: { id: 'm1', role: 'user', text: 'hi', attachments: [], isStreaming: false, timestamp: T, ...extra }
+    }) as TranscriptItem
+
+  const tool = (extra: object): TranscriptItem =>
+    ({
+      kind: 'tool',
+      tool: { id: 'call-1~2', title: 'Run ls', status: 'completed', output: '', diffs: [], locations: [], timestamp: T, ...extra }
+    }) as TranscriptItem
+
+  it('keeps what the Swift store never had on messages', async () => {
+    const [steer, thinking, notice] = await opened([
+      message({ steering: 'queued', mentions: ['src/a.ts'] }),
+      message({ id: 'm2', role: 'reasoning', isStreaming: true, startedAt: T, endedAt: T + 12_000 }),
+      message({ id: 'm3', role: 'notice', noticeIsError: true, endsTurn: true, contextCleared: true, plain: true })
+    ])
+    expect((steer.message as Frame)._0).toMatchObject({ steering: 'queued', mentions: ['src/a.ts'] })
+    expect((thinking.message as Frame)._0).toMatchObject({
+      isStreaming: true,
+      startedAt: '2023-11-14T22:13:20Z',
+      endedAt: '2023-11-14T22:13:32Z'
+    })
+    expect((notice.message as Frame)._0).toMatchObject({ endsTurn: true, contextCleared: true, plain: true })
+    expect(REMOTE_HOST_FEATURES).toContain(RemoteFeature.snapshotV2)
+  })
+
+  it('keeps a tool’s workflow, raw output, denial and images', async () => {
+    const workflow = { version: 1, runId: 'r1', name: 'ship', status: 'running' }
+    const images = [1, 2, 3, 4, 5].map((n) => ({ data: `img${n}`, mimeType: 'image/png' }))
+    const [item] = await opened([tool({ workflow, rawOutput: 'full output', denied: true, images })])
+    const stored = (item.tool as Frame)._0 as Frame
+    expect(stored).toMatchObject({ id: 'call-1~2', workflow, rawOutput: 'full output', denied: true })
+    expect(stored.images).toEqual(images.slice(0, 4))
+  })
+
+  it('adds nothing to an item that has none of it', async () => {
+    const [plain, card] = await opened([message({}), tool({})])
+    expect(Object.keys((plain.message as Frame)._0 as Frame).sort()).toEqual(
+      ['id', 'noticeIsError', 'role', 'text', 'timestamp'].sort()
+    )
+    expect(Object.keys((card.tool as Frame)._0 as Frame).sort()).toEqual(
+      ['diffs', 'id', 'locations', 'output', 'status', 'timestamp', 'title'].sort()
+    )
   })
 })

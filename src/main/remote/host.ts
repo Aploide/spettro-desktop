@@ -50,7 +50,16 @@ import {
   isPairingWindowExpired,
   type PairingWindow
 } from './pairing'
-import { RemoteTunnel, type RemoteTunnelOptions } from './tunnel/remoteTunnel'
+import { RemoteTunnel, type PortRefusal, type RemoteTunnelOptions } from './tunnel/remoteTunnel'
+
+/** Why the pinned port couldn't be had, when that's worth falling back
+ *  over. Any other listen error is a real failure. */
+function portRefusal(error: unknown): PortRefusal | null {
+  const code = (error as NodeJS.ErrnoException).code
+  if (code === 'EADDRINUSE') return 'in-use'
+  if (code === 'EACCES' || code === 'EPERM') return 'not-allowed'
+  return null
+}
 
 function appVersion(): string {
   try {
@@ -104,6 +113,12 @@ export class RemoteHost implements RemoteHostSessionDelegate {
   private port: number | null = null
   private enabled = false
   private starting: Promise<void> | null = null
+  /** Bumped by every start, stop and rebind: a listener that opens after
+   *  it was overtaken is closed again instead of taken on. */
+  private listenGeneration = 0
+  /** Starts and rebinds, one at a time — each wants the pinned port, which
+   *  the one before may be about to take. */
+  private lifecycle: Promise<void> = Promise.resolve()
   private sessions: RemoteHostSession[] = []
   private connectedDeviceIds = new Set<string>()
   private readonly authLimiter = new FailedAuthLimiter()
@@ -267,8 +282,11 @@ export class RemoteHost implements RemoteHostSessionDelegate {
   // MARK: Lifecycle
 
   async setEnabled(v: boolean): Promise<void> {
-    if (v) await this.start()
-    else this.stop()
+    if (v) {
+      await this.start()
+      // Turned off again while the listener was opening: that stands.
+      if (!this.enabled) return
+    } else this.stop()
     this.onSharingChanged(v)
   }
 
@@ -279,35 +297,56 @@ export class RemoteHost implements RemoteHostSessionDelegate {
     if (wasOn) await this.setEnabled(true)
   }
 
-  private async start(): Promise<void> {
-    if (this.enabled) return
+  private start(): Promise<void> {
+    if (this.enabled) return Promise.resolve()
     if (this.starting) return this.starting
-    this.starting = (async () => {
-      await this.bind()
+    const generation = ++this.listenGeneration
+    const starting = this.serialize(async () => {
+      if (generation !== this.listenGeneration) return
+      const bound = await this.bind()
+      if (generation !== this.listenGeneration) {
+        // Stopped while it was opening.
+        bound.wss.close()
+        return
+      }
+      this.adopt(bound.wss)
       this.enabled = true
       this.advertise()
-      this.tunnel.attach(this.port ?? 0)
+      this.tunnel.attach(this.port ?? 0, bound.refusal)
       this.publishState()
-    })()
+    })
+    this.starting = starting
+    const clear = (): void => {
+      if (this.starting === starting) this.starting = null
+    }
+    starting.then(clear, clear)
+    return starting
+  }
+
+  /** Runs a start or rebind once the one before it is done. */
+  private serialize(task: () => Promise<void>): Promise<void> {
+    const run = this.lifecycle.then(task)
+    this.lifecycle = run.catch(() => undefined)
+    return run
+  }
+
+  /** Opens a listener on the pinned port — the one the tunnel's service
+   *  URL names, 7879 unless the user chose another. If something else holds
+   *  it, or the OS reserves it, the OS picks one instead: phones on the LAN
+   *  find the host by Bonjour, not port, and the tunnel reports why its
+   *  port couldn't be had. */
+  private async bind(): Promise<{ wss: WebSocketServer; refusal: PortRefusal | undefined }> {
     try {
-      await this.starting
-    } finally {
-      this.starting = null
+      return { wss: await this.listen(this.tunnel.port), refusal: undefined }
+    } catch (error) {
+      const refusal = portRefusal(error)
+      if (!refusal) throw error
+      return { wss: await this.listen(0), refusal }
     }
   }
 
-  /** Opens the listener on the pinned port — the one the tunnel's service
-   *  URL names, 7879 unless the user chose another. If something else holds
-   *  it, the OS picks one instead: phones on the LAN find the host by
-   *  Bonjour, not port, and the tunnel reports the port as taken. */
-  private async bind(): Promise<void> {
-    let wss: WebSocketServer
-    try {
-      wss = await this.listen(this.tunnel.port)
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EADDRINUSE') throw error
-      wss = await this.listen(0)
-    }
+  /** Makes a freshly opened listener the host's. */
+  private adopt(wss: WebSocketServer): void {
     this.wss = wss
     const address = wss.address()
     this.port = typeof address === 'object' && address !== null ? address.port : null
@@ -327,27 +366,40 @@ export class RemoteHost implements RemoteHostSessionDelegate {
 
   /** Moves the listener to the pinned port: the tunnel needs it there, and
    *  the host is on another (the pinned one was taken at start, or the user
-   *  chose a new one). Attached phones drop and find the host again. */
-  private async rebind(): Promise<void> {
-    if (!this.enabled) return
-    for (const session of this.sessions) session.close()
-    this.sessions = []
-    this.connectedDeviceIds.clear()
-    this.stopHeartbeat()
-    this.wss?.close()
-    this.wss = null
-    this.port = null
-    try {
-      await this.bind()
-    } catch (error) {
-      console.error('[remote] could not listen again', error)
-      this.stop()
-      return
-    }
-    this.advertise()
-    this.refreshPairingURL()
-    this.tunnel.attach(this.port ?? 0)
-    this.publishState()
+   *  chose a new one). Attached phones drop and find the host again. Two in
+   *  a row move it once; one overtaken by a stop leaves it stopped. */
+  private rebind(): Promise<void> {
+    if (!this.enabled) return Promise.resolve()
+    const generation = ++this.listenGeneration
+    const current = (): boolean => generation === this.listenGeneration && this.enabled
+    return this.serialize(async () => {
+      if (!current()) return
+      for (const session of this.sessions) session.close()
+      this.sessions = []
+      this.connectedDeviceIds.clear()
+      this.stopHeartbeat()
+      this.wss?.close()
+      this.wss = null
+      this.port = null
+      let bound: { wss: WebSocketServer; refusal: PortRefusal | undefined }
+      try {
+        bound = await this.bind()
+      } catch (error) {
+        if (!current()) return
+        console.error('[remote] could not listen again', error)
+        this.stop()
+        return
+      }
+      if (!current()) {
+        bound.wss.close()
+        return
+      }
+      this.adopt(bound.wss)
+      this.advertise()
+      this.refreshPairingURL()
+      this.tunnel.attach(this.port ?? 0, bound.refusal)
+      this.publishState()
+    })
   }
 
   /** Takes on a connection the listener accepted: it is sent `hello` at
@@ -433,6 +485,9 @@ export class RemoteHost implements RemoteHostSessionDelegate {
   }
 
   private stop(): void {
+    // Whatever start or rebind is still opening a listener is overtaken.
+    this.listenGeneration++
+    this.starting = null
     if (!this.enabled && !this.wss) {
       this.closePairing()
       return
@@ -480,6 +535,7 @@ export class RemoteHost implements RemoteHostSessionDelegate {
     this.authLimiter.resetBreaker()
     if (!this.enabled) {
       await this.start()
+      if (!this.enabled) return
       this.onSharingChanged(true)
     }
     if (this.pairingTimer) clearTimeout(this.pairingTimer)
@@ -585,7 +641,7 @@ export class RemoteHost implements RemoteHostSessionDelegate {
     if (enabled) {
       if (!this.enabled) {
         await this.start()
-        this.onSharingChanged(true)
+        if (this.enabled) this.onSharingChanged(true)
       } else if (this.port !== this.tunnel.port) {
         await this.rebind()
       }

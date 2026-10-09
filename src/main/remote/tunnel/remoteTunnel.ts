@@ -56,8 +56,17 @@ const OUTDATED = 'Your cloudflared is over a year old. Spettro can use its own u
 const LOG_LIMIT = 60
 const CHECK_TIMEOUT_MS = 10_000
 
+/** Why the relay couldn't have the pinned port: something else holds it, or
+ *  the OS won't let anything have it (on Windows, a range Hyper-V, WSL or
+ *  Docker reserved). */
+export type PortRefusal = 'in-use' | 'not-allowed'
+
 export function portInUseMessage(port: number): string {
   return `Port ${port} is in use by another program, so the tunnel can’t reach Spettro. Close it, or choose another port and update the service URL in Cloudflare.`
+}
+
+export function portNotAllowedMessage(port: number): string {
+  return `This computer doesn’t let programs use port ${port} (Windows reserves some ranges for Hyper-V, WSL or Docker). Choose another port and update the service URL in Cloudflare.`
 }
 
 export class RemoteTunnel {
@@ -70,6 +79,8 @@ export class RemoteTunnel {
 
   /** The port the relay listens on right now, or null while it is off. */
   private listenPort: number | null = null
+  /** Why it isn't the pinned one, when it isn't. */
+  private portRefusal: PortRefusal = 'in-use'
   /** Bumped by every start and stop, so a start that finishes after it
    *  was overtaken does nothing. */
   private generation = 0
@@ -173,11 +184,13 @@ export class RemoteTunnel {
     return null
   }
 
-  /** The relay is listening on `port`. Remote access coming on is a fresh
-   *  try: a download that failed last time is tried again. */
-  attach(port: number): void {
+  /** The relay is listening on `port`; `refusal` says why, when that isn't
+   *  the pinned one. Remote access coming on is a fresh try: a download
+   *  that failed last time is tried again. */
+  attach(port: number, refusal: PortRefusal = 'in-use'): void {
     if (this.listenPort === null && this.localError?.kind !== 'port-in-use') this.localError = null
     this.listenPort = port
+    this.portRefusal = refusal
     this.sync()
   }
 
@@ -367,7 +380,10 @@ export class RemoteTunnel {
       // The relay fell back to another port (the pinned one was taken), so
       // the dashboard's route leads nowhere: don't start cloudflared at all.
       void this.stopProcess()
-      this.localError = { kind: 'port-in-use', message: portInUseMessage(port) }
+      this.localError = {
+        kind: 'port-in-use',
+        message: this.portRefusal === 'not-allowed' ? portNotAllowedMessage(port) : portInUseMessage(port)
+      }
       this.publish()
       return
     }

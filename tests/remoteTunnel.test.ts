@@ -102,13 +102,16 @@ class FakeProcess implements TunnelProcessLike {
 /** What the host's listener needs from a WebSocketServer. */
 class FakeServer extends EventEmitter {
   readonly clients = new Set<WebSocket>()
+  closed = false
   constructor(readonly port: number) {
     super()
   }
   address(): { port: number } {
     return { port: this.port }
   }
-  close(): void {}
+  close(): void {
+    this.closed = true
+  }
 }
 
 function fakeBridge(): RemoteBridge {
@@ -383,6 +386,101 @@ describe('the pinned port', () => {
     await settleAll()
     expect(host.getState().port).toBe(7879)
     expect(processes).toHaveLength(1)
+  })
+
+  it('falls back for the LAN when the OS reserves it, and says so', async () => {
+    makeHost()
+    const internals = host as unknown as { listen(port: number): Promise<WebSocketServer> }
+    internals.listen = async (port) => {
+      if (port === 7879) throw Object.assign(new Error('listen EACCES: permission denied'), { code: 'EACCES' })
+      return new FakeServer(port === 0 ? 50123 : port) as unknown as WebSocketServer
+    }
+    await host.configureTunnel({ token: TOKEN, hostname: 'spettro.example.com' })
+    await host.setTunnelEnabled(true)
+    await settleAll()
+    expect(host.getState().enabled).toBe(true)
+    expect(host.getState().port).toBe(50123)
+    expect(processes).toHaveLength(0)
+    expect(host.getState().tunnel.error).toEqual({
+      kind: 'port-in-use',
+      message:
+        'This computer doesn’t let programs use port 7879 (Windows reserves some ranges for Hyper-V, WSL or Docker). Choose another port and update the service URL in Cloudflare.'
+    })
+  })
+
+  it('doesn’t fall back over a listen error that isn’t about the port', async () => {
+    makeHost()
+    const internals = host as unknown as { listen(port: number): Promise<WebSocketServer> }
+    internals.listen = async () => {
+      throw Object.assign(new Error('listen EMFILE'), { code: 'EMFILE' })
+    }
+    await expect(host.setEnabled(true)).rejects.toThrow('EMFILE')
+    expect(host.getState().enabled).toBe(false)
+  })
+
+  it('stays off when turned off while the listener was opening', async () => {
+    makeHost()
+    await host.configureTunnel({ token: TOKEN })
+    const opened: FakeServer[] = []
+    let release!: () => void
+    const internals = host as unknown as { listen(port: number): Promise<WebSocketServer> }
+    internals.listen = (port) =>
+      new Promise((resolve) => {
+        release = () => {
+          const server = new FakeServer(port)
+          opened.push(server)
+          resolve(server as unknown as WebSocketServer)
+        }
+      })
+    const on = host.setEnabled(true)
+    await settle()
+    await host.setEnabled(false)
+    release()
+    await on
+    await settleAll()
+    expect(host.getState().enabled).toBe(false)
+    expect(opened[0].closed).toBe(true)
+    expect(sharing).toEqual([false])
+  })
+
+  it('doesn’t leave a listener behind, or start cloudflared, when turned off mid-move', async () => {
+    await connectedTunnel()
+    const opened: FakeServer[] = []
+    const releases: (() => void)[] = []
+    const internals = host as unknown as { listen(port: number): Promise<WebSocketServer> }
+    internals.listen = (port) =>
+      new Promise((resolve) => {
+        releases.push(() => {
+          const server = new FakeServer(port)
+          opened.push(server)
+          resolve(server as unknown as WebSocketServer)
+        })
+      })
+    const moving = host.configureTunnel({ port: 9000 })
+    await settleAll()
+    await host.setEnabled(false)
+    const before = processes.length
+    releases[0]()
+    await moving
+    await settleAll()
+    expect(host.getState()).toMatchObject({ enabled: false, port: null })
+    expect(opened[0].closed).toBe(true)
+    expect(processes.filter((p) => p.isRunning)).toHaveLength(0)
+    expect(processes).toHaveLength(before)
+  })
+
+  it('moves once for two port changes in a row', async () => {
+    await connectedTunnel()
+    const asked: number[] = []
+    const internals = host as unknown as { listen(port: number): Promise<WebSocketServer> }
+    internals.listen = async (port) => {
+      asked.push(port)
+      return new FakeServer(port) as unknown as WebSocketServer
+    }
+    await Promise.all([host.configureTunnel({ port: 9000 }), host.configureTunnel({ port: 9001 })])
+    await settleAll()
+    expect(asked).toEqual([9001])
+    expect(host.getState().port).toBe(9001)
   })
 
   it('moves the listener when the user picks another port', async () => {

@@ -628,3 +628,18 @@ describe('the real listener', () => {
     expect(first.method).toBe(RemoteMethod.hello)
   })
 })
+
+describe('a failed download', () => {
+  it('is tried again when remote access comes back on', async () => {
+    located = null
+    makeHost()
+    await host.configureTunnel({ token: TOKEN })
+    await host.setTunnelEnabled(true)
+    await settleAll()
+    expect(installs).toBe(1)
+    await host.setEnabled(false)
+    await host.setEnabled(true)
+    await settleAll()
+    expect(installs).toBe(2)
+  })
+})

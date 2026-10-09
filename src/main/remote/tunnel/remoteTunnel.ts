@@ -173,8 +173,10 @@ export class RemoteTunnel {
     return null
   }
 
-  /** The relay is listening on `port`. */
+  /** The relay is listening on `port`. Remote access coming on is a fresh
+   *  try: a download that failed last time is tried again. */
   attach(port: number): void {
+    if (this.listenPort === null && this.localError?.kind !== 'port-in-use') this.localError = null
     this.listenPort = port
     this.sync()
   }
@@ -291,7 +293,7 @@ export class RemoteTunnel {
       this.stage = 'idle'
     }
     if (wasRunning || !this.localError) this.sync()
-    this.publish()
+    else this.publish()
   }
 
   /** Connects to wss://<hostname>/ the way a phone away from home would, and

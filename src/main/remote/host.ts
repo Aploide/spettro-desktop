@@ -8,7 +8,7 @@
 // the TUI.
 
 import { networkInterfaces } from 'os'
-import { WebSocketServer } from 'ws'
+import { WebSocketServer, type WebSocket } from 'ws'
 import QRCodeLib from 'qrcode'
 import type { JSONValue } from '../../shared/acp'
 import type { ChatSummary, RemoteHostState } from '../../shared/model'
@@ -113,6 +113,13 @@ export class RemoteHost implements RemoteHostSessionDelegate {
     return this.version
   }
 
+  /** The public hostname a tunnel puts this host at. None yet: this is the
+   *  one place the tunnel fills in, and the auth result and every host/state
+   *  pick it up from here. */
+  get remoteHost(): string | undefined {
+    return undefined
+  }
+
   openPairingSecret(): Buffer | null {
     if (!this.pairingWindow || isPairingWindowExpired(this.pairingWindow)) return null
     return this.pairingWindow.secret
@@ -135,7 +142,7 @@ export class RemoteHost implements RemoteHostSessionDelegate {
     return { key, revoked: record.revoked }
   }
 
-  /** Called by a session once it has authenticated. */
+  /** Called by a session once its auth reply has gone out. */
   sessionAuthenticated(session: RemoteHostSession): void {
     const deviceId = session.deviceId
     if (!deviceId) return
@@ -148,13 +155,24 @@ export class RemoteHost implements RemoteHostSessionDelegate {
       if (other !== session && other.deviceId === deviceId) other.close()
     }
     this.sessions = this.sessions.filter((s) => s === session || s.deviceId !== deviceId)
-    // A phone that just attached is shown the live agent state immediately
-    // rather than being left to assume.
-    session.sendHostState({
-      agentReady: this.bridge.agentReady(),
-      shuttingDown: false
+    // A phone that just attached is shown the live agent state rather than
+    // being left to assume — a turn later rather than right behind the
+    // reply, so the phone has had its answer in hand for a moment before
+    // the first notification arrives.
+    setImmediate(() => {
+      if (!this.sessions.includes(session)) return
+      session.sendHostState(this.hostStateParams(this.bridge.agentReady(), false))
     })
     this.publishState()
+  }
+
+  /** A host/state as this host sends it: the public hostname rides along
+   *  while the host is up (see RemoteHostStateParams.remoteHost). */
+  private hostStateParams(agentReady: boolean, shuttingDown: boolean, message?: string): RemoteHostStateParams {
+    const params: RemoteHostStateParams = { agentReady, shuttingDown }
+    if (message !== undefined && message !== null) params.message = message
+    if (!shuttingDown) params.remoteHost = this.remoteHost ?? ''
+    return params
   }
 
   sessionClosed(session: RemoteHostSession): void {
@@ -193,7 +211,7 @@ export class RemoteHost implements RemoteHostSessionDelegate {
           socket.close()
           return
         }
-        this.sessions.push(new RemoteHostSession(socket, this))
+        this.acceptSocket(socket)
       })
       wss.on('error', (error) => {
         console.error('[remote] listener error', error)
@@ -207,6 +225,14 @@ export class RemoteHost implements RemoteHostSessionDelegate {
     } finally {
       this.starting = null
     }
+  }
+
+  /** Takes on a connection the listener accepted: it is sent `hello` at
+   *  once, and nothing else until it authenticates. */
+  acceptSocket(socket: WebSocket): RemoteHostSession {
+    const session = new RemoteHostSession(socket, this)
+    this.sessions.push(session)
+    return session
   }
 
   private listen(port: number): Promise<WebSocketServer> {
@@ -232,11 +258,10 @@ export class RemoteHost implements RemoteHostSessionDelegate {
     // Tell attached phones this is deliberate before dropping them, so they
     // show "sharing was turned off" instead of retrying against what looks
     // like a flaky network.
-    this.broadcast(RemoteMethod.hostState, {
-      agentReady: false,
-      shuttingDown: true,
-      message: 'Remote access was turned off.'
-    } satisfies RemoteHostStateParams as unknown as JSONValue)
+    this.broadcast(
+      RemoteMethod.hostState,
+      this.hostStateParams(false, true, 'Remote access was turned off.') as unknown as JSONValue
+    )
     for (const session of this.sessions) session.close()
     this.sessions = []
     this.connectedDeviceIds.clear()
@@ -457,12 +482,8 @@ export class RemoteHost implements RemoteHostSessionDelegate {
     })
 
     on('host-state', (state: { agentReady: boolean; shuttingDown: boolean; message?: string }) => {
-      const params: { [key: string]: JSONValue } = {
-        agentReady: state.agentReady,
-        shuttingDown: state.shuttingDown
-      }
-      if (state.message !== undefined && state.message !== null) params.message = state.message
-      this.broadcast(RemoteMethod.hostState, params)
+      const params = this.hostStateParams(state.agentReady, state.shuttingDown, state.message)
+      this.broadcast(RemoteMethod.hostState, params as unknown as JSONValue)
     })
 
     // Blocking prompts fan out to every attached screen with the

@@ -12,6 +12,7 @@
 import type { WebSocket } from 'ws'
 import type { ACPContentBlock, JSONValue } from '../../shared/acp'
 import {
+  REMOTE_HOST_FEATURES,
   REMOTE_PROTOCOL_VERSION,
   RemoteAuthError,
   RemoteMethod,
@@ -36,6 +37,9 @@ export interface RemoteHostSessionDelegate {
   readonly hostName: string
   readonly hostVersion: string
   readonly bridge: RemoteBridge
+  /** The public hostname phones reach this host at from outside the
+   *  network, or undefined when there is none. */
+  readonly remoteHost: string | undefined
   /** The live pairing secret, or null when the window is shut or expired. */
   openPairingSecret(): Buffer | null
   /** Close the pairing window — called on the FIRST successful pair. */
@@ -45,6 +49,9 @@ export interface RemoteHostSessionDelegate {
   pairDevice(id: string, name: string, platform: string): Buffer
   /** Stored (possibly revoked) device lookup for `resume`. */
   resumeDevice(id: string): { key: Buffer; revoked: boolean } | null
+  /** Called once the auth reply is on the wire — never before it, so a
+   *  phone that only listens for notifications once it has its answer
+   *  doesn't miss the first ones. */
   sessionAuthenticated(session: RemoteHostSession): void
   sessionClosed(session: RemoteHostSession): void
 }
@@ -163,7 +170,8 @@ export class RemoteHostSession {
       hostKind: 'app',
       hostVersion: this.delegate.hostVersion,
       challenge: base64urlEncode(this.challenge),
-      pairingOpen: this.delegate.openPairingSecret() !== null
+      pairingOpen: this.delegate.openPairingSecret() !== null,
+      features: [...REMOTE_HOST_FEATURES]
     }
     this.notify(RemoteMethod.hello, hello as unknown as JSONValue)
   }
@@ -203,6 +211,10 @@ export class RemoteHostSession {
     try {
       if (method === RemoteMethod.auth) {
         succeed(this.authenticate(params))
+        // After the reply, not inside authenticate(): whatever the host
+        // sends a new session (its state, the prompts waiting) has to land
+        // behind the answer the phone is waiting for.
+        if (!this.closed) this.delegate.sessionAuthenticated(this)
         return
       }
       if (!this.isAuthenticated) {
@@ -445,14 +457,16 @@ export class RemoteHostSession {
     }
 
     this.authedDeviceId = deviceID
-    this.delegate.sessionAuthenticated(this)
 
     const result: RemoteAuthResultPayload = {
       hostID: this.delegate.hostId,
       hostName: this.delegate.hostName,
       hostKind: 'app',
-      agentReady: this.delegate.bridge.agentReady()
+      agentReady: this.delegate.bridge.agentReady(),
+      features: [...REMOTE_HOST_FEATURES]
     }
+    const remoteHost = this.delegate.remoteHost
+    if (remoteHost) result.remoteHost = remoteHost
     // The durable key travels exactly once, on the connection that minted it.
     // A resume proves the key the device already has.
     if (mintedKey) result.deviceKey = base64urlEncode(mintedKey)

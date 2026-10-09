@@ -29,8 +29,41 @@ import type { ChatSummary, StoredSession, TranscriptItem } from './model'
 // Versioning / discovery
 // ---------------------------------------------------------------------------
 
-/** Bumped when the wire surface changes incompatibly. */
+/** Bumped when the wire surface changes incompatibly. Additions don't bump
+ *  it — a host rejects every other version outright (-33004), so a bump
+ *  would lock out every phone already in the field. They are announced in
+ *  `features` instead. */
 export const REMOTE_PROTOCOL_VERSION = 1
+
+/** Capabilities a host may announce in `hello` and the auth result. Each is
+ *  an addition to v1 that an older peer simply never sees: a phone that
+ *  finds a name here may rely on it, and falls back to v1 behaviour when it
+ *  is missing (an older desktop, or the Mac host). */
+export const RemoteFeature = {
+  /** chats/config answers once the set is done, with `{configOptions}`, and
+   *  every option change reaches every phone as a config_option_update. */
+  configResult: 'configResult',
+  /** Local notices ("Couldn't change Model…") arrive as chat/state with a
+   *  `notice` and no stopReason. */
+  notices: 'notices',
+  /** Prompts still waiting are sent again right after auth. */
+  pendingReplay: 'pendingReplay',
+  /** chats/prompt takes `mentions`. */
+  mentions: 'mentions',
+  /** chats/rename. */
+  rename: 'rename',
+  /** projects/files. */
+  projectFiles: 'projectFiles',
+  /** The auth result and host/state carry `remoteHost`. */
+  remoteHost: 'remoteHost',
+  /** chats/open's transcript keeps the fields listed at transcriptItemToWire. */
+  snapshotV2: 'snapshotV2'
+} as const
+
+export type RemoteFeatureName = (typeof RemoteFeature)[keyof typeof RemoteFeature]
+
+/** What this host implements — exactly these, so a phone can trust them. */
+export const REMOTE_HOST_FEATURES: readonly RemoteFeatureName[] = []
 
 /** Bonjour service type ("_spettro-remote._tcp" on the wire; bonjour-service
  *  takes it without the underscore/protocol decoration). */
@@ -138,6 +171,8 @@ export interface RemoteHelloParams {
   /** base64url, 32 random bytes, fresh per connection. */
   challenge: string
   pairingOpen: boolean
+  /** REMOTE_HOST_FEATURES. Absent from older hosts. */
+  features: string[]
 }
 
 export type RemoteAuthMode = 'pair' | 'resume'
@@ -160,6 +195,12 @@ export interface RemoteAuthResultPayload {
   hostName: string
   hostKind: RemoteHostKind
   agentReady: boolean
+  /** REMOTE_HOST_FEATURES, again: a phone that resumed may not have kept the
+   *  hello it built its proof from. */
+  features: string[]
+  /** The bare public hostname phones can reach this host at from outside
+   *  the network (`wss://<remoteHost>/`). Omitted when there is none. */
+  remoteHost?: string
 }
 
 // ---------------------------------------------------------------------------
@@ -267,6 +308,10 @@ export interface RemoteHostStateParams {
   agentReady: boolean
   shuttingDown: boolean
   message?: string
+  /** As in the auth result, but always sent while the host is up: '' means
+   *  there is no public hostname (any the phone kept is stale). Left out of
+   *  a goodbye (shuttingDown), which says nothing about the next launch. */
+  remoteHost?: string
 }
 
 // ---------------------------------------------------------------------------

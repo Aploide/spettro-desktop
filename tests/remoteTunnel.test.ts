@@ -5,7 +5,7 @@
 // listener would hand them over — so nothing here reaches a network.
 
 import { EventEmitter } from 'node:events'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -641,5 +641,35 @@ describe('a failed download', () => {
     await host.setEnabled(true)
     await settleAll()
     expect(installs).toBe(2)
+  })
+})
+
+describe('a cloudflared that went away', () => {
+  it('is looked for again on Try again, not run from where it was', async () => {
+    const p = await connectedTunnel()
+    p.emit({ phase: 'failed', error: { kind: 'binary-missing', message: 'cloudflared isn’t where it was.' } })
+    expect(host.getState().tunnel.status).toBe('error')
+    located = { path: '/usr/local/bin/cloudflared', version: '2026.9.0', source: 'system' }
+    await host.retryTunnel()
+    await settleAll()
+    expect(p.retried).toBe(0)
+    expect(processes).toHaveLength(2)
+    expect(processes[1].options.binaryPath).toBe('/usr/local/bin/cloudflared')
+  })
+
+  it('leaves the pid file to its successor when it exits late', async () => {
+    const pidFile = join(dir, 'cloudflared.pid')
+    const first = await connectedTunnel()
+    first.options.onPid?.(4_000_001)
+    await host.setTunnelEnabled(false)
+    await host.setTunnelEnabled(true)
+    await settleAll()
+    const second = processes.at(-1) as FakeProcess
+    expect(second).not.toBe(first)
+    second.options.onPid?.(4_000_002)
+    first.options.onPid?.(null)
+    expect(readFileSync(pidFile, 'utf8')).toBe('4000002')
+    second.options.onPid?.(null)
+    expect(existsSync(pidFile)).toBe(false)
   })
 })

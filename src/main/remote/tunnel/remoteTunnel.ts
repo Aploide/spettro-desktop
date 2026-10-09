@@ -262,10 +262,14 @@ export class RemoteTunnel {
     this.sync()
   }
 
-  /** Try again now: after an error, or to cut a backoff short. */
+  /** Try again now: after an error, or to cut a backoff short. A
+   *  cloudflared that is gone or won't run is looked for (or fetched)
+   *  again rather than tried at the same path. */
   retry(): void {
     if (this.localError?.kind !== 'port-in-use') this.localError = null
-    if (this.process) this.process.retryNow()
+    const failed = this.process?.state.phase === 'failed' ? this.process.state.error?.kind : undefined
+    if (failed === 'binary-missing' || failed === 'launch') void this.restart()
+    else if (this.process) this.process.retryNow()
     else this.sync()
     this.publish()
   }
@@ -421,6 +425,7 @@ export class RemoteTunnel {
       // An empty config of our own: without --config, cloudflared would
       // load ~/.cloudflared/config.yml and whatever it says.
       writeFileSync(this.configFile, '{}\n')
+      let ownPid: number | null = null
       const create =
         this.options.createProcess ?? ((options, onChange) => new TunnelProcess(options, onChange))
       const proc = create(
@@ -429,7 +434,12 @@ export class RemoteTunnel {
           token: settings.token,
           configPath: this.configFile,
           platform: this.platform,
-          onPid: (pid) => this.writePid(pid)
+          // The file is this process's only while it runs: one stopped
+          // without waiting may exit after its successor wrote its own pid.
+          onPid: (pid) => {
+            if (pid !== null) ownPid = pid
+            this.writePid(pid, ownPid)
+          }
         },
         (snapshot) => {
           if (this.process !== proc) return
@@ -504,10 +514,14 @@ export class RemoteTunnel {
 
   // MARK: A cloudflared left behind
 
-  private writePid(pid: number | null): void {
+  /** Writes the pid of a cloudflared that started, or (pid null) removes
+   *  the file if it still names `own`, the one that exited. */
+  private writePid(pid: number | null, own: number | null): void {
     try {
-      if (pid === null) rmSync(this.pidFile, { force: true })
-      else writeFileSync(this.pidFile, String(pid))
+      if (pid !== null) writeFileSync(this.pidFile, String(pid))
+      else if (own !== null && existsSync(this.pidFile) && readFileSync(this.pidFile, 'utf8').trim() === String(own)) {
+        rmSync(this.pidFile, { force: true })
+      }
     } catch {
       /* best effort */
     }

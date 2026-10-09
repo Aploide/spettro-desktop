@@ -484,7 +484,7 @@ export class TunnelProcess {
       retryAt: null,
       error:
         code === 'ENOENT'
-          ? { kind: 'binary-missing', message: 'cloudflared isn’t where it was. Turn the tunnel off and on to look again.' }
+          ? { kind: 'binary-missing', message: 'cloudflared isn’t where it was. Try again, and Spettro will look for it.' }
           : { kind: 'launch', message: `cloudflared couldn’t start: ${redactTokens(message)}` }
     })
     this.publish()

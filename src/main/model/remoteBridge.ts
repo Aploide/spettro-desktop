@@ -14,6 +14,7 @@ import type { ACPContentBlock, ACPQuestionAnswer, JSONValue } from '../../shared
 import { ExtensionMethod } from '../../shared/extensions'
 import type { RemoteBridge } from '../remote/bridge'
 import type { AppModel, PromptAttachment } from './appModel'
+import { listProjectFiles } from './projectFiles'
 
 /** The `_spettro/*` calls a phone can make that change state this process
  *  mirrors. After one lands, the local stores are re-read so both screens
@@ -54,6 +55,22 @@ export function buildRemoteBridge(model: AppModel): RemoteBridge {
   forward('question-resolved', 'question-resolved')
   forward('agent-notification', 'agent-notification')
 
+  const listProjects = (): { path: string; name: string }[] => {
+    const counts = new Map<string, number>()
+    for (const session of model.sessions) {
+      counts.set(session.projectPath, (counts.get(session.projectPath) ?? 0) + 1)
+    }
+    // The default folder is always offered, even with no chats in it yet —
+    // otherwise a phone attached to an empty sidebar would have nowhere at
+    // all to start a conversation.
+    const fallback = model.defaultProjectPath
+    if (!counts.has(fallback)) counts.set(fallback, 0)
+    return [...counts.entries()]
+      .map(([path, chatCount]) => ({ path, name: basename(path), chatCount }))
+      .sort((a, b) => b.chatCount - a.chatCount || a.name.localeCompare(b.name))
+      .map(({ path, name }) => ({ path, name }))
+  }
+
   return {
     listChats: () => model.sessions.map((s) => s.summary()),
 
@@ -91,20 +108,19 @@ export function buildRemoteBridge(model: AppModel): RemoteBridge {
       model.flagChat(chatId, flags)
     },
 
-    listProjects: () => {
-      const counts = new Map<string, number>()
-      for (const session of model.sessions) {
-        counts.set(session.projectPath, (counts.get(session.projectPath) ?? 0) + 1)
-      }
-      // The default folder is always offered, even with no chats in it yet —
-      // otherwise a phone attached to an empty sidebar would have nowhere at
-      // all to start a conversation.
-      const fallback = model.defaultProjectPath
-      if (!counts.has(fallback)) counts.set(fallback, 0)
-      return [...counts.entries()]
-        .map(([path, chatCount]) => ({ path, name: basename(path), chatCount }))
-        .sort((a, b) => b.chatCount - a.chatCount || a.name.localeCompare(b.name))
-        .map(({ path, name }) => ({ path, name }))
+    renameChat: (chatId, title) => {
+      if (!model.sessionById(chatId)) return false
+      model.renameChat(chatId, title)
+      return true
+    },
+
+    listProjects,
+
+    // Only the folders a phone is offered: projects/list is the whole of
+    // what it can browse, not the disk.
+    projectFiles: async (projectPath) => {
+      if (!listProjects().some((p) => p.path === projectPath)) return null
+      return listProjectFiles(projectPath)
     },
 
     // Mentions go the same way as the composer's: each still in the text is

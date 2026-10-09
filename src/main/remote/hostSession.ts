@@ -13,6 +13,7 @@ import type { WebSocket } from 'ws'
 import type { ACPContentBlock, JSONValue } from '../../shared/acp'
 import {
   REMOTE_HOST_FEATURES,
+  REMOTE_PROJECT_FILES_CAP,
   REMOTE_PROTOCOL_VERSION,
   RemoteAuthError,
   RemoteMethod,
@@ -306,6 +307,17 @@ export class RemoteHostSession {
         return null
       }
 
+      case RemoteMethod.chatRename: {
+        const obj = asObject(params)
+        const chatId = normalizeChatId(reqString(obj, 'chatID'))
+        const title = reqString(obj, 'title')
+        // A chat is never left nameless (ChatSession.rename refuses it).
+        if (title.trim() === '') throw invalidParams()
+        // Every screen hears the new title as a chat/state, this one too.
+        if (!bridge.renameChat(chatId, title)) throw new RPCFault(-32001, 'no such chat')
+        return null
+      }
+
       case RemoteMethod.chatPrompt: {
         const obj = asObject(params)
         const chatId = normalizeChatId(reqString(obj, 'chatID'))
@@ -383,6 +395,13 @@ export class RemoteHostSession {
 
       case RemoteMethod.projectsList:
         return { projects: this.projects() as unknown as JSONValue[] }
+
+      case RemoteMethod.projectFiles: {
+        const obj = asObject(params)
+        const files = await bridge.projectFiles(reqString(obj, 'projectPath'))
+        if (files === null) throw new RPCFault(-32001, 'no such project')
+        return { files: files.slice(0, REMOTE_PROJECT_FILES_CAP) }
+      }
 
       default:
         throw new RPCFault(-32601, `method not supported: ${method}`)

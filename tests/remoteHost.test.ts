@@ -7,7 +7,7 @@
 // each test says what the app holds and reads what the phone would see.
 
 import { EventEmitter } from 'events'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -82,7 +82,9 @@ function fakeBridge(overrides: Partial<RemoteBridge> = {}): RemoteBridge {
     newChat: (projectPath) => summary('00000000-0000-4000-8000-000000000001', { projectPath }),
     deleteChat: () => undefined,
     flagChat: () => undefined,
+    renameChat: () => false,
     listProjects: () => [],
+    projectFiles: async () => null,
     prompt: async () => undefined,
     cancelChat: () => undefined,
     setConfig: async () => undefined,
@@ -149,9 +151,9 @@ function liveHost(): RemoteHost {
 }
 
 /** A chat with a live ACP session `sessionId`, showing `configOptions()`. */
-async function liveChat(sessionId = 's1'): Promise<ChatSession> {
+async function liveChat(sessionId = 's1', projectPath = dir): Promise<ChatSession> {
   fake.handlers['session/new'] = () => ({ sessionId, configOptions: configOptions({}) })
-  const session = model.newChat(dir)
+  const session = model.newChat(projectPath)
   await settleAll()
   expect(session.acpSessionId).toBe(sessionId)
   return session
@@ -209,10 +211,13 @@ function authenticating(deviceId = 'phone-1'): { socket: FakeSocket; authId: num
 async function call(socket: FakeSocket, method: string, params: JSONValue): Promise<Frame> {
   const id = nextId++
   socket.receive({ jsonrpc: '2.0', id, method, params })
-  for (let i = 0; i < 20; i++) {
+  // Some answers wait on a child process (projects/files asks git), so
+  // this waits on the clock rather than on a number of turns.
+  const deadline = Date.now() + 3000
+  while (Date.now() < deadline) {
     const reply = socket.reply(id)
     if (reply) return reply
-    await settle()
+    await new Promise((resolve) => setTimeout(resolve, 1))
   }
   throw new Error(`no reply to ${method}`)
 }
@@ -642,5 +647,72 @@ describe('chats/prompt mentions', () => {
       mentions: [42]
     })
     expect((reply.error as Frame).code).toBe(-32602)
+  })
+})
+
+describe('chats/rename', () => {
+  it('renames the chat and tells every screen', async () => {
+    liveHost()
+    const chat = await liveChat()
+    const renaming = await attached('phone-1')
+    const watching = await attached('phone-2')
+
+    const reply = await call(renaming, RemoteMethod.chatRename, { chatID: chat.id.toUpperCase(), title: '  Ship   it ' })
+
+    expect(reply.result).toBeNull()
+    expect(chat.title).toBe('Ship it')
+    for (const socket of [renaming, watching]) {
+      const titles = socket.notifications(RemoteMethod.chatState).map((f) => ((f.params as Frame).chat as Frame).title)
+      expect(titles).toContain('Ship it')
+    }
+    expect(REMOTE_HOST_FEATURES).toContain(RemoteFeature.rename)
+  })
+
+  it('refuses a blank title and an unknown chat', async () => {
+    liveHost()
+    const chat = await liveChat()
+    const socket = await attached()
+    const blank = await call(socket, RemoteMethod.chatRename, { chatID: chat.id, title: '   ' })
+    expect((blank.error as Frame).code).toBe(-32602)
+    const unknown = await call(socket, RemoteMethod.chatRename, {
+      chatID: '00000000-0000-4000-8000-00000000dead',
+      title: 'Nope'
+    })
+    expect((unknown.error as Frame).code).toBe(-32001)
+  })
+})
+
+describe('projects/files', () => {
+  it('lists a project’s files as the mention menu does', async () => {
+    liveHost()
+    const project = join(dir, 'acme')
+    mkdirSync(join(project, 'src'), { recursive: true })
+    mkdirSync(join(project, 'node_modules', 'dep'), { recursive: true })
+    writeFileSync(join(project, 'src', 'a.ts'), '')
+    writeFileSync(join(project, 'README.md'), '')
+    writeFileSync(join(project, 'node_modules', 'dep', 'index.js'), '')
+    await liveChat('s1', project)
+    const socket = await attached()
+
+    const reply = await call(socket, RemoteMethod.projectFiles, { projectPath: project })
+
+    expect(((reply.result as Frame).files as string[]).sort()).toEqual(['README.md', 'src/a.ts'])
+    expect(REMOTE_HOST_FEATURES).toContain(RemoteFeature.projectFiles)
+  })
+
+  it('lists nothing outside the projects a phone is offered', async () => {
+    liveHost()
+    await liveChat()
+    const socket = await attached()
+    const reply = await call(socket, RemoteMethod.projectFiles, { projectPath: '/etc' })
+    expect((reply.error as Frame).code).toBe(-32001)
+  })
+
+  it('stops at 5000 files', async () => {
+    const many = Array.from({ length: 6000 }, (_, i) => `f${i}.txt`)
+    makeHost({ projectFiles: async () => many })
+    const socket = await attached()
+    const reply = await call(socket, RemoteMethod.projectFiles, { projectPath: '/project' })
+    expect((reply.result as Frame).files).toHaveLength(5000)
   })
 })

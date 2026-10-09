@@ -34,7 +34,12 @@ export interface RemoteBridge {
   newChat(projectPath: string): ChatSummary
   deleteChat(chatId: string): void
   flagChat(chatId: string, flags: { isPinned?: boolean; isArchived?: boolean }): void
+  /** False when there is no such chat. */
+  renameChat(chatId: string, title: string): boolean
   listProjects(): { path: string; name: string }[]
+  /** The files the @-mention menu would list for one of listProjects'
+   *  folders; null for any other path. */
+  projectFiles(projectPath: string): Promise<string[] | null>
   /** `mentions`: the project-relative files @-mentioned in the text. */
   prompt(chatId: string, blocks: ACPContentBlock[], sourceDeviceId: string, mentions: string[]): Promise<void>
   cancelChat(chatId: string): void

@@ -68,6 +68,8 @@ export const REMOTE_HOST_FEATURES: readonly RemoteFeatureName[] = [
   RemoteFeature.notices,
   RemoteFeature.pendingReplay,
   RemoteFeature.mentions,
+  RemoteFeature.rename,
+  RemoteFeature.projectFiles,
   RemoteFeature.snapshotV2
 ]
 
@@ -115,6 +117,8 @@ export const RemoteMethod = {
   chatNew: '_spettro/remote/chats/new',
   chatDelete: '_spettro/remote/chats/delete',
   chatFlag: '_spettro/remote/chats/flag',
+  /** {chatID, title} → null (feature `rename`). */
+  chatRename: '_spettro/remote/chats/rename',
 
   // Driving a turn.
   chatPrompt: '_spettro/remote/chats/prompt',
@@ -141,7 +145,9 @@ export const RemoteMethod = {
   agentNotification: '_spettro/remote/agent/notification',
 
   // Projects.
-  projectsList: '_spettro/remote/projects/list'
+  projectsList: '_spettro/remote/projects/list',
+  /** {projectPath} → {files} (feature `projectFiles`). */
+  projectFiles: '_spettro/remote/projects/files'
 } as const
 
 export type RemoteMethodName = (typeof RemoteMethod)[keyof typeof RemoteMethod]
@@ -390,6 +396,26 @@ export interface RemoteProjectWire {
 
 export interface RemoteProjectsListResult {
   projects: RemoteProjectWire[]
+}
+
+/** Files projects/files returns at most — the walk's own cap, and plenty
+ *  for a mention menu to search. */
+export const REMOTE_PROJECT_FILES_CAP = 5000
+
+export interface RemoteProjectFilesParams {
+  /** One of projects/list's paths (or a chat's projectPath). */
+  projectPath: string
+}
+
+/** What the desktop's @-mention menu lists: project-relative paths with
+ *  forward slashes, git's tracked and unignored files in a repository. */
+export interface RemoteProjectFilesResult {
+  files: string[]
+}
+
+export interface RemoteChatRenameParams {
+  chatID: string
+  title: string
 }
 
 // ---------------------------------------------------------------------------

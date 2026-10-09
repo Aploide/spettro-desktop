@@ -16,7 +16,7 @@ specification; this file maps its concepts onto this codebase.
 | Shared wire/presentation types | `src/shared/` — imported by both sides |
 
 Keeping the model in the main process means the local window and remote
-clients (iPhone app) are both "screens" attached to one source of truth —
+clients (the iPhone and Android apps) are both "screens" attached to one source of truth —
 exactly the topology doc 34 (remote protocol) prescribes.
 
 ## IPC contract

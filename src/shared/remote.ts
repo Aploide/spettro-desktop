@@ -1,7 +1,8 @@
 // Spettro Remote wire types — port of RemoteProtocol.swift.
 //
-// This is the protocol an iPhone/iPad speaks to a host driving the CLI. The
-// Swift host (spettro-apple/Platforms/macOS/Core/Remote/*) is the reference
+// This is the protocol a phone or tablet (the iOS and the Android app) speaks
+// to a host driving the CLI. The Swift host
+// (spettro-apple/Platforms/macOS/Core/Remote/*) is the reference
 // implementation and the shipped iOS client decodes every payload with Swift's
 // synthesized Codable, so the shapes below are byte-for-byte what that decoder
 // expects:

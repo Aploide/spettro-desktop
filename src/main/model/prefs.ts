@@ -35,6 +35,9 @@
 //   knownSessionIds   — every CLI session id this app created or imported,
 //                       kept after the chat is deleted: the CLI keeps those
 //                       on disk, and they are not "started in a terminal"
+//   remoteSharing     — remote access was on when the app last ran (or
+//                       quit); it is turned back on at launch, since a
+//                       phone away from this computer can't do it
 
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'fs'
 import { dirname, join } from 'path'
@@ -55,6 +58,7 @@ interface PrefsData {
   approvedBroadFolders: string[]
   pendingDefaults: Record<string, string | boolean>
   knownSessionIds: string[]
+  remoteSharing: boolean
 }
 
 /** The commands-cache key for "the last list seen in any folder". */
@@ -83,7 +87,8 @@ function defaults(): PrefsData {
     notifyWhenDone: true,
     approvedBroadFolders: [],
     pendingDefaults: {},
-    knownSessionIds: []
+    knownSessionIds: [],
+    remoteSharing: false
   }
 }
 
@@ -132,6 +137,7 @@ function sanitize(raw: unknown): PrefsData {
   if (Array.isArray(obj.knownSessionIds)) {
     data.knownSessionIds = obj.knownSessionIds.filter((id): id is string => typeof id === 'string')
   }
+  if (typeof obj.remoteSharing === 'boolean') data.remoteSharing = obj.remoteSharing
   return data
 }
 
@@ -333,6 +339,16 @@ export class Prefs {
 
   set pendingDefaults(values: Record<string, string | boolean>) {
     this.data.pendingDefaults = { ...values }
+    this.save()
+  }
+
+  get remoteSharing(): boolean {
+    return this.data.remoteSharing
+  }
+
+  set remoteSharing(value: boolean) {
+    if (this.data.remoteSharing === value) return
+    this.data.remoteSharing = value
     this.save()
   }
 

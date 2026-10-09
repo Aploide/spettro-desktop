@@ -11,12 +11,13 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import type { WebSocket } from 'ws'
+import { WebSocketServer, type WebSocket } from 'ws'
 import { AcpAgent, type AcpConnection, parseAgentCapabilities } from '@main/acp'
 import { AppModel } from '@main/model/appModel'
 import type { ChatSession } from '@main/model/chatSession'
 import { buildRemoteBridge } from '@main/model/remoteBridge'
 import type { RemoteBridge } from '@main/remote/bridge'
+import { Prefs } from '@main/model/prefs'
 import { RemoteHost } from '@main/remote/host'
 import { base64urlDecode, computeProof } from '@main/remote/pairing'
 import type { JSONValue } from '@shared/acp'
@@ -767,5 +768,58 @@ describe('Workflow Studio scratch chats', () => {
     expect(mentioning(socket, scratchId)).toEqual([
       expect.objectContaining({ method: RemoteMethod.chatRemoved, params: { chatID: scratchId } })
     ])
+  })
+})
+
+describe('remote sharing across launches', () => {
+  /** A host that listens on a loopback port of the OS's choosing and
+   *  advertises nothing, reporting each sharing change to `changes`. */
+  function sharingHost(changes: boolean[]): RemoteHost {
+    bridge = fakeBridge()
+    host = new RemoteHost(bridge, {
+      dataDir: dir,
+      onStateChanged: () => undefined,
+      onSharingChanged: (enabled) => changes.push(enabled)
+    })
+    const internals = host as unknown as {
+      advertiser: { start(): void; stop(): void }
+      listen(port: number): Promise<WebSocketServer>
+    }
+    internals.advertiser = { start: () => undefined, stop: () => undefined }
+    internals.listen = () =>
+      new Promise((resolve) => {
+        const wss = new WebSocketServer({ port: 0, host: '127.0.0.1' })
+        wss.once('listening', () => resolve(wss))
+      })
+    return host
+  }
+
+  it('reports the user turning it on and off, and opening a code turning it on', async () => {
+    const changes: boolean[] = []
+    sharingHost(changes)
+    await host.setEnabled(true)
+    await host.setEnabled(false)
+    await host.openPairing()
+    expect(changes).toEqual([true, false, true])
+    expect(host.getState().enabled).toBe(true)
+  })
+
+  it('doesn’t count quitting as turning it off', async () => {
+    const changes: boolean[] = []
+    sharingHost(changes)
+    await host.setEnabled(true)
+    host.shutdown()
+    expect(changes).toEqual([true])
+  })
+
+  it('is remembered on disk', () => {
+    const prefs = new Prefs(dir)
+    expect(prefs.remoteSharing).toBe(false)
+    prefs.remoteSharing = true
+    expect(new Prefs(dir).remoteSharing).toBe(true)
+    const app = new AppModel({ userDataDir: dir, appVersion: '0.0.0-test' })
+    expect(app.remoteSharing).toBe(true)
+    app.remoteSharing = false
+    expect(new Prefs(dir).remoteSharing).toBe(false)
   })
 })

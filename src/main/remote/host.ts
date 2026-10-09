@@ -5,7 +5,8 @@
 // Lifetime: the listener runs for as long as remote access is switched on,
 // independent of whether any phone is connected — the phone is the thing that
 // comes and goes. Sharing is off by default and opt-in, matching /remote in
-// the TUI.
+// the TUI; once on, it stays on across launches (onSharingChanged, restored
+// by main) until the user turns it off.
 
 import { networkInterfaces } from 'os'
 import { WebSocketServer, type WebSocket } from 'ws'
@@ -74,6 +75,7 @@ function askParams(promptId: string, chatId: string | null, raw: JSONValue): JSO
 export class RemoteHost implements RemoteHostSessionDelegate {
   readonly bridge: RemoteBridge
   private readonly onStateChanged: (s: RemoteHostState) => void
+  private readonly onSharingChanged: (enabled: boolean) => void
   private readonly devices: PairedDeviceStore
   private readonly identity: HostIdentityStore
   private readonly advertiser = new RemoteAdvertiser()
@@ -99,9 +101,19 @@ export class RemoteHost implements RemoteHostSessionDelegate {
   /** Listeners registered on bridge.events, kept for shutdown(). */
   private readonly bridgeListeners: [string, (...args: never[]) => void][] = []
 
-  constructor(bridge: RemoteBridge, opts: { dataDir: string; onStateChanged: (s: RemoteHostState) => void }) {
+  constructor(
+    bridge: RemoteBridge,
+    opts: {
+      dataDir: string
+      onStateChanged: (s: RemoteHostState) => void
+      /** The user turned sharing on or off — persisted so a launch can
+       *  restore it. Not called when the app quits with sharing on. */
+      onSharingChanged?: (enabled: boolean) => void
+    }
+  ) {
     this.bridge = bridge
     this.onStateChanged = opts.onStateChanged
+    this.onSharingChanged = opts.onSharingChanged ?? ((): void => undefined)
     this.devices = new PairedDeviceStore(opts.dataDir)
     this.identity = new HostIdentityStore(opts.dataDir)
     this.wireBridgeEvents()
@@ -209,6 +221,7 @@ export class RemoteHost implements RemoteHostSessionDelegate {
   async setEnabled(v: boolean): Promise<void> {
     if (v) await this.start()
     else this.stop()
+    this.onSharingChanged(v)
   }
 
   private async start(): Promise<void> {
@@ -311,7 +324,10 @@ export class RemoteHost implements RemoteHostSessionDelegate {
    *  be on for a scan to reach anything, so turning it on is part of "show me
    *  the code" rather than a separate step. */
   async openPairing(): Promise<void> {
-    if (!this.enabled) await this.start()
+    if (!this.enabled) {
+      await this.start()
+      this.onSharingChanged(true)
+    }
     if (this.pairingTimer) clearTimeout(this.pairingTimer)
     const window = createPairingWindow()
     this.pairingWindow = window

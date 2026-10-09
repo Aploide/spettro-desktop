@@ -128,9 +128,19 @@ app.whenReady().then(() => {
   terminals = new TerminalManager(pushToWindow)
   remoteHost = new RemoteHost(buildRemoteBridge(model), {
     dataDir: userDataDir,
-    onStateChanged: (state) => model?.setRemoteState(state)
+    onStateChanged: (state) => model?.setRemoteState(state),
+    onSharingChanged: (enabled) => {
+      if (model) model.remoteSharing = enabled
+    }
   })
   model.setRemoteState(remoteHost.getState())
+  // Sharing left on is on again: a phone away from this computer has no
+  // way to turn it back on itself.
+  if (model.remoteSharing) {
+    remoteHost.setEnabled(true).catch((error) => {
+      console.error('[remote] could not turn remote access back on', error)
+    })
+  }
   ipcHandle = registerIpc(model, terminals, remoteHost, getMainWindow)
   // The app badge and notifications for approvals and questions waiting.
   wireAttention(model, getMainWindow)

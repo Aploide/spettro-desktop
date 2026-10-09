@@ -372,6 +372,16 @@ export class AppModel extends EventEmitter {
     this.emitAppState()
   }
 
+  /** Whether remote access was on when the app last ran. Main turns it back
+   *  on at launch and keeps it up to date (RemoteHost onSharingChanged). */
+  get remoteSharing(): boolean {
+    return this.prefs.remoteSharing
+  }
+
+  set remoteSharing(on: boolean) {
+    this.prefs.remoteSharing = on
+  }
+
   /** A one-off message from outside the model (the quit guard). */
   notify(text: string): void {
     this.showBanner(text)

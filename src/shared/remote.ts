@@ -65,7 +65,8 @@ export type RemoteFeatureName = (typeof RemoteFeature)[keyof typeof RemoteFeatur
 /** What this host implements — exactly these, so a phone can trust them. */
 export const REMOTE_HOST_FEATURES: readonly RemoteFeatureName[] = [
   RemoteFeature.configResult,
-  RemoteFeature.notices
+  RemoteFeature.notices,
+  RemoteFeature.pendingReplay
 ]
 
 /** Bonjour service type ("_spettro-remote._tcp" on the wire; bonjour-service

@@ -20,6 +20,13 @@ import type { EventEmitter } from 'events'
 import type { ACPContentBlock, JSONValue } from '../../shared/acp'
 import type { ChatSummary, StoredSession } from '../../shared/model'
 
+export interface RemotePendingPrompt {
+  kind: 'permission' | 'question'
+  promptId: string
+  chatId: string | null
+  raw: JSONValue
+}
+
 export interface RemoteBridge {
   listChats(): ChatSummary[]
   openChat(chatId: string): { chat: StoredSession; configOptions: JSONValue; commands: JSONValue; plan: JSONValue; usage: JSONValue | null; isBusy: boolean } | null
@@ -38,5 +45,8 @@ export interface RemoteBridge {
   resolvePermission(promptId: string, selectedOptionId: string | null, deviceId: string): void
   answerQuestion(promptId: string, answers: JSONValue | null, deviceId: string): void
   agentReady(): boolean
+  /** Every permission and question still waiting on an answer, with the
+   *  same ids and payloads their -ask events carried. */
+  pendingPrompts(): RemotePendingPrompt[]
   events: EventEmitter // 'chat-update'(chatId, rawUpdate) 'chat-user'(chatId, text, attachments, timestamp, sourceDeviceId|null) 'chat-state'(summary, extra?) 'chat-removed'(chatId) 'host-state'({agentReady,shuttingDown,message?}) 'permission-ask'(promptId, chatId|null, raw) 'permission-resolved'(promptId, resolvedBy|null) 'question-ask'(promptId, chatId|null, raw) 'question-resolved'(promptId, resolvedBy|null) 'agent-notification'(method, params)
 }

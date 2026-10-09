@@ -2039,6 +2039,25 @@ export class AppModel extends EventEmitter {
     this.emit('permission-resolved', requestId, resolvedBy)
   }
 
+  /** The permissions and questions still waiting, as paired devices were
+   *  told of them: one that attaches later is told again (RemoteHost). */
+  pendingPrompts(): { kind: 'permission' | 'question'; promptId: string; chatId: string | null; raw: JSONValue }[] {
+    return [
+      ...this.pendingPermissions.map((p) => ({
+        kind: 'permission' as const,
+        promptId: p.request.id,
+        chatId: p.request.chatId,
+        raw: p.raw
+      })),
+      ...this.pendingQuestions.map((q) => ({
+        kind: 'question' as const,
+        promptId: q.request.id,
+        chatId: q.request.chatId,
+        raw: q.raw
+      }))
+    ]
+  }
+
   /** answers === null declines the whole form. */
   answerQuestion(
     requestId: string,

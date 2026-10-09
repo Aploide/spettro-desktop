@@ -63,6 +63,14 @@ function primaryLANAddress(): string | undefined {
   return best
 }
 
+/** permission/ask and question/ask params: the host's prompt id, the chat
+ *  when there is one, and the agent's request verbatim. */
+function askParams(promptId: string, chatId: string | null, raw: JSONValue): JSONValue {
+  const params: { [key: string]: JSONValue } = { promptID: promptId, request: raw }
+  if (chatId) params.chatID = chatId
+  return params
+}
+
 export class RemoteHost implements RemoteHostSessionDelegate {
   readonly bridge: RemoteBridge
   private readonly onStateChanged: (s: RemoteHostState) => void
@@ -155,13 +163,25 @@ export class RemoteHost implements RemoteHostSessionDelegate {
       if (other !== session && other.deviceId === deviceId) other.close()
     }
     this.sessions = this.sessions.filter((s) => s === session || s.deviceId !== deviceId)
+    // The prompts this session was never told about: everything from here
+    // on reaches it as a broadcast.
+    const waiting = this.bridge.pendingPrompts()
     // A phone that just attached is shown the live agent state rather than
     // being left to assume — a turn later rather than right behind the
     // reply, so the phone has had its answer in hand for a moment before
-    // the first notification arrives.
+    // the first notification arrives. Then whatever is still waiting on an
+    // answer, asked again exactly as it was asked: a phone that attaches
+    // mid-prompt (or comes back from the background) would otherwise never
+    // see the approval the turn is blocked on.
     setImmediate(() => {
       if (!this.sessions.includes(session)) return
       session.sendHostState(this.hostStateParams(this.bridge.agentReady(), false))
+      const still = new Set(this.bridge.pendingPrompts().map((p) => p.promptId))
+      for (const prompt of waiting) {
+        if (!still.has(prompt.promptId)) continue
+        const method = prompt.kind === 'permission' ? RemoteMethod.permissionAsk : RemoteMethod.questionAsk
+        session.notify(method, askParams(prompt.promptId, prompt.chatId, prompt.raw))
+      }
     })
     this.publishState()
   }
@@ -489,9 +509,7 @@ export class RemoteHost implements RemoteHostSessionDelegate {
     // Blocking prompts fan out to every attached screen with the
     // host-assigned promptID; the request payload is the ACP one, verbatim.
     on('permission-ask', (promptId: string, chatId: string | null, raw: JSONValue) => {
-      const params: { [key: string]: JSONValue } = { promptID: promptId, request: raw }
-      if (chatId) params.chatID = chatId
-      this.broadcast(RemoteMethod.permissionAsk, params)
+      this.broadcast(RemoteMethod.permissionAsk, askParams(promptId, chatId, raw))
     })
 
     on('permission-resolved', (promptId: string, resolvedBy: string | null) => {
@@ -502,9 +520,7 @@ export class RemoteHost implements RemoteHostSessionDelegate {
     })
 
     on('question-ask', (promptId: string, chatId: string | null, raw: JSONValue) => {
-      const params: { [key: string]: JSONValue } = { promptID: promptId, request: raw }
-      if (chatId) params.chatID = chatId
-      this.broadcast(RemoteMethod.questionAsk, params)
+      this.broadcast(RemoteMethod.questionAsk, askParams(promptId, chatId, raw))
     })
 
     on('question-resolved', (promptId: string, resolvedBy: string | null) => {

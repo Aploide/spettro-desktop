@@ -23,7 +23,7 @@ import type { JSONValue } from '@shared/acp'
 import type { ChatSummary } from '@shared/model'
 import { REMOTE_HOST_FEATURES, RemoteFeature, RemoteMethod } from '@shared/remote'
 import { FakeAgent, Reply, settle as settleAll } from './fakeAgent'
-import { configOptionUpdate, configOptions, initializeResult, rpcError } from './wire'
+import { configOptionUpdate, configOptions, initializeResult, permissionAttached, rpcError } from './wire'
 
 type Frame = { [key: string]: JSONValue }
 
@@ -90,6 +90,7 @@ function fakeBridge(overrides: Partial<RemoteBridge> = {}): RemoteBridge {
     resolvePermission: () => undefined,
     answerQuestion: () => undefined,
     agentReady: () => true,
+    pendingPrompts: () => [],
     events: new EventEmitter(),
     ...overrides
   } as RemoteBridge
@@ -173,6 +174,15 @@ function acpValue(update: Frame, id: string): JSONValue | undefined {
 /** A socket that has been through hello and a successful resume. Resolves
  *  once the host's post-auth sends have gone out. */
 async function attached(deviceId = 'phone-1'): Promise<FakeSocket> {
+  const { socket, authId } = authenticating(deviceId)
+  await settle()
+  expect(socket.reply(authId)?.result).toBeDefined()
+  return socket
+}
+
+/** A socket whose resume has just been answered, before anything the host
+ *  defers past the reply has run. */
+function authenticating(deviceId = 'phone-1'): { socket: FakeSocket; authId: number } {
   const key = host.pairDevice(deviceId, 'Pixel', 'android')
   const socket = new FakeSocket()
   host.acceptSocket(socket as unknown as WebSocket)
@@ -192,9 +202,7 @@ async function attached(deviceId = 'phone-1'): Promise<FakeSocket> {
       protocolVersion: 1
     }
   })
-  await settle()
-  expect(socket.reply(id)?.result).toBeDefined()
-  return socket
+  return { socket, authId: id }
 }
 
 /** Sends a request and waits for its reply. */
@@ -445,5 +453,73 @@ describe('notices', () => {
     expect(withNotice).toEqual([
       expect.objectContaining({ stopReason: 'max_tokens', notice: { text: 'The reply hit the length limit.', isError: false } })
     ])
+  })
+})
+
+describe('prompts waiting when a phone attaches', () => {
+  const permission = {
+    kind: 'permission' as const,
+    promptId: 'perm-req-1',
+    chatId: '00000000-0000-4000-8000-0000000000c1',
+    raw: { sessionId: 's1', toolCall: { toolCallId: 'call-1', status: 'pending' }, options: [] }
+  }
+  const question = {
+    kind: 'question' as const,
+    promptId: 'question-req-1',
+    chatId: null,
+    raw: { sessionId: 's1', questions: [{ id: 'q1', question: 'Which?' }] }
+  }
+
+  it('are asked again right after the auth reply and host/state', async () => {
+    makeHost({ pendingPrompts: () => [permission, question] })
+    const socket = await attached()
+
+    const methods = socket.sent.map((f) => f.method ?? 'reply')
+    expect(methods.slice(-4)).toEqual([
+      'reply',
+      RemoteMethod.hostState,
+      RemoteMethod.permissionAsk,
+      RemoteMethod.questionAsk
+    ])
+    expect(socket.notifications(RemoteMethod.permissionAsk)[0].params).toEqual({
+      promptID: 'perm-req-1',
+      chatID: permission.chatId,
+      request: permission.raw
+    })
+    // No chat: the key is left out, as on the original ask.
+    expect(socket.notifications(RemoteMethod.questionAsk)[0].params).toEqual({
+      promptID: 'question-req-1',
+      request: question.raw
+    })
+    expect(REMOTE_HOST_FEATURES).toContain(RemoteFeature.pendingReplay)
+  })
+
+  it('aren’t asked again once answered in the meantime', async () => {
+    let waiting = [permission, question]
+    makeHost({ pendingPrompts: () => waiting })
+    const { socket } = authenticating()
+    waiting = [question]
+    await settle()
+
+    expect(socket.notifications(RemoteMethod.permissionAsk)).toHaveLength(0)
+    expect(socket.notifications(RemoteMethod.questionAsk)).toHaveLength(1)
+  })
+
+  it('reach a phone exactly as the one already attached was asked', async () => {
+    liveHost()
+    const chat = await liveChat()
+    fake.update('s1', { sessionUpdate: 'tool_call', toolCallId: 'call-1', title: 'Run ls', kind: 'execute', status: 'in_progress' })
+    const early = await attached('phone-1')
+    fake.ask(7, 'session/request_permission', permissionAttached({ sessionId: 's1', toolCallId: 'call-1', command: 'ls' }))
+    await settleAll()
+    const late = await attached('phone-2')
+
+    const asked = early.notifications(RemoteMethod.permissionAsk)
+    const replayed = late.notifications(RemoteMethod.permissionAsk)
+    expect(asked).toHaveLength(1)
+    expect(replayed).toEqual(asked)
+    expect((replayed[0].params as Frame).chatID).toBe(chat.id)
+    // Attaching phone-2 tells phone-1 nothing new.
+    expect(early.notifications(RemoteMethod.permissionAsk)).toHaveLength(1)
   })
 })

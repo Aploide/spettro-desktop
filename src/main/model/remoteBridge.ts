@@ -151,6 +151,8 @@ export function buildRemoteBridge(model: AppModel): RemoteBridge {
 
     agentReady: () => model.agentReady(),
 
+    pendingPrompts: () => model.pendingPrompts(),
+
     events
   }
 }

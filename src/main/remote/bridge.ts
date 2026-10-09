@@ -30,7 +30,10 @@ export interface RemoteBridge {
   listProjects(): { path: string; name: string }[]
   prompt(chatId: string, blocks: ACPContentBlock[], sourceDeviceId: string): Promise<void>
   cancelChat(chatId: string): void
-  setConfig(chatId: string, configId: string, value: { stringValue?: string; boolValue?: boolean }): Promise<void>
+  /** Resolves once the change is in, to the chat's options (either shape,
+   *  as for openChat), or null when there is no such chat. Rejects when the
+   *  agent refused it; the rejection's message and code go to the phone. */
+  setConfig(chatId: string, configId: string, value: { stringValue?: string; boolValue?: boolean }): Promise<JSONValue | null>
   agentCall(method: string, params: JSONValue): Promise<JSONValue>
   resolvePermission(promptId: string, selectedOptionId: string | null, deviceId: string): void
   answerQuestion(promptId: string, answers: JSONValue | null, deviceId: string): void

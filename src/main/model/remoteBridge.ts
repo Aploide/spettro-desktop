@@ -114,11 +114,10 @@ export function buildRemoteBridge(model: AppModel): RemoteBridge {
     },
 
     setConfig: async (chatId, configId, value) => {
-      if (typeof value.stringValue === 'string') {
-        await model.setConfigValue(chatId, configId, value.stringValue)
-      } else if (typeof value.boolValue === 'boolean') {
-        await model.setConfigValue(chatId, configId, value.boolValue)
-      }
+      const next = typeof value.stringValue === 'string' ? value.stringValue : value.boolValue
+      if (next === undefined) return null
+      const options = await model.setConfigValueForDevice(chatId, configId, next)
+      return options === null ? null : (options as unknown as JSONValue)
     },
 
     // The phone drives its own account, subscription, and provider screens

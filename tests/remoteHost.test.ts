@@ -10,14 +10,20 @@ import { EventEmitter } from 'events'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { WebSocket } from 'ws'
-import type { JSONValue } from '@shared/acp'
-import type { ChatSummary, StoredSession } from '@shared/model'
-import { REMOTE_HOST_FEATURES, RemoteMethod } from '@shared/remote'
+import { AcpAgent, type AcpConnection, parseAgentCapabilities } from '@main/acp'
+import { AppModel } from '@main/model/appModel'
+import type { ChatSession } from '@main/model/chatSession'
+import { buildRemoteBridge } from '@main/model/remoteBridge'
 import type { RemoteBridge } from '@main/remote/bridge'
 import { RemoteHost } from '@main/remote/host'
 import { base64urlDecode, computeProof } from '@main/remote/pairing'
+import type { JSONValue } from '@shared/acp'
+import type { ChatSummary } from '@shared/model'
+import { REMOTE_HOST_FEATURES, RemoteFeature, RemoteMethod } from '@shared/remote'
+import { FakeAgent, Reply, settle as settleAll } from './fakeAgent'
+import { configOptionUpdate, configOptions, initializeResult, rpcError } from './wire'
 
 type Frame = { [key: string]: JSONValue }
 
@@ -113,6 +119,57 @@ function makeHost(overrides: Partial<RemoteBridge> = {}): RemoteHost {
   return host
 }
 
+let fake: FakeAgent
+let model: AppModel
+
+/** The real thing behind the host: an AppModel whose live agent is `fake`
+ *  (wired the way connect() wires a real one), seen through the same
+ *  bridge the app builds. */
+function liveHost(): RemoteHost {
+  fake = new FakeAgent()
+  model = new AppModel({ userDataDir: dir, appVersion: '0.0.0-test' })
+  const internals = model as unknown as {
+    connection: AcpConnection
+    agent: AcpAgent
+    liveConnectionToken: number
+    phase: { kind: string }
+    wire(connection: AcpConnection, token: number): void
+  }
+  const agent = new AcpAgent(fake.conn)
+  agent.capabilities = parseAgentCapabilities(initializeResult())
+  internals.connection = fake.conn
+  internals.agent = agent
+  internals.liveConnectionToken = 1
+  internals.phase = { kind: 'ready' }
+  internals.wire(fake.conn, 1)
+  bridge = buildRemoteBridge(model)
+  host = new RemoteHost(bridge, { dataDir: dir, onStateChanged: () => undefined })
+  return host
+}
+
+/** A chat with a live ACP session `sessionId`, showing `configOptions()`. */
+async function liveChat(sessionId = 's1'): Promise<ChatSession> {
+  fake.handlers['session/new'] = () => ({ sessionId, configOptions: configOptions({}) })
+  const session = model.newChat(dir)
+  await settleAll()
+  expect(session.acpSessionId).toBe(sessionId)
+  return session
+}
+
+/** The config_option_updates a socket was sent for `chatId`. */
+function configUpdates(socket: FakeSocket, chatId: string): Frame[] {
+  return socket
+    .notifications(RemoteMethod.chatUpdate)
+    .map((f) => f.params as Frame)
+    .filter((p) => p.chatID === chatId && (p.update as Frame).sessionUpdate === 'config_option_update')
+    .map((p) => p.update as Frame)
+}
+
+/** One option's current value in an ACP-shaped option list. */
+function acpValue(update: Frame, id: string): JSONValue | undefined {
+  return (update.configOptions as Frame[]).find((o) => o.id === id)?.currentValue
+}
+
 /** A socket that has been through hello and a successful resume. Resolves
  *  once the host's post-auth sends have gone out. */
 async function attached(deviceId = 'phone-1'): Promise<FakeSocket> {
@@ -198,5 +255,128 @@ describe('the handshake', () => {
     bridge.events.emit('host-state', { agentReady: false, shuttingDown: true })
     const goodbye = socket.notifications(RemoteMethod.hostState).at(-1)?.params as Frame
     expect(goodbye).toEqual({ agentReady: false, shuttingDown: true })
+  })
+})
+
+describe('chats/config', () => {
+  it('answers once the change is in, with the options the chat runs with now', async () => {
+    liveHost()
+    const chat = await liveChat()
+    fake.handlers['session/set_config_option'] = () => ({ configOptions: configOptions({ thinking: 'high' }) })
+    const socket = await attached()
+
+    const reply = await call(socket, RemoteMethod.chatConfig, {
+      chatID: chat.id.toUpperCase(),
+      configID: 'thinking',
+      stringValue: 'high'
+    })
+
+    // The Swift wire shape chats/open uses, so one decoder reads both.
+    const thinking = (reply.result as { configOptions: Frame[] }).configOptions.find((o) => o.id === 'thinking')
+    expect((thinking?.kind as Frame).select).toMatchObject({ current: 'high' })
+    expect(REMOTE_HOST_FEATURES).toContain(RemoteFeature.configResult)
+  })
+
+  it('tells every phone, the one that asked included, as a config_option_update', async () => {
+    // The CLI only tells the *other* live sessions about a change; without
+    // this the phone that made it would never hear it landed.
+    liveHost()
+    const chat = await liveChat()
+    fake.handlers['session/set_config_option'] = () => ({ configOptions: configOptions({ thinking: 'high' }) })
+    const asking = await attached('phone-1')
+    const watching = await attached('phone-2')
+
+    await call(asking, RemoteMethod.chatConfig, { chatID: chat.id, configID: 'thinking', stringValue: 'high' })
+    await settleAll()
+
+    for (const socket of [asking, watching]) {
+      const updates = configUpdates(socket, chat.id)
+      // The optimistic value and the agent's answer agree: one update.
+      expect(updates).toHaveLength(1)
+      expect(acpValue(updates[0], 'thinking')).toBe('high')
+      // The shape the CLI sends, so the phone's ACP parser takes it as is.
+      expect((updates[0].configOptions as Frame[])[0]).toMatchObject({ id: 'mode', type: 'select' })
+    }
+  })
+
+  it('refuses with the agent’s code and the notice’s words, and takes the value back', async () => {
+    liveHost()
+    const chat = await liveChat()
+    fake.handlers['session/set_config_option'] = () => {
+      throw new Reply(rpcError('that level is not available', -32602))
+    }
+    const socket = await attached()
+
+    const reply = await call(socket, RemoteMethod.chatConfig, {
+      chatID: chat.id,
+      configID: 'thinking',
+      stringValue: 'max'
+    })
+    await settleAll()
+
+    const error = reply.error as Frame
+    expect(error.code).toBe(-32602)
+    expect(error.message).toMatch(/^Couldn't change Thinking\. /)
+    // The optimistic value went out, then the rollback.
+    const updates = configUpdates(socket, chat.id)
+    expect(updates.map((u) => acpValue(u, 'thinking'))).toEqual(['max', 'medium'])
+  })
+
+  it('answers a chat with no live session with what it now shows', async () => {
+    liveHost()
+    const chat = await liveChat()
+    // Its session belongs to an agent that has since gone.
+    ;(model as unknown as { sessionsByACPID: Map<string, unknown> }).sessionsByACPID.clear()
+    const socket = await attached()
+
+    const reply = await call(socket, RemoteMethod.chatConfig, {
+      chatID: chat.id,
+      configID: 'permission',
+      stringValue: 'restricted'
+    })
+
+    const permission = (reply.result as { configOptions: Frame[] }).configOptions.find((o) => o.id === 'permission')
+    expect((permission?.kind as Frame).select).toMatchObject({ current: 'restricted' })
+    expect(chat.pendingConfigChanges['permission']).toBe('restricted')
+    expect(fake.calls('session/set_config_option')).toHaveLength(0)
+  })
+
+  it('answers an unknown chat with -32001', async () => {
+    liveHost()
+    const socket = await attached()
+    const reply = await call(socket, RemoteMethod.chatConfig, {
+      chatID: '00000000-0000-4000-8000-00000000dead',
+      configID: 'thinking',
+      stringValue: 'high'
+    })
+    expect((reply.error as Frame).code).toBe(-32001)
+  })
+
+  it('relays a change made on this computer', async () => {
+    liveHost()
+    const chat = await liveChat()
+    fake.handlers['session/set_config_option'] = () => ({ configOptions: configOptions({ mode: 'plan' }) })
+    const socket = await attached()
+
+    await model.setConfigValue(chat.id, 'mode', 'plan')
+    await settleAll()
+
+    const updates = configUpdates(socket, chat.id)
+    expect(updates).toHaveLength(1)
+    expect(acpValue(updates[0], 'mode')).toBe('plan')
+  })
+
+  it('doesn’t repeat an update the CLI sent itself', async () => {
+    liveHost()
+    const chat = await liveChat()
+    const socket = await attached()
+
+    fake.update('s1', configOptionUpdate(configOptions({ permission: 'yolo' })))
+    await settleAll()
+
+    // The CLI's own update, relayed as it came, and nothing after it.
+    const updates = configUpdates(socket, chat.id)
+    expect(updates).toHaveLength(1)
+    expect(acpValue(updates[0], 'permission')).toBe('yolo')
   })
 })

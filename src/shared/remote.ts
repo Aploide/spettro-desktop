@@ -63,7 +63,7 @@ export const RemoteFeature = {
 export type RemoteFeatureName = (typeof RemoteFeature)[keyof typeof RemoteFeature]
 
 /** What this host implements — exactly these, so a phone can trust them. */
-export const REMOTE_HOST_FEATURES: readonly RemoteFeatureName[] = []
+export const REMOTE_HOST_FEATURES: readonly RemoteFeatureName[] = [RemoteFeature.configResult]
 
 /** Bonjour service type ("_spettro-remote._tcp" on the wire; bonjour-service
  *  takes it without the underscore/protocol decoration). */
@@ -486,6 +486,31 @@ export function configOptionToWire(opt: ACPConfigOption): JSONValue {
         }))
       : [{ options: opt.kind.flat.map(configChoiceToWire) }] // ungrouped: name omitted (nil)
   wire.kind = { select: { current: opt.kind.currentValue ?? '', groups } }
+  return wire
+}
+
+/** Shared ACPConfigOption → the ACP wire shape the CLI itself sends in
+ *  `config_option_update` (what parseConfigOption reads back):
+ *  { id, name, description?, category?, type:'select', currentValue?,
+ *    options:[{value,name,description?}] | [{name,options:[…]}] }
+ *  | { …, type:'boolean', currentValue }. Grouped only when a group has a
+ *  name — an ungrouped list parses back as one nameless group. Used for the
+ *  update the host makes up when options change without the CLI saying so. */
+export function configOptionToAcpWire(opt: ACPConfigOption): JSONValue {
+  const wire: { [key: string]: JSONValue } = { id: opt.id, name: opt.name }
+  if (opt.description !== undefined) wire.description = opt.description
+  if (opt.category !== undefined) wire.category = opt.category
+  if (opt.kind.type === 'boolean') {
+    wire.type = 'boolean'
+    wire.currentValue = opt.kind.currentValue
+    return wire
+  }
+  wire.type = 'select'
+  if (opt.kind.currentValue !== null) wire.currentValue = opt.kind.currentValue
+  const grouped = opt.kind.groups.some((g) => g.name !== '')
+  wire.options = grouped
+    ? opt.kind.groups.map((g) => ({ name: g.name, options: g.options.map(configChoiceToWire) }))
+    : opt.kind.flat.map(configChoiceToWire)
   return wire
 }
 

@@ -7,7 +7,8 @@
 // It extends EventEmitter and is the one event source in the main process:
 //   emit('event', e: MainEvent)          — everything the renderer mirrors
 // plus the remote-host-facing events (re-emitted by buildRemoteBridge):
-//   'chat-update-raw' (chatId, rawUpdate)
+//   'chat-update-raw' (chatId, rawUpdate) — the agent's, or a made-up
+//                     config_option_update (relayConfig)
 //   'chat-user'       (chatId, text, attachments, timestamp, sourceDeviceId)
 //   'chat-state'      (summary, extra?)
 //   'chat-removed-remote' (chatId)
@@ -65,6 +66,7 @@ import { EMPTY_WORKFLOW_LIST } from '../../shared/extensions'
 import type { UpdateState } from '../../shared/update'
 import { ExtensionMethod } from '../../shared/extensions'
 import { humanSentence } from '../../shared/humanize'
+import { configOptionToAcpWire } from '../../shared/remote'
 import { AcpAgent, AcpConnection, AcpError } from '../acp'
 import type { WorkflowTarget } from '../acp/extensions'
 import { ChatSession, type ConfigValue } from './chatSession'
@@ -516,9 +518,46 @@ export class AppModel extends EventEmitter {
 
   private attachSessionCallbacks(session: ChatSession): void {
     session.onItem = (s, item) => this.pushEvent({ type: 'chat-item', chatId: s.id, item })
-    session.onMeta = (s, meta) => this.pushEvent({ type: 'chat-meta', chatId: s.id, meta })
-    session.onConfigValue = (s, configId, value) =>
+    session.onMeta = (s, meta) => {
+      this.pushEvent({ type: 'chat-meta', chatId: s.id, meta })
+      if (meta.configOptions !== undefined) this.relayConfigSoon(s)
+    }
+    session.onConfigValue = (s, configId, value) => {
       this.pushEvent({ type: 'chat-config-value', chatId: s.id, configId, value })
+      this.relayConfigSoon(s)
+    }
+  }
+
+  /** Chats whose options changed in this tick, waiting for relayConfig. */
+  private configRelayQueue = new Set<ChatSession>()
+  /** Per chat, the options paired devices last heard (relayed JSON). */
+  private relayedConfig = new Map<string, string>()
+
+  /** The CLI tells a session about a change only when another session (or
+   *  a slash command) made it — never the session that asked, and never a
+   *  cold chat. So paired devices are told here, whatever the path: a chip
+   *  on this screen, a phone's change, a rollback, the attach-time sync, a
+   *  shared setting spread to the cold chats. Once per chat per tick, so a
+   *  change and its answer landing together go out as one. */
+  private relayConfigSoon(session: ChatSession): void {
+    if (session.isScratch) return
+    if (this.configRelayQueue.size === 0) queueMicrotask(() => this.relayConfig())
+    this.configRelayQueue.add(session)
+  }
+
+  /** Sends each queued chat's options as the config_option_update the CLI
+   *  would have sent, unless the devices already have exactly these. */
+  private relayConfig(): void {
+    const queued = [...this.configRelayQueue]
+    this.configRelayQueue.clear()
+    for (const session of queued) {
+      if (!this.sessions.includes(session)) continue
+      const configOptions = session.configOptions.map(configOptionToAcpWire)
+      const json = JSON.stringify(configOptions)
+      if (this.relayedConfig.get(session.id) === json) continue
+      this.relayedConfig.set(session.id, json)
+      this.emit('chat-update-raw', session.id, { sessionUpdate: 'config_option_update', configOptions })
+    }
   }
 
   /** Marks the sessions file out of date and says so in app-state. The
@@ -1191,6 +1230,7 @@ export class AppModel extends EventEmitter {
     if (this.selectedSessionId === chatId) {
       this.selectedSessionId = this.sessions[0]?.id ?? null
     }
+    this.relayedConfig.delete(chatId)
     this.pushEvent({ type: 'chat-removed', chatId })
     this.emit('chat-removed-remote', chatId)
     this.persist()
@@ -1770,6 +1810,7 @@ export class AppModel extends EventEmitter {
     this.sessions = this.sessions.filter((s) => s.id !== chatId)
     const acpId = session.acpSessionId
     if (acpId) this.sessionsByACPID.delete(acpId)
+    this.relayedConfig.delete(chatId)
     this.pushEvent({ type: 'chat-removed', chatId })
   }
 
@@ -1792,6 +1833,33 @@ export class AppModel extends EventEmitter {
     if (chatId === '') return this.setDraftOption(configId, value)
     const session = this.sessionById(chatId)
     if (!session) return
+    await this.changeConfigValue(session, configId, value)
+  }
+
+  /** setConfigValue for a paired device, which is told how it went: the
+   *  chat's options once the change is in (or queued, for a chat with no
+   *  live session — what it shows then), or, when the agent refused it,
+   *  an error saying so in the words of the notice, its code the agent's.
+   *  Null when there is no such chat. */
+  async setConfigValueForDevice(
+    chatId: string,
+    configId: string,
+    value: ConfigValue
+  ): Promise<ACPConfigOption[] | null> {
+    const session = this.sessionById(chatId)
+    if (!session) return null
+    const refusal = await this.changeConfigValue(session, configId, value)
+    if (refusal) throw refusal
+    return session.configOptions
+  }
+
+  /** The change itself. Resolves to the refusal, already said in the chat
+   *  and rolled back, when the agent turned it down; null otherwise. */
+  private async changeConfigValue(
+    session: ChatSession,
+    configId: string,
+    value: ConfigValue
+  ): Promise<(Error & { code: number }) | null> {
     // What the agent last told us this option was — the value to fall back to
     // if it turns out the agent won't take the new one.
     const before = session.displayedConfigValues()
@@ -1806,7 +1874,7 @@ export class AppModel extends EventEmitter {
       // cold chat's ConfigBar changes stick.
       session.pendingConfigChanges[configId] = value
       this.persist()
-      return
+      return null
     }
     try {
       const options = await agent.setConfigOption(acpId, configId, value)
@@ -1817,10 +1885,12 @@ export class AppModel extends EventEmitter {
       if (isSharedConfig(configId)) changed.add(configId)
       this.spreadSharedConfig(session, changed)
       this.persist()
+      return null
     } catch (err) {
       // Named as the user knows it ("Model"), not by its wire id.
       const label = session.configOptions.find((o) => o.id === configId)?.name ?? configId
-      session.appendNotice(`Couldn't change ${label}. ${humanSentence(err)}`, true, false, errMessage(err))
+      const sentence = `Couldn't change ${label}. ${humanSentence(err)}`
+      session.appendNotice(sentence, true, false, errMessage(err))
       // Two very different failures arrive here, and they want opposite
       // treatment.
       //
@@ -1850,6 +1920,9 @@ export class AppModel extends EventEmitter {
         session.pendingConfigChanges[configId] = value
       }
       this.persist()
+      if (!refused) return null
+      const code = (err as { code?: unknown }).code
+      return Object.assign(new Error(sentence), { code: typeof code === 'number' ? code : -32000 })
     }
   }
 
@@ -2237,6 +2310,10 @@ export class AppModel extends EventEmitter {
         if (update.options.length > 0) {
           const before = session.displayedConfigValues()
           session.setConfigOptions(update.options)
+          // Relayed above as it came: the devices have these already.
+          if (!session.isReplaying) {
+            this.relayedConfig.set(session.id, JSON.stringify(session.configOptions.map(configOptionToAcpWire)))
+          }
           this.rememberConfig(update.options)
           // A change made in another session or by a slash command
           // (/permission, /thinking, /ultra): the cold chats show it too.

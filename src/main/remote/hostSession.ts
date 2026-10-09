@@ -327,10 +327,13 @@ export class RemoteHostSession {
         const boolValue = optBool(obj, 'boolValue')
         if (stringValue === undefined && boolValue === undefined) throw invalidParams()
         const value = stringValue !== undefined ? { stringValue } : { boolValue }
-        void bridge.setConfig(chatId, configId, value).catch((error) => {
-          console.error('[remote] setConfig failed', error)
-        })
-        return null
+        // Answered once the agent has: with the options the chat runs with
+        // now, so a phone can sequence dependent changes (Ultra is two) and
+        // take a refusal back off its screen. A refusal rejects, and goes
+        // back as the agent's code with the notice's words.
+        const options = await bridge.setConfig(chatId, configId, value)
+        if (options === null) throw new RPCFault(-32001, 'no such chat')
+        return { configOptions: normalizeConfigOptions(options) }
       }
 
       // Both of these take the prompt down everywhere, including the local

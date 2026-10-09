@@ -669,6 +669,23 @@ describe('chats/rename', () => {
     expect(REMOTE_HOST_FEATURES).toContain(RemoteFeature.rename)
   })
 
+  it('tells every screen the title kept when it was already the chat’s', async () => {
+    liveHost()
+    const chat = await liveChat()
+    model.renameChat(chat.id, 'Fix bug')
+    const renaming = await attached('phone-1')
+    const watching = await attached('phone-2')
+
+    const reply = await call(renaming, RemoteMethod.chatRename, { chatID: chat.id, title: 'Fix  bug ' })
+
+    expect(reply.result).toBeNull()
+    expect(chat.title).toBe('Fix bug')
+    for (const socket of [renaming, watching]) {
+      const states = socket.notifications(RemoteMethod.chatState).map((f) => (f.params as Frame).chat as Frame)
+      expect(states).toEqual([expect.objectContaining({ id: chat.id, title: 'Fix bug' })])
+    }
+  })
+
   it('refuses a blank title and an unknown chat', async () => {
     liveHost()
     const chat = await liveChat()

@@ -1233,12 +1233,13 @@ export class AppModel extends EventEmitter {
 
   /** Sidebar / header rename. Persisted with the rest of the snapshot; an
    *  untouched chat isn't on disk yet, and takes the new title with it when
-   *  its first prompt makes it real. */
-  renameChat(chatId: string, title: string): void {
+   *  its first prompt makes it real. False when nothing changed. */
+  renameChat(chatId: string, title: string): boolean {
     const session = this.sessionById(chatId)
-    if (!session || !session.rename(title)) return
+    if (!session || !session.rename(title)) return false
     this.persist()
     this.emit('chat-state', session.summary())
+    return true
   }
 
   /** Deletes a chat. Its ACP session is closed too — a turn still running

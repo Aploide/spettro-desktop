@@ -139,8 +139,12 @@ export function buildRemoteBridge(model: AppModel): RemoteBridge {
     },
 
     renameChat: (chatId, title) => {
-      if (!visible(chatId)) return false
-      model.renameChat(chatId, title)
+      const session = visible(chatId)
+      if (!session) return false
+      // A title that tidies up to the one the chat has changes nothing, so
+      // the model says nothing; the phones still hear the title kept, or the
+      // one that asked goes on showing what it typed.
+      if (!model.renameChat(chatId, title)) events.emit('chat-state', session.summary())
       return true
     },
 

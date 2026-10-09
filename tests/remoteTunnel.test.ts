@@ -12,7 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { WebSocket, WebSocketServer } from 'ws'
 import type { RemoteBridge } from '@main/remote/bridge'
 import type { ConnectionOrigin } from '@main/remote/connectionGuard'
-import { RemoteHost } from '@main/remote/host'
+import { REPEATED_SIGN_INS_NOTICE, RemoteHost } from '@main/remote/host'
 import { RemoteHostSession } from '@main/remote/hostSession'
 import { base64urlDecode, computeProof } from '@main/remote/pairing'
 import type { TunnelProcessLike } from '@main/remote/tunnel/remoteTunnel'
@@ -891,5 +891,26 @@ describe('a cloudflared that went away', () => {
     expect(readFileSync(pidFile, 'utf8')).toBe('4000002')
     second.options.onPid?.(null)
     expect(existsSync(pidFile)).toBe(false)
+  })
+})
+
+describe('a wave of failed sign-ins over the internet', () => {
+  it('stops pairing through the tunnel, tells the user, and waits for a new code', async () => {
+    const notices: { title: string; body: string }[] = []
+    await connectedTunnel()
+    ;(host as unknown as { onAttention: (n: { title: string; body: string }) => void }).onAttention = (n) => notices.push(n)
+    await host.configureTunnel({ allowInternetPairing: true })
+    await host.openPairing()
+    host.pairDevice('phone-1', 'Pixel', 'android')
+    for (let i = 0; i < 51; i++) {
+      const { socket } = connect({ ...tunneled, peerIp: `198.51.${i >> 8}.${i & 255}` })
+      resume(socket, 'phone-1', Buffer.alloc(32, 9))
+      socket.close()
+    }
+    expect(notices).toEqual([REPEATED_SIGN_INS_NOTICE])
+    expect(host.getState()).toMatchObject({ pairingOpen: false, tunnel: { internetPairingPaused: true } })
+    await host.openPairing()
+    expect(host.getState().tunnel.internetPairingPaused).toBe(false)
+    expect(hello(connect({ ...tunneled, peerIp: '192.0.2.1' }).socket).pairingOpen).toBe(true)
   })
 })

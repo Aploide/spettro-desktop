@@ -55,6 +55,13 @@ import {
 } from './pairing'
 import { RemoteTunnel, type PortRefusal, type RemoteTunnelOptions } from './tunnel/remoteTunnel'
 
+/** What the user is told when the breaker trips: someone failing to sign
+ *  in, over and over, through the tunnel. */
+export const REPEATED_SIGN_INS_NOTICE = {
+  title: 'Someone is repeatedly trying to connect to Spettro over the internet',
+  body: 'Pairing over the internet is off until you show a new pairing code.'
+} as const
+
 /** Why the pinned port couldn't be had, when that's worth falling back
  *  over. Any other listen error is a real failure. */
 function portRefusal(error: unknown): PortRefusal | null {
@@ -107,6 +114,7 @@ export class RemoteHost implements RemoteHostSessionDelegate {
   readonly bridge: RemoteBridge
   private readonly onStateChanged: (s: RemoteHostState) => void
   private readonly onSharingChanged: (enabled: boolean) => void
+  private readonly onAttention: (notice: { title: string; body: string }) => void
   private readonly devices: PairedDeviceStore
   private readonly identity: HostIdentityStore
   private readonly advertiser = new RemoteAdvertiser()
@@ -151,6 +159,9 @@ export class RemoteHost implements RemoteHostSessionDelegate {
       /** The user turned sharing on or off — persisted so a launch can
        *  restore it. Not called when the app quits with sharing on. */
       onSharingChanged?: (enabled: boolean) => void
+      /** Something the user should hear about even with the window shut
+       *  (a notification, in the app). */
+      onAttention?: (notice: { title: string; body: string }) => void
       /** Overrides for the tunnel's parts (tests). */
       tunnel?: Omit<RemoteTunnelOptions, 'dataDir' | 'onChange'>
     }
@@ -158,6 +169,7 @@ export class RemoteHost implements RemoteHostSessionDelegate {
     this.bridge = bridge
     this.onStateChanged = opts.onStateChanged
     this.onSharingChanged = opts.onSharingChanged ?? ((): void => undefined)
+    this.onAttention = opts.onAttention ?? ((): void => undefined)
     this.devices = new PairedDeviceStore(opts.dataDir)
     this.identity = new HostIdentityStore(opts.dataDir)
     this.tunnel = new RemoteTunnel({ ...opts.tunnel, dataDir: opts.dataDir, onChange: () => this.tunnelChanged() })
@@ -202,10 +214,11 @@ export class RemoteHost implements RemoteHostSessionDelegate {
     if (options.soft && session.via !== 'tunnel') return
     if (this.authLimiter.recordFailure(session.origin, options)) {
       // A wave of failures over the internet: whatever pairing code is up
-      // stops working, and pairing through the tunnel stays off until the
-      // user opens a new code.
+      // stops working, pairing through the tunnel stays off until the user
+      // opens a new code, and the user is told.
       console.error('[remote] repeated failed sign-ins over the internet; pairing through the tunnel is off')
       this.closePairing()
+      this.onAttention(REPEATED_SIGN_INS_NOTICE)
     }
   }
 
@@ -741,7 +754,7 @@ export class RemoteHost implements RemoteHostSessionDelegate {
       pairingExpired: this.pairingExpired,
       devices: this.devices.toDTOs(),
       connectedDeviceIds: [...this.connectedDeviceIds],
-      tunnel: this.tunnel.getState(),
+      tunnel: { ...this.tunnel.getState(), internetPairingPaused: this.authLimiter.breakerTripped },
       tunneledDeviceIds: [
         ...new Set(
           this.sessions

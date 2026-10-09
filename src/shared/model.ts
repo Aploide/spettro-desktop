@@ -310,6 +310,10 @@ export interface RemoteTunnelState {
   binary: { path: string; version: string | null; source: 'system' | 'downloaded' } | null
   /** The last lines cloudflared wrote, with the token taken out. */
   log: string[]
+  /** Too many failed sign-ins over the internet lately: pairing through
+   *  the tunnel is off, whatever allowInternetPairing says, until the user
+   *  shows a new pairing code. */
+  internetPairingPaused?: boolean
 }
 
 /** Tunnel settings to change; what's left out stays. `token` is the token,

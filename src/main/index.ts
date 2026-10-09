@@ -7,7 +7,7 @@ import { join } from 'path'
 import { busyGuard } from '../shared/busyGuard'
 import { ACCENT_ARG, EVENT_CHANNEL, type MainEvent } from '../shared/ipc'
 import { DEFAULT_ACCENT } from '../shared/model'
-import { wireAttention } from './attention'
+import { showNotice, wireAttention } from './attention'
 import { registerIpc, type IpcHandle } from './ipc'
 import { installAppMenu } from './menu'
 import { AppModel } from './model/appModel'
@@ -131,7 +131,8 @@ app.whenReady().then(() => {
     onStateChanged: (state) => model?.setRemoteState(state),
     onSharingChanged: (enabled) => {
       if (model) model.remoteSharing = enabled
-    }
+    },
+    onAttention: (notice) => showNotice(notice, getMainWindow)
   })
   model.setRemoteState(remoteHost.getState())
   // Sharing, and with it the tunnel if its switch was on, come back as

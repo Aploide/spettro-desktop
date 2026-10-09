@@ -12,6 +12,9 @@
 // With "Notify me when Spettro finishes" on (Settings › General), a turn that
 // ends while the window is in the background says so too — the long task you
 // switched away from is done, or it stopped on an error.
+//
+// The remote host has news of its own (someone hammering sign-in over the
+// internet), shown through showNotice whatever the window is doing.
 
 import { app, Notification, type BrowserWindow } from 'electron'
 import type { ACPPermissionRequest, ACPQuestionRequest } from '../shared/acp'
@@ -170,4 +173,25 @@ export function wireAttention(model: AppModel, getWindow: () => BrowserWindow | 
       notification.show()
     }
   )
+}
+
+/** Held until closed: a collected notification loses its click handler. */
+const standalone = new Set<Notification>()
+
+/** Shows `notice` now, focused window or not; clicking it brings the
+ *  window forward. */
+export function showNotice(notice: Notice, getWindow: () => BrowserWindow | null): void {
+  if (!Notification.isSupported()) return
+  const notification = new Notification({ title: notice.title, body: notice.body })
+  notification.on('click', () => {
+    const target = getWindow()
+    if (target && !target.isDestroyed()) {
+      if (target.isMinimized()) target.restore()
+      target.show()
+      target.focus()
+    }
+  })
+  notification.on('close', () => standalone.delete(notification))
+  standalone.add(notification)
+  notification.show()
 }

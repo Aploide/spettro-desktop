@@ -36,7 +36,9 @@ export interface PairedDeviceRecord {
   revoked: boolean
 }
 
-function writePrivate(filePath: string, contents: string): void {
+/** Writes a file only its owner can read (0600), atomically: a crash
+ *  mid-write leaves the old file, never half of the new one. */
+export function writePrivate(filePath: string, contents: string): void {
   mkdirSync(dirname(filePath), { recursive: true })
   const tmp = `${filePath}.tmp`
   writeFileSync(tmp, contents, { mode: 0o600 })

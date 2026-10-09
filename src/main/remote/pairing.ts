@@ -11,6 +11,7 @@
 
 import { createHmac, randomBytes, timingSafeEqual } from 'crypto'
 import {
+  PAIRING_KEY_REMOTE_HOST,
   PAIRING_URL_SCHEME,
   PAIRING_WINDOW_MS,
   REMOTE_KEY_LENGTH,
@@ -87,10 +88,13 @@ export interface PairingPayload {
   /** Address hint for networks that filter mDNS — Bonjour is the real path. */
   address?: string
   port?: number
+  /** The public hostname the tunnel puts the host at (the phone connects to
+   *  wss://<remoteHost>/ when it's away). Only while the tunnel is on. */
+  remoteHost?: string
 }
 
 /** Builds the spettro-pair:// URL the QR encodes:
- *  spettro-pair://pair?v=1&h=<hostID>&n=<name>&k=app&s=<secret>&a=<addr>&p=<port>
+ *  spettro-pair://pair?v=1&h=<hostID>&n=<name>&k=app&s=<secret>&a=<addr>&p=<port>&r=<remoteHost>
  *  Values are percent-encoded (encodeURIComponent, spaces as %20 — never `+`,
  *  which iOS URLComponents would read literally). */
 export function buildPairingURL(payload: PairingPayload): string {
@@ -103,6 +107,7 @@ export function buildPairingURL(payload: PairingPayload): string {
   ]
   if (payload.address) items.push(['a', payload.address])
   if (payload.port !== undefined) items.push(['p', String(payload.port)])
+  if (payload.remoteHost) items.push([PAIRING_KEY_REMOTE_HOST, payload.remoteHost])
   const query = items.map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&')
   return `${PAIRING_URL_SCHEME}://pair?${query}`
 }

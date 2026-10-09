@@ -1,7 +1,7 @@
 // Main-process entry: window creation, model construction, IPC registration,
 // and event-push wiring (the port of SpettroApp.swift's app wiring).
 
-import { app, BrowserWindow, dialog, nativeTheme, shell } from 'electron'
+import { app, BrowserWindow, dialog, nativeTheme, powerMonitor, shell } from 'electron'
 import { existsSync } from 'fs'
 import { join } from 'path'
 import { busyGuard } from '../shared/busyGuard'
@@ -134,9 +134,13 @@ app.whenReady().then(() => {
     }
   })
   model.setRemoteState(remoteHost.getState())
+  // Sharing, and with it the tunnel if its switch was on, come back as
+  // they were when the app quit.
   remoteHost.restoreSharing(model.remoteSharing).catch((error) => {
     console.error('[remote] could not turn remote access back on', error)
   })
+  // Back from sleep, a tunnel waiting out its backoff tries again now.
+  powerMonitor.on('resume', () => remoteHost?.systemResumed())
   ipcHandle = registerIpc(model, terminals, remoteHost, getMainWindow)
   // The app badge and notifications for approvals and questions waiting.
   wireAttention(model, getMainWindow)
@@ -162,6 +166,7 @@ function shutdownAll(): void {
     // best-effort
   }
   try {
+    // Signals cloudflared before anything else, synchronously.
     remoteHost?.shutdown()
   } catch {
     // best-effort

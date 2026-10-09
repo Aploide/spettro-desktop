@@ -812,7 +812,26 @@ const REMOTE: RemoteHostState = {
       revoked: false
     }
   ],
-  connectedDeviceIds: ['d1']
+  connectedDeviceIds: ['d1'],
+  tunnel: {
+    enabled: false,
+    hostname: '',
+    hasToken: false,
+    tunnelId: null,
+    port: 7879,
+    allowInternetPairing: false,
+    status: 'off',
+    downloadProgress: null,
+    connections: 0,
+    locations: [],
+    protocol: null,
+    error: null,
+    warning: null,
+    retryAt: null,
+    binary: null,
+    log: []
+  },
+  tunneledDeviceIds: []
 }
 
 const INSTALL_LOG = [

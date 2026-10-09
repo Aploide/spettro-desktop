@@ -70,6 +70,7 @@ export const REMOTE_HOST_FEATURES: readonly RemoteFeatureName[] = [
   RemoteFeature.mentions,
   RemoteFeature.rename,
   RemoteFeature.projectFiles,
+  RemoteFeature.remoteHost,
   RemoteFeature.snapshotV2
 ]
 
@@ -98,6 +99,10 @@ export const PAIRING_WINDOW_MS = 5 * 60 * 1000
 
 /** URL scheme of the pairing QR payload. */
 export const PAIRING_URL_SCHEME = 'spettro-pair'
+
+/** QR query key carrying the public tunnel hostname (`wss://<r>/`). Older
+ *  phones ignore keys they don't know. */
+export const PAIRING_KEY_REMOTE_HOST = 'r'
 
 export type RemoteHostKind = 'app' | 'tui'
 

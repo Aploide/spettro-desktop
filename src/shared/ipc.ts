@@ -18,6 +18,9 @@ import type {
   ChatDetail,
   CLISessionEntry,
   GitStat,
+  RemoteTunnelCheck,
+  RemoteTunnelConfigureResult,
+  RemoteTunnelPatch,
   TranscriptItem
 } from './model'
 import type { MenuCommand } from './shortcuts'
@@ -198,6 +201,18 @@ export interface RendererApi {
   remoteClosePairing(): Promise<void>
   remoteRevokeDevice(deviceId: string): Promise<void>
   remoteRenameHost(name: string): Promise<void>
+  /** The tunnel switch; turning it on turns remote access on too. */
+  remoteTunnelSetEnabled(enabled: boolean): Promise<void>
+  /** Hostname, token (or the dashboard's install command), port, internet
+   *  pairing. A refusal names the field and saves nothing. */
+  remoteTunnelConfigure(patch: RemoteTunnelPatch): Promise<RemoteTunnelConfigureResult>
+  remoteTunnelForgetToken(): Promise<void>
+  /** Restart the tunnel now (or listen on the pinned port again). */
+  remoteTunnelRetry(): Promise<void>
+  /** Get (or update) Spettro's own copy of cloudflared. */
+  remoteTunnelInstallCloudflared(): Promise<void>
+  /** "Check from the internet". */
+  remoteTunnelCheck(): Promise<RemoteTunnelCheck>
 
   // Account / providers / models (the `_spettro/*` extension surface).
   // Every one of these refreshes AppStateDTO.extensions and pushes app-state,

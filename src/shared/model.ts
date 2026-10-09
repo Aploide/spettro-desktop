@@ -250,6 +250,87 @@ export interface RemoteHostState {
   pairingExpired: boolean
   devices: PairedDeviceDTO[]
   connectedDeviceIds: string[]
+  /** The Cloudflare tunnel that puts this host on the internet. */
+  tunnel: RemoteTunnelState
+  /** The connected devices that came in through the tunnel. */
+  tunneledDeviceIds: string[]
+}
+
+/** Where the tunnel stands. `off`: the switch is off, or remote access is
+ *  (the tunnel only runs while sharing does). `needs-setup`: on, but there
+ *  is no token to run it with. */
+export type RemoteTunnelStatus =
+  | 'off'
+  | 'needs-setup'
+  | 'locating'
+  | 'downloading'
+  | 'starting'
+  | 'connected'
+  | 'reconnecting'
+  | 'error'
+
+/** Why the tunnel isn't up. `network` and `exited` retry on their own; the
+ *  rest wait for the user (a new token, a free port, a retry). */
+export type RemoteTunnelErrorKind =
+  | 'bad-token'
+  | 'unauthorized'
+  | 'network'
+  | 'port-in-use'
+  | 'binary-missing'
+  | 'unsupported-platform'
+  | 'download-failed'
+  | 'launch'
+  | 'exited'
+
+export interface RemoteTunnelState {
+  /** The user's switch, remembered across launches. */
+  enabled: boolean
+  /** The public hostname ('' while unset). */
+  hostname: string
+  /** A token is stored. The token itself never leaves the main process. */
+  hasToken: boolean
+  /** The tunnel the token is for (its UUID), to match against the dashboard. */
+  tunnelId: string | null
+  /** The local port the dashboard's service URL has to name. */
+  port: number
+  allowInternetPairing: boolean
+  status: RemoteTunnelStatus
+  /** 0…1 while cloudflared downloads, else null. */
+  downloadProgress: number | null
+  /** Connections to Cloudflare's edge (normally 4 when up). */
+  connections: number
+  /** The edge locations those connections landed at ("fra08"). */
+  locations: string[]
+  protocol: 'quic' | 'http2' | null
+  error: { kind: RemoteTunnelErrorKind; message: string } | null
+  /** Up, but something to fix: the dashboard routes elsewhere, UDP is blocked. */
+  warning: string | null
+  /** When the next restart is due (ms since epoch), while one is waiting. */
+  retryAt: number | null
+  binary: { path: string; version: string | null; source: 'system' | 'downloaded' } | null
+  /** The last lines cloudflared wrote, with the token taken out. */
+  log: string[]
+}
+
+/** Tunnel settings to change; what's left out stays. `token` is the token,
+ *  or anything the dashboard shows with one in it (the install command). */
+export interface RemoteTunnelPatch {
+  hostname?: string
+  token?: string
+  port?: number
+  allowInternetPairing?: boolean
+}
+
+/** A refused patch names the field to fix; nothing in it was saved. */
+export type RemoteTunnelConfigureResult =
+  | { ok: true }
+  | { ok: false; field: 'hostname' | 'token' | 'port'; message: string }
+
+/** "Check from the internet": whether this computer answered at its public
+ *  hostname, said so a person can act on it. */
+export interface RemoteTunnelCheck {
+  ok: boolean
+  message: string
 }
 
 export interface PairedDeviceDTO {

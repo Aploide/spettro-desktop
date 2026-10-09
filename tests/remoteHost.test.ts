@@ -10,7 +10,7 @@ import { EventEmitter } from 'events'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { WebSocketServer, type WebSocket } from 'ws'
 import { AcpAgent, type AcpConnection, parseAgentCapabilities } from '@main/acp'
 import { AppModel } from '@main/model/appModel'
@@ -18,6 +18,7 @@ import type { ChatSession } from '@main/model/chatSession'
 import { buildRemoteBridge } from '@main/model/remoteBridge'
 import type { RemoteBridge } from '@main/remote/bridge'
 import { Prefs } from '@main/model/prefs'
+import type { ConnectionOrigin } from '@main/remote/connectionGuard'
 import { RemoteHost } from '@main/remote/host'
 import { base64urlDecode, computeProof } from '@main/remote/pairing'
 import type { JSONValue } from '@shared/acp'
@@ -41,14 +42,16 @@ type Frame = { [key: string]: JSONValue }
 class FakeSocket extends EventEmitter {
   readonly sent: Frame[] = []
   closed = false
+  closeCode: number | undefined
 
   send(data: string): void {
     this.sent.push(JSON.parse(data) as Frame)
   }
 
-  close(): void {
+  close(code?: number): void {
     if (this.closed) return
     this.closed = true
+    this.closeCode = code
     this.emit('close')
   }
 
@@ -971,5 +974,118 @@ describe('remote sharing across launches', () => {
     expect(app.remoteSharing).toBe(true)
     app.remoteSharing = false
     expect(new Prefs(dir).remoteSharing).toBe(false)
+  })
+})
+
+describe('connections the host turns away', () => {
+  /** A hello-only socket, accepted as if from `origin`. */
+  function connect(origin?: ConnectionOrigin): { socket: FakeSocket; session: unknown } {
+    const socket = new FakeSocket()
+    const session = host.acceptSocket(socket as unknown as WebSocket, origin)
+    return { socket, session }
+  }
+
+  function resume(socket: FakeSocket, deviceId: string, key: Buffer): number {
+    const hello = socket.notifications(RemoteMethod.hello)[0].params as Frame
+    const challenge = base64urlDecode(hello.challenge as string) as Buffer
+    const id = nextId++
+    socket.receive({
+      jsonrpc: '2.0',
+      id,
+      method: RemoteMethod.auth,
+      params: { mode: 'resume', deviceID: deviceId, deviceName: 'Pixel', platform: 'android', proof: computeProof(key, challenge, host.hostId), protocolVersion: 1 }
+    })
+    return id
+  }
+
+  const tunneled: ConnectionOrigin = { via: 'tunnel', peerIp: '203.0.113.9', connectorTag: '6f0c9a52-6f43-4bd4-9a7e-3b55e2d3c1aa' }
+  const lan = (peerIp: string): ConnectionOrigin => ({ via: 'lan', peerIp, connectorTag: null })
+
+  it('turns a tunneled connection away while there is no tunnel', () => {
+    makeHost()
+    const { socket, session } = connect(tunneled)
+    expect(session).toBeNull()
+    expect(socket.closeCode).toBe(1008)
+    expect(socket.sent).toHaveLength(0)
+  })
+
+  it('closes a socket that hasn’t signed in within 15 seconds', () => {
+    vi.useFakeTimers()
+    try {
+      makeHost()
+      const { socket } = connect()
+      vi.advanceTimersByTime(14_999)
+      expect(socket.closed).toBe(false)
+      vi.advanceTimersByTime(1)
+      expect(socket.closeCode).toBe(1008)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('keeps a socket that signed in past the deadline', async () => {
+    makeHost()
+    const key = host.pairDevice('phone-1', 'Pixel', 'android')
+    vi.useFakeTimers()
+    try {
+      const { socket } = connect()
+      resume(socket, 'phone-1', key)
+      vi.advanceTimersByTime(60_000)
+      expect(socket.closed).toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('closes a socket that sends too much before signing in', () => {
+    makeHost()
+    const big = connect().socket
+    big.receive({ jsonrpc: '2.0', id: 1, method: RemoteMethod.auth, params: { pad: 'x'.repeat(70 * 1024) } })
+    expect(big.closeCode).toBe(1008)
+    const chatty = connect().socket
+    for (let i = 0; i < 10; i++) chatty.receive({ jsonrpc: '2.0', id: i, method: RemoteMethod.chatsList, params: {} })
+    expect(chatty.closed).toBe(false)
+    chatty.receive({ jsonrpc: '2.0', id: 11, method: RemoteMethod.chatsList, params: {} })
+    expect(chatty.closeCode).toBe(1008)
+  })
+
+  it('blocks an address after five failed sign-ins, but lets it pair while a code is up', async () => {
+    makeHost()
+    host.pairDevice('phone-1', 'Pixel', 'android')
+    const wrong = Buffer.alloc(32, 9)
+    for (let i = 0; i < 5; i++) {
+      const { socket } = connect(lan('192.168.1.40'))
+      const id = resume(socket, 'phone-1', wrong)
+      expect((socket.reply(id)?.error as Frame).code).toBe(-33002)
+    }
+    expect(connect(lan('192.168.1.40')).session).toBeNull()
+    expect(connect(lan('192.168.1.41')).session).not.toBeNull()
+    const internals = host as unknown as { pairingWindow: unknown }
+    internals.pairingWindow = { secret: Buffer.alloc(32, 1), openedAt: Date.now() }
+    expect(connect(lan('192.168.1.40')).session).not.toBeNull()
+  })
+
+  it('doesn’t count a stale code or an old protocol against the phone', () => {
+    makeHost()
+    for (let i = 0; i < 6; i++) {
+      const { socket } = connect(lan('192.168.1.40'))
+      socket.receive({
+        jsonrpc: '2.0',
+        id: 1,
+        method: RemoteMethod.auth,
+        params: { mode: 'pair', deviceID: 'phone-9', proof: 'x', protocolVersion: 1 }
+      })
+      expect((socket.reply(1)?.error as Frame).code).toBe(-33003)
+    }
+    expect(connect(lan('192.168.1.40')).session).not.toBeNull()
+  })
+
+  it('takes no more than 32 sockets at once', () => {
+    makeHost()
+    const sockets = Array.from({ length: 32 }, (_, i) => connect(lan(`192.168.1.${i}`)))
+    expect(sockets.every((s) => s.session !== null)).toBe(true)
+    const extra = connect(lan('192.168.1.200'))
+    expect(extra.session).toBeNull()
+    expect(extra.socket.closeCode).toBe(1013)
   })
 })

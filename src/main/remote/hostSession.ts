@@ -29,6 +29,15 @@ import {
   type RemoteProjectWire
 } from '../../shared/remote'
 import type { RemoteBridge } from './bridge'
+import {
+  AUTH_DEADLINE_MS,
+  CLOSE_POLICY,
+  LAN_ORIGIN,
+  PREAUTH_MAX_FRAMES,
+  PREAUTH_MAX_FRAME_BYTES,
+  type ConnectionOrigin,
+  type ConnectionVia
+} from './connectionGuard'
 import { base64urlEncode, randomKey, verifyProof } from './pairing'
 
 /** What a session needs from its RemoteHost. Kept as an interface so the two
@@ -41,6 +50,8 @@ export interface RemoteHostSessionDelegate {
   /** The public hostname phones reach this host at from outside the
    *  network, or undefined when there is none. */
   readonly remoteHost: string | undefined
+  /** Whether a phone may pair through the tunnel (resume always may). */
+  readonly internetPairingAllowed: boolean
   /** The live pairing secret, or null when the window is shut or expired. */
   openPairingSecret(): Buffer | null
   /** Close the pairing window — called on the FIRST successful pair. */
@@ -55,7 +66,23 @@ export interface RemoteHostSessionDelegate {
    *  doesn't miss the first ones. */
   sessionAuthenticated(session: RemoteHostSession): void
   sessionClosed(session: RemoteHostSession): void
+  /** An auth attempt failed in a way that counts against the peer's
+   *  address (a bad proof, an unknown or removed device, garbage). */
+  authFailed(session: RemoteHostSession): void
 }
+
+/** Auth refusals counted against the peer: wrong keys and garbage, not a
+ *  stale QR or a version mismatch, which honest phones hit. */
+const COUNTED_AUTH_FAILURES = new Set<number>([
+  RemoteAuthError.notPaired,
+  RemoteAuthError.badProof,
+  RemoteAuthError.revoked,
+  -32602
+])
+
+/** What a phone on the other side of the tunnel is told this host is
+ *  called before it proves itself; the real name is in the auth result. */
+const TUNNELED_HELLO_NAME = 'Spettro'
 
 /** A JSON-RPC error to return from a request handler. */
 class RPCFault extends Error {
@@ -116,16 +143,26 @@ export class RemoteHostSession {
    *  from an earlier one cannot be replayed onto this. */
   private readonly challenge = randomKey()
   private closed = false
+  /** Frames received before auth (PREAUTH_MAX_FRAMES). */
+  private preAuthFrames = 0
+  private authDeadline: NodeJS.Timeout | null = null
 
   constructor(
     private readonly ws: WebSocket,
-    private readonly delegate: RemoteHostSessionDelegate
+    private readonly delegate: RemoteHostSessionDelegate,
+    readonly origin: ConnectionOrigin = LAN_ORIGIN
   ) {
     ws.on('message', (data) => {
       this.handleFrame(data.toString())
     })
     ws.on('close', () => this.didClose())
     ws.on('error', () => this.didClose())
+    // A socket that never proves itself doesn't get to sit here: a phone
+    // that means it answers hello within a second.
+    this.authDeadline = setTimeout(() => {
+      if (!this.isAuthenticated) this.close(CLOSE_POLICY)
+    }, AUTH_DEADLINE_MS)
+    this.authDeadline.unref?.()
     // The host speaks first: the client cannot build an auth proof until it
     // has the challenge, so `hello` goes out the moment the socket is open —
     // which, for a server-accepted `ws` connection, is right now.
@@ -140,11 +177,17 @@ export class RemoteHostSession {
     return this.authedDeviceId !== null
   }
 
-  close(): void {
+  get via(): ConnectionVia {
+    return this.origin.via
+  }
+
+  close(code?: number): void {
     if (this.closed) return
     this.closed = true
+    this.clearDeadline()
     try {
-      this.ws.close()
+      if (code === undefined) this.ws.close()
+      else this.ws.close(code)
     } catch {
       /* ignore */
     }
@@ -153,7 +196,19 @@ export class RemoteHostSession {
   private didClose(): void {
     if (this.closed) return
     this.closed = true
+    this.clearDeadline()
     this.delegate.sessionClosed(this)
+  }
+
+  private clearDeadline(): void {
+    if (this.authDeadline) clearTimeout(this.authDeadline)
+    this.authDeadline = null
+  }
+
+  /** Whether this connection may pair: on the LAN whenever a code is open;
+   *  through the tunnel only if the user allowed pairing over the internet. */
+  private get mayPair(): boolean {
+    return this.origin.via === 'lan' || this.delegate.internetPairingAllowed
   }
 
   /** Sends a JSON-RPC notification (one message per text frame). */
@@ -174,11 +229,11 @@ export class RemoteHostSession {
     const hello: RemoteHelloParams = {
       protocolVersion: REMOTE_PROTOCOL_VERSION,
       hostID: this.delegate.hostId,
-      hostName: this.delegate.hostName,
+      hostName: this.origin.via === 'tunnel' ? TUNNELED_HELLO_NAME : this.delegate.hostName,
       hostKind: 'app',
       hostVersion: this.delegate.hostVersion,
       challenge: base64urlEncode(this.challenge),
-      pairingOpen: this.delegate.openPairingSecret() !== null,
+      pairingOpen: this.mayPair && this.delegate.openPairingSecret() !== null,
       features: [...REMOTE_HOST_FEATURES]
     }
     this.notify(RemoteMethod.hello, hello as unknown as JSONValue)
@@ -187,6 +242,16 @@ export class RemoteHostSession {
   // MARK: Inbound frames
 
   private handleFrame(text: string): void {
+    // Before auth, a socket gets a handful of small frames: enough for an
+    // auth request and a retry, not enough to make the host parse megabytes
+    // for a stranger.
+    if (!this.isAuthenticated) {
+      this.preAuthFrames += 1
+      if (this.preAuthFrames > PREAUTH_MAX_FRAMES || Buffer.byteLength(text, 'utf8') > PREAUTH_MAX_FRAME_BYTES) {
+        this.close(CLOSE_POLICY)
+        return
+      }
+    }
     let root: JSONValue
     try {
       root = JSON.parse(text) as JSONValue
@@ -218,7 +283,13 @@ export class RemoteHostSession {
 
     try {
       if (method === RemoteMethod.auth) {
-        succeed(this.authenticate(params))
+        try {
+          succeed(this.authenticate(params))
+        } catch (error) {
+          if (error instanceof RPCFault && COUNTED_AUTH_FAILURES.has(error.code)) this.delegate.authFailed(this)
+          throw error
+        }
+        this.clearDeadline()
         // After the reply, not inside authenticate(): whatever the host
         // sends a new session (its state, the prompts waiting) has to land
         // behind the answer the phone is waiting for.
@@ -451,6 +522,11 @@ export class RemoteHostSession {
 
     let mintedKey: Buffer | null = null
     if (mode === 'pair') {
+      // A phone pairs where it can see the QR, which is the same network.
+      // Over the internet it only resumes, unless the user allowed more.
+      if (!this.mayPair) {
+        throw new RPCFault(RemoteAuthError.pairingExpired, 'Pair on the same network as this computer first.')
+      }
       const secret = this.delegate.openPairingSecret()
       if (!secret) {
         throw new RPCFault(

@@ -23,6 +23,19 @@ import {
   type RemoteHostStateParams
 } from '../../shared/remote'
 import type { RemoteBridge } from './bridge'
+import {
+  CLOSE_POLICY,
+  CLOSE_TRY_AGAIN_LATER,
+  FailedAuthLimiter,
+  HEARTBEAT_MS,
+  LAN_ORIGIN,
+  MAX_PAYLOAD_BYTES,
+  MAX_SESSIONS,
+  MAX_UNAUTHENTICATED_TUNNELED,
+  admitsTunneled,
+  classifyConnection,
+  type ConnectionOrigin
+} from './connectionGuard'
 import { RemoteAdvertiser } from './discovery'
 import { RemoteHostSession, type RemoteHostSessionDelegate } from './hostSession'
 import { HostIdentityStore, PairedDeviceStore } from './pairedDevices'
@@ -87,6 +100,8 @@ export class RemoteHost implements RemoteHostSessionDelegate {
   private starting: Promise<void> | null = null
   private sessions: RemoteHostSession[] = []
   private connectedDeviceIds = new Set<string>()
+  private readonly authLimiter = new FailedAuthLimiter()
+  private heartbeat: NodeJS.Timeout | null = null
 
   private pairingWindow: PairingWindow | null = null
   private pairingTimer: NodeJS.Timeout | null = null
@@ -138,6 +153,27 @@ export class RemoteHost implements RemoteHostSessionDelegate {
    *  pick it up from here. */
   get remoteHost(): string | undefined {
     return undefined
+  }
+
+  /** Pairing through the tunnel: off unless the user allowed it, and off
+   *  again while someone is hammering auth over the internet. */
+  get internetPairingAllowed(): boolean {
+    return false
+  }
+
+  /** What the kill switch checks a tunneled connection against. */
+  private tunnelGate(): { running: boolean; connectorId: string | null } {
+    return { running: false, connectorId: null }
+  }
+
+  authFailed(session: RemoteHostSession): void {
+    if (this.authLimiter.recordFailure(session.origin)) {
+      // A wave of failures over the internet: whatever pairing code is up
+      // stops working, and pairing through the tunnel stays off until the
+      // user opens a new code.
+      console.error('[remote] repeated failed sign-ins over the internet; pairing through the tunnel is off')
+      this.closePairing()
+    }
   }
 
   openPairingSecret(): Buffer | null {
@@ -246,13 +282,15 @@ export class RemoteHost implements RemoteHostSessionDelegate {
       this.wss = wss
       const address = wss.address()
       this.port = typeof address === 'object' && address !== null ? address.port : null
-      wss.on('connection', (socket) => {
+      wss.on('connection', (socket, req) => {
         if (!this.enabled) {
           socket.close()
           return
         }
-        this.acceptSocket(socket)
+        this.watchHeartbeat(socket)
+        this.acceptSocket(socket, classifyConnection(req.socket.remoteAddress, req.headers))
       })
+      this.startHeartbeat(wss)
       wss.on('error', (error) => {
         console.error('[remote] listener error', error)
       })
@@ -268,16 +306,75 @@ export class RemoteHost implements RemoteHostSessionDelegate {
   }
 
   /** Takes on a connection the listener accepted: it is sent `hello` at
-   *  once, and nothing else until it authenticates. */
-  acceptSocket(socket: WebSocket): RemoteHostSession {
-    const session = new RemoteHostSession(socket, this)
+   *  once, and nothing else until it authenticates. Null when it was turned
+   *  away instead: a tunneled connection the kill switch stops, an address
+   *  blocked for failing auth, or one socket too many. */
+  acceptSocket(socket: WebSocket, origin: ConnectionOrigin = LAN_ORIGIN): RemoteHostSession | null {
+    const reject = (code: number): null => {
+      try {
+        socket.close(code)
+      } catch {
+        /* already gone */
+      }
+      return null
+    }
+    if (!admitsTunneled(origin, this.tunnelGate())) return reject(CLOSE_POLICY)
+    // A phone on the LAN that failed its way into a block can still pair
+    // while a code is up: that is how it gets a working key again.
+    if (this.authLimiter.isBlocked(origin.peerIp) && !(origin.via === 'lan' && this.openPairingSecret())) {
+      return reject(CLOSE_POLICY)
+    }
+    if (this.sessions.length >= MAX_SESSIONS) return reject(CLOSE_TRY_AGAIN_LATER)
+    if (
+      origin.via === 'tunnel' &&
+      this.sessions.filter((s) => s.via === 'tunnel' && !s.isAuthenticated).length >= MAX_UNAUTHENTICATED_TUNNELED
+    ) {
+      return reject(CLOSE_TRY_AGAIN_LATER)
+    }
+    const session = new RemoteHostSession(socket, this, origin)
     this.sessions.push(session)
     return session
   }
 
+  // MARK: Heartbeat
+
+  private readonly alive = new WeakMap<WebSocket, boolean>()
+
+  private watchHeartbeat(socket: WebSocket): void {
+    this.alive.set(socket, true)
+    socket.on('pong', () => this.alive.set(socket, true))
+  }
+
+  /** Pings every socket each HEARTBEAT_MS and ends any that didn't answer
+   *  the last one: a phone that vanished behind the tunnel (or a NAT that
+   *  forgot it) otherwise holds its socket open forever. */
+  private startHeartbeat(wss: WebSocketServer): void {
+    this.stopHeartbeat()
+    this.heartbeat = setInterval(() => {
+      for (const socket of wss.clients) {
+        if (this.alive.get(socket) === false) {
+          socket.terminate()
+          continue
+        }
+        this.alive.set(socket, false)
+        try {
+          socket.ping()
+        } catch {
+          /* closing anyway */
+        }
+      }
+    }, HEARTBEAT_MS)
+    this.heartbeat.unref?.()
+  }
+
+  private stopHeartbeat(): void {
+    if (this.heartbeat) clearInterval(this.heartbeat)
+    this.heartbeat = null
+  }
+
   private listen(port: number): Promise<WebSocketServer> {
     return new Promise((resolve, reject) => {
-      const wss = new WebSocketServer({ port })
+      const wss = new WebSocketServer({ port, maxPayload: MAX_PAYLOAD_BYTES })
       const onError = (error: Error): void => {
         wss.close()
         reject(error)
@@ -307,6 +404,7 @@ export class RemoteHost implements RemoteHostSessionDelegate {
     this.connectedDeviceIds.clear()
     this.closePairingInternal()
     this.advertiser.stop()
+    this.stopHeartbeat()
     this.wss?.close()
     this.wss = null
     this.port = null
@@ -331,6 +429,9 @@ export class RemoteHost implements RemoteHostSessionDelegate {
    *  be on for a scan to reach anything, so turning it on is part of "show me
    *  the code" rather than a separate step. */
   async openPairing(): Promise<void> {
+    // The user is back at the screen: a breaker tripped by failed sign-ins
+    // over the internet is theirs to reset.
+    this.authLimiter.resetBreaker()
     if (!this.enabled) {
       await this.start()
       this.onSharingChanged(true)

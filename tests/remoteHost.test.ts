@@ -574,15 +574,18 @@ describe('chats/open', () => {
   it('keeps what the Swift store never had on messages', async () => {
     const [steer, thinking, notice] = await opened([
       message({ steering: 'queued', mentions: ['src/a.ts'] }),
-      message({ id: 'm2', role: 'reasoning', isStreaming: true, startedAt: T, endedAt: T + 12_000 }),
+      message({ id: 'm2', role: 'reasoning', isStreaming: true, startedAt: T, endedAt: T + 12_400 }),
       message({ id: 'm3', role: 'notice', noticeIsError: true, endsTurn: true, contextCleared: true, plain: true })
     ])
     expect((steer.message as Frame)._0).toMatchObject({ steering: 'queued', mentions: ['src/a.ts'] })
     expect((thinking.message as Frame)._0).toMatchObject({
       isStreaming: true,
-      startedAt: '2023-11-14T22:13:20Z',
-      endedAt: '2023-11-14T22:13:32Z'
+      // To the millisecond: the phone times the thought from these.
+      startedAt: '2023-11-14T22:13:20.000Z',
+      endedAt: '2023-11-14T22:13:32.400Z'
     })
+    // The fields the Swift store has keep its second-precision dates.
+    expect((thinking.message as Frame)._0).toMatchObject({ timestamp: '2023-11-14T22:13:20Z' })
     expect((notice.message as Frame)._0).toMatchObject({ endsTurn: true, contextCleared: true, plain: true })
     expect(REMOTE_HOST_FEATURES).toContain(RemoteFeature.snapshotV2)
   })

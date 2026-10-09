@@ -454,9 +454,10 @@ const MAX_WIRE_TOOL_IMAGES = 4
  *
  *  After them, the ones the Swift store never had (`snapshotV2`), each left
  *  out when it says nothing — Codable ignores keys it doesn't know:
- *    message: steering, isStreaming (true), startedAt/endedAt (RFC3339,
- *             reasoning), mentions, plain (true), contextCleared (true),
- *             endsTurn (true)
+ *    message: steering, isStreaming (true), startedAt/endedAt (reasoning;
+ *             RFC3339 WITH milliseconds, "2026-08-01T10:00:00.400Z" — they
+ *             time a thought, and no Swift decoder reads them), mentions,
+ *             plain (true), contextCleared (true), endsTurn (true)
  *    tool:    workflow (the `_meta["spettro.app/workflow"]` object),
  *             rawOutput, denied (true), images ([{data, mimeType}], ≤4) */
 export function transcriptItemToWire(item: TranscriptItem): JSONValue {
@@ -479,8 +480,8 @@ export function transcriptItemToWire(item: TranscriptItem): JSONValue {
     }
     if (m.steering !== undefined) stored.steering = m.steering
     if (m.isStreaming) stored.isStreaming = true
-    if (m.startedAt !== undefined) stored.startedAt = rfc3339(m.startedAt)
-    if (m.endedAt !== undefined) stored.endedAt = rfc3339(m.endedAt)
+    if (m.startedAt !== undefined) stored.startedAt = new Date(m.startedAt).toISOString()
+    if (m.endedAt !== undefined) stored.endedAt = new Date(m.endedAt).toISOString()
     if (m.mentions !== undefined && m.mentions.length > 0) stored.mentions = [...m.mentions]
     if (m.plain) stored.plain = true
     if (m.contextCleared) stored.contextCleared = true

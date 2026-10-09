@@ -9,7 +9,7 @@
 //
 // Framing: JSON-RPC 2.0, one message per WebSocket text frame.
 
-import type { WebSocket } from 'ws'
+import type { RawData, WebSocket } from 'ws'
 import type { ACPContentBlock, JSONValue } from '../../shared/acp'
 import {
   REMOTE_HOST_FEATURES,
@@ -33,6 +33,7 @@ import {
   AUTH_DEADLINE_MS,
   CLOSE_POLICY,
   LAN_ORIGIN,
+  PREAUTH_MAX_BYTES,
   PREAUTH_MAX_FRAMES,
   PREAUTH_MAX_FRAME_BYTES,
   type ConnectionOrigin,
@@ -67,8 +68,18 @@ export interface RemoteHostSessionDelegate {
   sessionAuthenticated(session: RemoteHostSession): void
   sessionClosed(session: RemoteHostSession): void
   /** An auth attempt failed in a way that counts against the peer's
-   *  address (a bad proof, an unknown or removed device, garbage). */
-  authFailed(session: RemoteHostSession): void
+   *  address (a bad proof, an unknown or removed device, garbage). `soft`:
+   *  no attempt, but a socket that let the deadline pass or sent too much
+   *  before signing in. */
+  authFailed(session: RemoteHostSession, options?: { soft?: boolean }): void
+}
+
+/** The TCP socket under a WebSocket, as far as counting what arrives on it
+ *  goes (the upgrade request's `req.socket`). */
+export interface WireSocket {
+  on(event: 'data', listener: (chunk: Buffer) => void): unknown
+  off(event: 'data', listener: (chunk: Buffer) => void): unknown
+  destroy(): void
 }
 
 /** Auth refusals counted against the peer: wrong keys and garbage, not a
@@ -83,6 +94,17 @@ const COUNTED_AUTH_FAILURES = new Set<number>([
 /** What a phone on the other side of the tunnel is told this host is
  *  called before it proves itself; the real name is in the auth result. */
 const TUNNELED_HELLO_NAME = 'Spettro'
+
+/** A frame's size in bytes, before anything is made of it. */
+function rawLength(data: RawData): number {
+  if (Array.isArray(data)) return data.reduce((n, chunk) => n + chunk.length, 0)
+  return data.byteLength
+}
+
+function rawText(data: RawData): string {
+  if (Array.isArray(data)) return Buffer.concat(data).toString('utf8')
+  return Buffer.isBuffer(data) ? data.toString('utf8') : Buffer.from(data).toString('utf8')
+}
 
 /** A JSON-RPC error to return from a request handler. */
 class RPCFault extends Error {
@@ -146,21 +168,25 @@ export class RemoteHostSession {
   /** Frames received before auth (PREAUTH_MAX_FRAMES). */
   private preAuthFrames = 0
   private authDeadline: NodeJS.Timeout | null = null
+  /** Stops counting the bytes that arrive before auth. */
+  private unwatchWire: (() => void) | null = null
 
   constructor(
     private readonly ws: WebSocket,
     private readonly delegate: RemoteHostSessionDelegate,
-    readonly origin: ConnectionOrigin = LAN_ORIGIN
+    readonly origin: ConnectionOrigin = LAN_ORIGIN,
+    wire?: WireSocket
   ) {
-    ws.on('message', (data) => {
-      this.handleFrame(data.toString())
-    })
+    ws.on('message', (data) => this.handleMessage(data))
     ws.on('close', () => this.didClose())
     ws.on('error', () => this.didClose())
+    if (wire) this.watchWire(wire)
     // A socket that never proves itself doesn't get to sit here: a phone
     // that means it answers hello within a second.
     this.authDeadline = setTimeout(() => {
-      if (!this.isAuthenticated) this.close(CLOSE_POLICY)
+      if (this.isAuthenticated) return
+      this.delegate.authFailed(this, { soft: true })
+      this.close(CLOSE_POLICY)
     }, AUTH_DEADLINE_MS)
     this.authDeadline.unref?.()
     // The host speaks first: the client cannot build an auth proof until it
@@ -199,7 +225,32 @@ export class RemoteHostSession {
     if (this.closed) return
     this.closed = true
     this.clearDeadline()
+    this.unwatchWire?.()
     this.delegate.sessionClosed(this)
+  }
+
+  /** Counts what arrives on the wire until auth: `ws` buffers a frame
+   *  whole before it says a word about it, so a stranger's 32 MiB frame is
+   *  cut off here while it arrives, not read and then refused. */
+  private watchWire(wire: WireSocket): void {
+    let received = 0
+    const onData = (chunk: Buffer): void => {
+      received += chunk.length
+      if (received <= PREAUTH_MAX_BYTES) return
+      this.unwatchWire?.()
+      this.delegate.authFailed(this, { soft: true })
+      try {
+        wire.destroy()
+      } catch {
+        /* gone */
+      }
+      this.didClose()
+    }
+    wire.on('data', onData)
+    this.unwatchWire = () => {
+      wire.off('data', onData)
+      this.unwatchWire = null
+    }
   }
 
   private clearDeadline(): void {
@@ -243,17 +294,22 @@ export class RemoteHostSession {
 
   // MARK: Inbound frames
 
-  private handleFrame(text: string): void {
+  private handleMessage(data: RawData): void {
     // Before auth, a socket gets a handful of small frames: enough for an
     // auth request and a retry, not enough to make the host parse megabytes
-    // for a stranger.
+    // for a stranger. Measured before it is turned into text.
     if (!this.isAuthenticated) {
       this.preAuthFrames += 1
-      if (this.preAuthFrames > PREAUTH_MAX_FRAMES || Buffer.byteLength(text, 'utf8') > PREAUTH_MAX_FRAME_BYTES) {
+      if (this.preAuthFrames > PREAUTH_MAX_FRAMES || rawLength(data) > PREAUTH_MAX_FRAME_BYTES) {
+        this.delegate.authFailed(this, { soft: true })
         this.close(CLOSE_POLICY)
         return
       }
     }
+    this.handleFrame(rawText(data))
+  }
+
+  private handleFrame(text: string): void {
     let root: JSONValue
     try {
       root = JSON.parse(text) as JSONValue
@@ -292,6 +348,7 @@ export class RemoteHostSession {
           throw error
         }
         this.clearDeadline()
+        this.unwatchWire?.()
         // After the reply, not inside authenticate(): whatever the host
         // sends a new session (its state, the prompts waiting) has to land
         // behind the answer the phone is waiting for.
@@ -551,10 +608,9 @@ export class RemoteHostSession {
     } else {
       const known = this.delegate.resumeDevice(deviceID)
       if (!known) {
-        throw new RPCFault(
-          RemoteAuthError.notPaired,
-          `this device isn't paired with ${this.delegate.hostName}`
-        )
+        // Through the tunnel the name stays out of it, as in hello.
+        const name = this.origin.via === 'tunnel' ? 'this computer' : this.delegate.hostName
+        throw new RPCFault(RemoteAuthError.notPaired, `this device isn't paired with ${name}`)
       }
       if (known.revoked) {
         throw new RPCFault(RemoteAuthError.revoked, 'access for this device was removed')

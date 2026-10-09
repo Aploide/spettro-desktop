@@ -8,11 +8,12 @@ import { EventEmitter } from 'node:events'
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { WebSocket, WebSocketServer } from 'ws'
 import type { RemoteBridge } from '@main/remote/bridge'
 import type { ConnectionOrigin } from '@main/remote/connectionGuard'
 import { RemoteHost } from '@main/remote/host'
+import { RemoteHostSession } from '@main/remote/hostSession'
 import { base64urlDecode, computeProof } from '@main/remote/pairing'
 import type { TunnelProcessLike } from '@main/remote/tunnel/remoteTunnel'
 import type { TunnelProcessOptions, TunnelProcessSnapshot } from '@main/remote/tunnel/tunnelProcess'
@@ -625,10 +626,55 @@ describe('connections through the tunnel', () => {
     for (let i = 0; i < 5; i++) {
       const { socket } = connect(tunneled)
       resume(socket, 'phone-1', Buffer.alloc(32, 9))
+      socket.close()
     }
     expect(connect(tunneled).accepted).toBe(false)
     expect(connect({ ...tunneled, peerIp: '198.51.100.7' }).accepted).toBe(true)
   })
+
+  it('take at most 2 unauthenticated from one peer, so one can’t keep the rest out', async () => {
+    await connectedTunnel()
+    expect(connect(tunneled).accepted).toBe(true)
+    expect(connect(tunneled).accepted).toBe(true)
+    const third = connect(tunneled)
+    expect(third.accepted).toBe(false)
+    expect(third.socket.closeCode).toBe(1013)
+    expect(connect({ ...tunneled, peerIp: '198.51.100.7' }).accepted).toBe(true)
+    // Another address in the same /64 is the same peer.
+    expect(connect({ ...tunneled, peerIp: '2001:db8:aa:bb::1' }).accepted).toBe(true)
+    expect(connect({ ...tunneled, peerIp: '2001:db8:aa:bb::2' }).accepted).toBe(true)
+    expect(connect({ ...tunneled, peerIp: '2001:db8:aa:bb::3' }).accepted).toBe(false)
+  })
+
+  it('count a socket idling past the deadline against its peer', async () => {
+    await connectedTunnel()
+    vi.useFakeTimers()
+    try {
+      for (let i = 0; i < 5; i++) {
+        const { socket } = connect(tunneled)
+        vi.advanceTimersByTime(15_000)
+        expect(socket.closeCode).toBe(1008)
+      }
+      expect(connect(tunneled).accepted).toBe(false)
+      // The LAN isn't held to that.
+      for (let i = 0; i < 6; i++) {
+        connect({ via: 'lan', peerIp: '192.168.1.40', connectorTag: null })
+        vi.advanceTimersByTime(15_000)
+      }
+      expect(connect({ via: 'lan', peerIp: '192.168.1.40', connectorTag: null }).accepted).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('don’t hear this computer’s name from a stranger’s resume', async () => {
+    await connectedTunnel()
+    const { socket } = connect(tunneled)
+    const id = auth(socket, { mode: 'resume', deviceID: 'nobody', proof: 'x', protocolVersion: 1 })
+    expect(socket.reply(id)?.error).toEqual({ code: -33001, message: "this device isn't paired with this computer" })
+    expect(JSON.stringify(socket.sent)).not.toContain(host.hostName)
+  })
+
 })
 
 describe('checking from the internet', () => {
@@ -703,6 +749,55 @@ describe('the real listener', () => {
     } finally {
       squatter.close()
     }
+  })
+
+  it('cuts off a frame too big before sign-in while it arrives, without reading it', async () => {
+    const { WebSocket: Client } = await import('ws')
+    const handled = vi.spyOn(RemoteHostSession.prototype as unknown as { handleMessage(data: unknown): void }, 'handleMessage')
+    try {
+      realHost()
+      await host.configureTunnel({ port: await freePort() })
+      await host.setEnabled(true)
+      const client = new Client(`ws://127.0.0.1:${host.getState().port}/`)
+      const closed = new Promise<void>((resolve) => client.on('close', () => resolve()))
+      client.on('error', () => undefined)
+      client.once('message', () => client.send('x'.repeat(4 * 1024 * 1024)))
+      await closed
+      expect(handled).not.toHaveBeenCalled()
+    } finally {
+      handled.mockRestore()
+    }
+  })
+
+  it('takes big frames once signed in', async () => {
+    const { WebSocket: Client } = await import('ws')
+    realHost()
+    await host.configureTunnel({ port: await freePort() })
+    await host.setEnabled(true)
+    const key = host.pairDevice('phone-1', 'Pixel', 'android')
+    const client = new Client(`ws://127.0.0.1:${host.getState().port}/`)
+    const reply = await new Promise<Frame>((resolve) => {
+      client.on('message', (data) => {
+        const frame = JSON.parse(data.toString()) as Frame
+        if (frame.method === RemoteMethod.hello) {
+          const challenge = base64urlDecode((frame.params as Frame).challenge as string) as Buffer
+          client.send(
+            JSON.stringify({
+              jsonrpc: '2.0',
+              id: 1,
+              method: RemoteMethod.auth,
+              params: { mode: 'resume', deviceID: 'phone-1', proof: computeProof(key, challenge, host.hostId), protocolVersion: 1 }
+            })
+          )
+        } else if (frame.id === 1) {
+          client.send(JSON.stringify({ jsonrpc: '2.0', id: 2, method: RemoteMethod.chatsList, params: { pad: 'x'.repeat(2 * 1024 * 1024) } }))
+        } else if (frame.id === 2) {
+          resolve(frame)
+          client.close()
+        }
+      })
+    })
+    expect(reply.result).toEqual({ chats: [] })
   })
 
   it('turns a tunneled upgrade away while the tunnel is off, and serves the LAN', async () => {

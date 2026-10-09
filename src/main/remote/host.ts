@@ -37,12 +37,15 @@ import {
   MAX_PAYLOAD_BYTES,
   MAX_SESSIONS,
   MAX_UNAUTHENTICATED_TUNNELED,
+  MAX_UNAUTHENTICATED_TUNNELED_PER_PEER,
   admitsTunneled,
   classifyConnection,
+  localAddresses,
+  peerKey,
   type ConnectionOrigin
 } from './connectionGuard'
 import { RemoteAdvertiser } from './discovery'
-import { RemoteHostSession, type RemoteHostSessionDelegate } from './hostSession'
+import { RemoteHostSession, type RemoteHostSessionDelegate, type WireSocket } from './hostSession'
 import { HostIdentityStore, PairedDeviceStore } from './pairedDevices'
 import {
   buildPairingURL,
@@ -193,8 +196,11 @@ export class RemoteHost implements RemoteHostSessionDelegate {
     return this.tunnel.gate
   }
 
-  authFailed(session: RemoteHostSession): void {
-    if (this.authLimiter.recordFailure(session.origin)) {
+  authFailed(session: RemoteHostSession, options: { soft?: boolean } = {}): void {
+    // A socket that idled past the deadline or sent too much counts only
+    // through the tunnel: on the LAN that's a phone having a bad moment.
+    if (options.soft && session.via !== 'tunnel') return
+    if (this.authLimiter.recordFailure(session.origin, options)) {
       // A wave of failures over the internet: whatever pairing code is up
       // stops working, and pairing through the tunnel stays off until the
       // user opens a new code.
@@ -356,7 +362,7 @@ export class RemoteHost implements RemoteHostSessionDelegate {
         return
       }
       this.watchHeartbeat(socket)
-      this.acceptSocket(socket, classifyConnection(req.socket.remoteAddress, req.headers))
+      this.acceptSocket(socket, classifyConnection(req.socket.remoteAddress, req.headers, localAddresses()), req.socket)
     })
     this.startHeartbeat(wss)
     wss.on('error', (error) => {
@@ -406,7 +412,7 @@ export class RemoteHost implements RemoteHostSessionDelegate {
    *  once, and nothing else until it authenticates. Null when it was turned
    *  away instead: a tunneled connection the kill switch stops, an address
    *  blocked for failing auth, or one socket too many. */
-  acceptSocket(socket: WebSocket, origin: ConnectionOrigin = LAN_ORIGIN): RemoteHostSession | null {
+  acceptSocket(socket: WebSocket, origin: ConnectionOrigin = LAN_ORIGIN, wire?: WireSocket): RemoteHostSession | null {
     const reject = (code: number): null => {
       try {
         socket.close(code)
@@ -418,17 +424,21 @@ export class RemoteHost implements RemoteHostSessionDelegate {
     if (!admitsTunneled(origin, this.tunnelGate())) return reject(CLOSE_POLICY)
     // A phone on the LAN that failed its way into a block can still pair
     // while a code is up: that is how it gets a working key again.
-    if (this.authLimiter.isBlocked(origin.peerIp) && !(origin.via === 'lan' && this.openPairingSecret())) {
+    if (this.authLimiter.isBlocked(origin) && !(origin.via === 'lan' && this.openPairingSecret())) {
       return reject(CLOSE_POLICY)
     }
     if (this.sessions.length >= MAX_SESSIONS) return reject(CLOSE_TRY_AGAIN_LATER)
-    if (
-      origin.via === 'tunnel' &&
-      this.sessions.filter((s) => s.via === 'tunnel' && !s.isAuthenticated).length >= MAX_UNAUTHENTICATED_TUNNELED
-    ) {
-      return reject(CLOSE_TRY_AGAIN_LATER)
+    if (origin.via === 'tunnel') {
+      const waiting = this.sessions.filter((s) => s.via === 'tunnel' && !s.isAuthenticated)
+      const peer = peerKey(origin)
+      if (
+        waiting.length >= MAX_UNAUTHENTICATED_TUNNELED ||
+        waiting.filter((s) => peerKey(s.origin) === peer).length >= MAX_UNAUTHENTICATED_TUNNELED_PER_PEER
+      ) {
+        return reject(CLOSE_TRY_AGAIN_LATER)
+      }
     }
-    const session = new RemoteHostSession(socket, this, origin)
+    const session = new RemoteHostSession(socket, this, origin, wire)
     this.sessions.push(session)
     return session
   }

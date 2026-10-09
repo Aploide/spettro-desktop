@@ -1,20 +1,31 @@
 // Remote Access settings — port of RemoteAccessView.swift.
 //
-// One switch, one QR code, and the list of phones already allowed in. The
+// One switch, one QR code, and the list of phones already allowed in — the
+// iPhone app and the Android app alike. The
 // flow is deliberately two-tiered: turning sharing ON is the everyday action
 // (the phone is already paired and just needs the host listening); showing a
 // QR is the once-ever action. Collapsing them into one button would put a
 // pairing code on screen for no reason.
 //
 // It lives in Settings › Remote. A code that can't be drawn still pairs: the
-// link behind it is offered to copy. A code that runs out says so, with "Show
-// New Code", instead of quietly vanishing. Removing a device asks first.
+// link behind it is offered to copy, and opening it on the phone pairs it
+// (both apps take spettro-pair:// links). A code that runs out says so, with
+// "Show new code", instead of quietly vanishing. Removing a device asks
+// first.
+//
+// Under the switch, Access over the internet (InternetAccess.tsx): the
+// Cloudflare tunnel, off until the user sets it up. While it is on, the
+// footer stops promising that nothing leaves the network, and a phone that
+// came in through it says so on its row, beside a Remove that is easy to
+// find.
 
 import { useEffect, useState } from 'react'
 import type { PairedDeviceDTO, RemoteHostState } from '@shared/model'
 import { call, useApp } from '../../state/store'
 import { confirmDialog } from '@renderer/views/common/ConfirmDialog'
 import { CopyButton } from '@renderer/views/common/Disclosure'
+import { Icon } from '@renderer/design/icons'
+import InternetAccess from './InternetAccess'
 import './remote.css'
 
 export interface RemoteAccessViewProps {
@@ -53,13 +64,15 @@ export default function RemoteAccessView({ onClose, embedded = false }: RemoteAc
       {!embedded && <Header onClose={onClose} />}
       {!embedded && <div className="remote__divider" />}
       <SwitchRow remote={remote} />
+      <InternetAccess remote={remote} now={now} />
       {pairing ? <PairingPanel remote={remote} now={now} /> : <PairedDevices remote={remote} now={now} />}
       <div className="remote__spacer" />
       <footer className="remote__footer">
         <LockIcon />
         <span>
-          Paired devices see and can steer every chat in this window. Sharing stays on your local
-          network — nothing is sent to a server.
+          {remote.tunnel.enabled
+            ? 'Paired devices see and can steer every chat in this window, from wherever they are. On your network, nothing is sent to a server; over the internet, the connection goes through Cloudflare.'
+            : 'Paired devices see and can steer every chat in this window. Sharing stays on your local network — nothing is sent to a server.'}
         </span>
       </footer>
     </div>
@@ -76,7 +89,7 @@ function Header({ onClose }: { onClose?: () => void }): JSX.Element {
       <div>
         <h2 className="remote__title">Remote Access</h2>
         <p className="remote__subtitle">
-          Drive these chats from Spettro on your iPhone or iPad, over your local network.
+          Drive these chats from Spettro on your phone or tablet.
         </p>
       </div>
       {onClose && (
@@ -99,6 +112,7 @@ function SwitchRow({ remote }: { remote: RemoteHostState }): JSX.Element {
   const connected = remote.devices.filter(
     (d) => !d.revoked && remote.connectedDeviceIds.includes(d.deviceId)
   )
+  const online = remote.tunnel.enabled && remote.tunnel.status === 'connected'
 
   const statusTitle = !remote.enabled
     ? 'Sharing is off'
@@ -109,9 +123,13 @@ function SwitchRow({ remote }: { remote: RemoteHostState }): JSX.Element {
   const statusDetail = !remote.enabled
     ? 'Your phone will show this computer as unavailable.'
     : connected.length === 0
-      ? 'Open Spettro on your phone, on the same Wi-Fi, to connect.'
+      ? online
+        ? 'Open Spettro on your phone to connect, at home or away.'
+        : 'Open Spettro on your phone, on the same Wi-Fi, to connect.'
       : connected.length === 1
-        ? `${connected[0].name} is connected`
+        ? remote.tunneledDeviceIds.includes(connected[0].deviceId)
+          ? `${connected[0].name} is connected over the internet`
+          : `${connected[0].name} is connected`
         : `${connected.length} devices connected`
 
   const commitRename = (): void => {
@@ -227,14 +245,21 @@ function PairingPanel({ remote, now }: { remote: RemoteHostState; now: number })
       )}
       <div className="remote__pairing-text">
         <span className="remote__pairing-title">
-          {remote.pairingQR ? 'Scan this in Spettro on your iPhone' : 'Pair with the link instead'}
+          {remote.pairingQR ? 'Scan this in Spettro on your phone' : 'Pair with the link instead'}
         </span>
         <span className="remote__pairing-expiry">{expiryText}</span>
+        {remote.tunnel.enabled && !remote.tunnel.allowInternetPairing && (
+          <span className="remote__pairing-expiry">Pair on the same Wi-Fi as this computer.</span>
+        )}
       </div>
       {remote.pairingURL && (
         <div className="remote__manual">
+          {/* Both apps open spettro-pair:// links: the iPhone app, and the
+              Android app through its deep link. */}
           <span className="remote__manual-text">
-            Can&rsquo;t scan? Copy the pairing link and open it on your phone.
+            {remote.tunnel.enabled && remote.tunnel.allowInternetPairing
+              ? 'Can’t scan? Copy the pairing link and open it on your phone. Anyone with the link can pair while it lasts, so send it only to yourself.'
+              : 'Can’t scan? Copy the pairing link and open it on your phone.'}
           </span>
           <CopyButton text={remote.pairingURL} label="Copy link" className="remote__button" />
         </div>
@@ -276,6 +301,8 @@ function PairedDevices({ remote, now }: { remote: RemoteHostState; now: number }
               key={device.deviceId}
               device={device}
               connected={remote.connectedDeviceIds.includes(device.deviceId)}
+              tunneled={remote.tunneledDeviceIds.includes(device.deviceId)}
+              tunnelOn={remote.tunnel.enabled}
               now={now}
             />
           ))}
@@ -285,31 +312,50 @@ function PairedDevices({ remote, now }: { remote: RemoteHostState; now: number }
   )
 }
 
+/** A device's row. One connected through the tunnel says so — that phone
+ *  is somewhere else, and Remove is how to shut it out if it shouldn't be. */
 function DeviceRow({
   device,
   connected,
+  tunneled,
+  tunnelOn,
   now
 }: {
   device: PairedDeviceDTO
   connected: boolean
+  tunneled: boolean
+  tunnelOn: boolean
   now: number
 }): JSX.Element {
   const detail = connected
-    ? `Connected · ${device.platform}`
+    ? tunneled
+      ? `Connected over the internet · ${device.platform}`
+      : tunnelOn
+        ? `Connected on your network · ${device.platform}`
+        : `Connected · ${device.platform}`
     : device.lastSeenAt != null
       ? `Last seen ${relativeTime(device.lastSeenAt, now)}`
       : device.platform
   return (
-    <div className="remote__card remote__device">
+    <div className={`remote__card remote__device${tunneled ? ' remote__device--tunneled' : ''}`}>
       <span className={`remote__device-icon ${connected ? 'remote__device-icon--on' : ''}`}>
         <PhoneIcon />
       </span>
       <div className="remote__device-text">
-        <span className="remote__device-name">{device.name}</span>
+        <span className="remote__device-name">
+          {device.name}
+          {tunneled && (
+            <span className="remote__badge" title="Connected through the Cloudflare tunnel">
+              <Icon name="globe" size={10} />
+              Internet
+            </span>
+          )}
+        </span>
         <span className="remote__device-detail">{detail}</span>
       </div>
       <button
         className="remote__remove"
+        aria-label={`Remove ${device.name}`}
         onClick={async () => {
           const answer = await confirmDialog({
             title: `Remove “${device.name}”?`,

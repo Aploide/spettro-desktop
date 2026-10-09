@@ -170,7 +170,7 @@ describe('labels', () => {
   // Names, and words that are names here (Settings is a place in the app,
   // Restricted a permission level).
   const PROPER = new Set(
-    'Spettro Spettro’s API CLI Anthropic OpenAI Ollama LM Studio Claude Sonnet Opus Google GitHub Windows Linux macOS Mac iPhone iPad Pro Max Ultra Git MCP URL Ctrl Cmd Shift Alt Esc Enter Tab Settings Finder Explorer I JSON ID Restricted'.split(
+    'Spettro Spettro’s API CLI Cloudflare Anthropic OpenAI Ollama LM Studio Claude Sonnet Opus Google GitHub Windows Linux macOS Mac iPhone iPad Pro Max Ultra Git MCP URL Ctrl Cmd Shift Alt Esc Enter Tab Settings Finder Explorer I JSON ID Restricted'.split(
       ' '
     )
   )

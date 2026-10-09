@@ -24,7 +24,15 @@ import type { JSONValue } from '@shared/acp'
 import type { ChatSummary, StoredSession, TranscriptItem } from '@shared/model'
 import { REMOTE_HOST_FEATURES, RemoteFeature, RemoteMethod } from '@shared/remote'
 import { FakeAgent, type Handler, Reply, deferred, settle as settleAll } from './fakeAgent'
-import { configOptionUpdate, configOptions, initializeResult, permissionAttached, rpcError } from './wire'
+import {
+  agentChunk,
+  configOptionUpdate,
+  configOptions,
+  initializeResult,
+  permissionAttached,
+  rpcError,
+  userChunk
+} from './wire'
 
 type Frame = { [key: string]: JSONValue }
 
@@ -444,6 +452,46 @@ describe('notices', () => {
     expect(states[noticeAt].stopReason).toBeUndefined()
     expect(states[endAt]).toMatchObject({ stopReason: 'error' })
     expect(noticeAt).toBeLessThan(endAt)
+  })
+
+  it('keeps the notices a session/load replays to the chat it fills', async () => {
+    // An imported conversation's failed turns come back as notices; they
+    // are history, which the phones get whole once the import is done.
+    liveHost()
+    fake.handlers['session/load'] = () => {
+      fake.update('tui-1', userChunk('hello'))
+      fake.update('tui-1', agentChunk('[turn failed: no API endpoint configured]'))
+      fake.update('tui-1', userChunk('again'))
+      fake.update('tui-1', agentChunk('[turn interrupted]'))
+      return { configOptions: configOptions({}) }
+    }
+    fake.handlers['session/set_config_option'] = () => ({ configOptions: configOptions({}) })
+    const socket = await attached()
+
+    const chatId = (await model.importCLISession('tui-1', dir)) as string
+    await settleAll()
+
+    const session = model.sessionById(chatId) as ChatSession
+    expect(session.items.filter((i) => i.kind === 'message' && i.message.role === 'notice')).toHaveLength(2)
+    expect(chatStates(socket, chatId).filter((p) => p.notice !== undefined)).toEqual([])
+    expect(chatStates(socket, chatId).length).toBeGreaterThan(0)
+  })
+
+  it('keeps a Workflow Studio run’s notices to the studio', async () => {
+    liveHost()
+    const chat = await liveChat()
+    fake.handlers['session/new'] = () => ({ sessionId: 's2', configOptions: configOptions({}) })
+    fake.handlers['session/prompt'] = () => new Promise(() => undefined)
+    const scratchId = model.runWorkflow(chat.id, 'ship') as string
+    await settleAll()
+    const socket = await attached()
+    const heard: unknown[] = []
+    model.on('chat-notice', (...args: unknown[]) => heard.push(args))
+
+    model.sessionById(scratchId)?.appendNotice("Couldn't change Model.", true)
+
+    expect(heard).toEqual([])
+    expect(chatStates(socket, scratchId)).toEqual([])
   })
 
   it('leaves the notice a turn ends on to the turn’s last chat/state', async () => {

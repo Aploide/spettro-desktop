@@ -66,6 +66,31 @@ src/renderer/src/
 | `~/.spettro/memory.md`, `<project>/.spettro/memory.md` | same paths |
 | Keychain (remote device keys) | `userData/remote-devices.json` (0600) |
 
+Remote access itself is a preference (`remoteSharing`): left on, it is
+turned back on at the next launch.
+
+## Remote protocol
+
+`src/shared/remote.ts` is the wire, Spettro Remote v1 as the Swift host
+defines it (doc 34), and `src/main/remote/` serves it. The protocol
+version stays 1, because a host refuses any other. What this host adds
+on top is listed in `features` (in `hello` and the auth result), so a
+phone knows what it may rely on:
+
+| Feature | What it adds |
+| --- | --- |
+| `configResult` | `chats/config` answers `{configOptions}` once the set is done (a refusal is an error), and every option change, by any path, reaches every phone as a `config_option_update` |
+| `notices` | notices the app writes into a chat arrive as `chat/state` with a `notice` and no `stopReason` |
+| `pendingReplay` | prompts still waiting are asked again right after auth |
+| `mentions` | `chats/prompt` takes `mentions` (project-relative paths) |
+| `rename` | `chats/rename {chatID, title}` |
+| `projectFiles` | `projects/files {projectPath}` → `{files}` (≤ 5000) |
+| `snapshotV2` | `chats/open` keeps the transcript fields the Swift store lacks (see `transcriptItemToWire`) |
+
+A phone's first `host/state` follows the auth reply, never the other way
+round. Workflow Studio's scratch chats never reach a phone
+(`remoteBridge.ts`).
+
 ## CLI discovery
 
 `spettro` binary search order (Linux/Windows): explicit override →

@@ -183,14 +183,16 @@ export class RemoteHostSession {
 
   close(code?: number): void {
     if (this.closed) return
-    this.closed = true
-    this.clearDeadline()
     try {
       if (code === undefined) this.ws.close()
       else this.ws.close(code)
     } catch {
       /* ignore */
     }
+    // The host forgets the session now rather than at the socket's close
+    // event: one that never finishes its closing handshake must not keep
+    // holding a slot (MAX_SESSIONS) or a device's place.
+    this.didClose()
   }
 
   private didClose(): void {

@@ -1087,5 +1087,8 @@ describe('connections the host turns away', () => {
     const extra = connect(lan('192.168.1.200'))
     expect(extra.session).toBeNull()
     expect(extra.socket.closeCode).toBe(1013)
+    // One the host closed itself gives its place back at once.
+    sockets[0].socket.receive({ jsonrpc: '2.0', id: 1, method: RemoteMethod.auth, params: { pad: 'x'.repeat(70 * 1024) } })
+    expect(connect(lan('192.168.1.201')).session).not.toBeNull()
   })
 })

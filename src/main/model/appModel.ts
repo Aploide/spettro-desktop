@@ -11,6 +11,7 @@
 //                     config_option_update (relayConfig)
 //   'chat-user'       (chatId, text, attachments, timestamp, sourceDeviceId)
 //   'chat-state'      (summary, extra?)
+//   'chat-notice'     (summary, { notice }) — a notice outside a turn's end
 //   'chat-removed-remote' (chatId)
 //   'host-state'      ({ agentReady, shuttingDown, message? })
 //   'permission-ask' / 'permission-resolved'
@@ -526,7 +527,20 @@ export class AppModel extends EventEmitter {
       this.pushEvent({ type: 'chat-config-value', chatId: s.id, configId, value })
       this.relayConfigSoon(s)
     }
+    // Paired devices see every line the app writes into a chat ("Couldn't
+    // change Model…", "Spettro's engine isn't running yet…"), not only the
+    // agent's. The one a turn ends on rides on the turn's last chat-state
+    // instead (finishTurn), and a load replay isn't anyone's yet.
+    session.onNotice = (s, notice) => {
+      if (this.noticeEndsTurn || s.isReplaying || s.isScratch) return
+      this.emit('chat-notice', s.summary(), {
+        notice: { text: notice.text, isError: notice.noticeIsError ?? false }
+      })
+    }
   }
+
+  /** True while finishTurn files the notice a turn ended on. */
+  private noticeEndsTurn = false
 
   /** Chats whose options changed in this tick, waiting for relayConfig. */
   private configRelayQueue = new Set<ChatSession>()
@@ -1481,7 +1495,14 @@ export class AppModel extends EventEmitter {
     // arrived kept behind the notice's "Show details".
     const notice: TurnNotice | null =
       failure !== null ? { text: humanSentence(failure), isError: true } : stopNotice(stopReason)
-    if (notice) session.appendNotice(notice.text, notice.isError, failure !== null, failure ?? undefined)
+    if (notice) {
+      this.noticeEndsTurn = true
+      try {
+        session.appendNotice(notice.text, notice.isError, failure !== null, failure ?? undefined)
+      } finally {
+        this.noticeEndsTurn = false
+      }
+    }
     if (failure !== null) {
       // The turn is gone; whatever it was asking can't be answered usefully.
       const acpId = session.acpSessionId

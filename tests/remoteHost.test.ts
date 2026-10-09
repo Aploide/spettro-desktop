@@ -380,3 +380,70 @@ describe('chats/config', () => {
     expect(acpValue(updates[0], 'permission')).toBe('yolo')
   })
 })
+
+describe('notices', () => {
+  /** The chat/state frames a socket was sent for `chatId`. */
+  function chatStates(socket: FakeSocket, chatId: string): Frame[] {
+    return socket
+      .notifications(RemoteMethod.chatState)
+      .map((f) => f.params as Frame)
+      .filter((p) => (p.chat as Frame).id === chatId)
+  }
+
+  it('mirrors a refused change’s notice as a chat/state that ends nothing', async () => {
+    liveHost()
+    const chat = await liveChat()
+    fake.handlers['session/set_config_option'] = () => {
+      throw new Reply(rpcError('that level is not available', -32602))
+    }
+    const socket = await attached()
+
+    await call(socket, RemoteMethod.chatConfig, { chatID: chat.id, configID: 'thinking', stringValue: 'max' })
+
+    const [state] = chatStates(socket, chat.id)
+    expect(state.stopReason).toBeUndefined()
+    expect(state.notice).toEqual({
+      text: expect.stringMatching(/^Couldn't change Thinking\. /),
+      isError: true
+    })
+    expect(REMOTE_HOST_FEATURES).toContain(RemoteFeature.notices)
+  })
+
+  it('says why a prompt went nowhere before the turn ends', async () => {
+    // A phone used to see only stopReason "error", with nothing to say why.
+    liveHost()
+    fake.handlers['session/new'] = () => {
+      throw new Reply(rpcError('no provider configured'))
+    }
+    const chat = model.newChat(dir)
+    await settleAll()
+    const socket = await attached()
+
+    await call(socket, RemoteMethod.chatPrompt, { chatID: chat.id, blocks: [{ type: 'text', text: 'hi' }] })
+    await settleAll()
+
+    const states = chatStates(socket, chat.id)
+    const noticeAt = states.findIndex((p) => p.notice !== undefined)
+    const endAt = states.findIndex((p) => p.stopReason !== undefined)
+    expect(states[noticeAt].notice).toMatchObject({ isError: true })
+    expect((states[noticeAt].notice as Frame).text).toMatch(/^Couldn't start this session\. /)
+    expect(states[noticeAt].stopReason).toBeUndefined()
+    expect(states[endAt]).toMatchObject({ stopReason: 'error' })
+    expect(noticeAt).toBeLessThan(endAt)
+  })
+
+  it('leaves the notice a turn ends on to the turn’s last chat/state', async () => {
+    liveHost()
+    const chat = await liveChat()
+    fake.handlers['session/prompt'] = () => ({ stopReason: 'max_tokens' })
+    const socket = await attached()
+
+    await call(socket, RemoteMethod.chatPrompt, { chatID: chat.id, blocks: [{ type: 'text', text: 'hi' }] })
+    await settleAll()
+
+    const withNotice = chatStates(socket, chat.id).filter((p) => p.notice !== undefined)
+    expect(withNotice).toEqual([
+      expect.objectContaining({ stopReason: 'max_tokens', notice: { text: 'The reply hit the length limit.', isError: false } })
+    ])
+  })
+})

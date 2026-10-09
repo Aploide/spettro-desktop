@@ -43,6 +43,9 @@ export function buildRemoteBridge(model: AppModel): RemoteBridge {
   forward('chat-update-raw', 'chat-update')
   forward('chat-user', 'chat-user')
   forward('chat-state', 'chat-state')
+  // A notice alone: a chat/state with a notice and no stopReason, which
+  // ends nothing on the phone.
+  forward('chat-notice', 'chat-state')
   forward('chat-removed-remote', 'chat-removed')
   forward('host-state', 'host-state')
   forward('permission-ask', 'permission-ask')

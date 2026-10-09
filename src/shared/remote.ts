@@ -63,7 +63,10 @@ export const RemoteFeature = {
 export type RemoteFeatureName = (typeof RemoteFeature)[keyof typeof RemoteFeature]
 
 /** What this host implements — exactly these, so a phone can trust them. */
-export const REMOTE_HOST_FEATURES: readonly RemoteFeatureName[] = [RemoteFeature.configResult]
+export const REMOTE_HOST_FEATURES: readonly RemoteFeatureName[] = [
+  RemoteFeature.configResult,
+  RemoteFeature.notices
+]
 
 /** Bonjour service type ("_spettro-remote._tcp" on the wire; bonjour-service
  *  takes it without the underscore/protocol decoration). */
@@ -298,6 +301,9 @@ export interface RemoteNoticeWire {
   isError: boolean
 }
 
+/** With a stopReason, the chat's turn ended (and `notice` is what it ended
+ *  on, if anything). Without one, `notice` is a line the host wrote into the
+ *  chat on its own — appended, ending nothing. */
 export interface RemoteChatStateParams {
   chat: RemoteChatSummaryWire
   stopReason?: string

@@ -904,6 +904,16 @@ describe('remote sharing across launches', () => {
     expect(changes).toEqual([true])
   })
 
+  it('comes back on at launch only when it was on', async () => {
+    const changes: boolean[] = []
+    sharingHost(changes)
+    await host.restoreSharing(false)
+    expect(host.getState().enabled).toBe(false)
+    await host.restoreSharing(true)
+    expect(host.getState().enabled).toBe(true)
+    expect(changes).toEqual([true])
+  })
+
   it('is remembered on disk', () => {
     const prefs = new Prefs(dir)
     expect(prefs.remoteSharing).toBe(false)

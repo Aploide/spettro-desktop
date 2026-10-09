@@ -134,13 +134,9 @@ app.whenReady().then(() => {
     }
   })
   model.setRemoteState(remoteHost.getState())
-  // Sharing left on is on again: a phone away from this computer has no
-  // way to turn it back on itself.
-  if (model.remoteSharing) {
-    remoteHost.setEnabled(true).catch((error) => {
-      console.error('[remote] could not turn remote access back on', error)
-    })
-  }
+  remoteHost.restoreSharing(model.remoteSharing).catch((error) => {
+    console.error('[remote] could not turn remote access back on', error)
+  })
   ipcHandle = registerIpc(model, terminals, remoteHost, getMainWindow)
   // The app badge and notifications for approvals and questions waiting.
   wireAttention(model, getMainWindow)

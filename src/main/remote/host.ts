@@ -5,8 +5,8 @@
 // Lifetime: the listener runs for as long as remote access is switched on,
 // independent of whether any phone is connected — the phone is the thing that
 // comes and goes. Sharing is off by default and opt-in, matching /remote in
-// the TUI; once on, it stays on across launches (onSharingChanged, restored
-// by main) until the user turns it off.
+// the TUI; once on, it stays on across launches (onSharingChanged persists
+// it, restoreSharing brings it back) until the user turns it off.
 
 import { networkInterfaces } from 'os'
 import { WebSocketServer, type WebSocket } from 'ws'
@@ -222,6 +222,13 @@ export class RemoteHost implements RemoteHostSessionDelegate {
     if (v) await this.start()
     else this.stop()
     this.onSharingChanged(v)
+  }
+
+  /** At launch: sharing left on when the app last quit is on again, since a
+   *  phone away from this computer has no way to turn it back on itself.
+   *  `wasOn` is the persisted preference (onSharingChanged keeps it). */
+  async restoreSharing(wasOn: boolean): Promise<void> {
+    if (wasOn) await this.setEnabled(true)
   }
 
   private async start(): Promise<void> {

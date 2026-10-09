@@ -207,7 +207,9 @@ export class TunnelProcess {
     this.links.clear()
     this.everConnected = false
     this.disconnectedSince = this.now()
-    this.update({ phase: 'starting', connections: 0, locations: [], protocol: null, error: null, retryAt: null })
+    // Each run is a new connector, with a new id: until it says which,
+    // the kill switch mustn't hold the last run's against it.
+    this.update({ phase: 'starting', connections: 0, locations: [], protocol: null, connectorId: null, error: null, retryAt: null })
 
     let child: ChildProcess
     try {

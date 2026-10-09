@@ -675,6 +675,33 @@ describe('connections through the tunnel', () => {
     expect(JSON.stringify(socket.sent)).not.toContain(host.hostName)
   })
 
+  it('are dropped once the connector is known, when they came in through another', async () => {
+    const p = await connectedTunnel()
+    p.emit({ connectorId: null })
+    const key = host.pairDevice('phone-1', 'Pixel', 'android')
+    const elsewhere = connect({ ...tunneled, connectorTag: '00000000-0000-4000-8000-000000000000' })
+    expect(elsewhere.accepted).toBe(true)
+    resume(elsewhere.socket, 'phone-1', key)
+    const ours = connect(tunneled).socket
+    resume(ours, 'phone-1', host.pairDevice('phone-2', 'Tab', 'android'))
+    await settle()
+    expect(host.getState().tunnel.warning).toBeNull()
+    p.emit({ connectorId: CONNECTOR })
+    expect(elsewhere.socket.closeCode).toBe(1008)
+    expect(ours.closed).toBe(false)
+    expect(host.getState().tunnel.warning).toBe(
+      'Another cloudflared is also running this tunnel (a system service?). Stop it, or phones will sometimes be turned away.'
+    )
+  })
+
+  it('say so when another connector keeps sending phones that get turned away', async () => {
+    await connectedTunnel()
+    expect(host.getState().tunnel.warning).toBeNull()
+    connect({ ...tunneled, connectorTag: '00000000-0000-4000-8000-000000000000' })
+    expect(host.getState().tunnel.warning).toMatch(/^Another cloudflared is also running this tunnel/)
+    await host.setTunnelEnabled(false)
+    expect(host.getState().tunnel.warning).toBeNull()
+  })
 })
 
 describe('checking from the internet', () => {

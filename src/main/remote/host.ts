@@ -421,7 +421,11 @@ export class RemoteHost implements RemoteHostSessionDelegate {
       }
       return null
     }
-    if (!admitsTunneled(origin, this.tunnelGate())) return reject(CLOSE_POLICY)
+    const gate = this.tunnelGate()
+    if (!admitsTunneled(origin, gate)) {
+      if (origin.via === 'tunnel' && gate.running) this.tunnel.foreignConnectorSeen()
+      return reject(CLOSE_POLICY)
+    }
     // A phone on the LAN that failed its way into a block can still pair
     // while a code is up: that is how it gets a working key again.
     if (this.authLimiter.isBlocked(origin) && !(origin.via === 'lan' && this.openPairingSecret())) {
@@ -692,10 +696,17 @@ export class RemoteHost implements RemoteHostSessionDelegate {
   }
 
   /** Whatever changed in the tunnel: phones are told a new public hostname
-   *  (and an open QR redrawn with it), and once the tunnel isn't running,
-   *  nobody stays connected through it. */
+   *  (and an open QR redrawn with it), once the tunnel isn't running nobody
+   *  stays connected through it, and once its connector is known nobody
+   *  stays who came in through another (let in while it wasn't). */
   private tunnelChanged(): void {
-    if (!this.tunnel.gate.running) this.dropTunneledSessions()
+    const gate = this.tunnel.gate
+    if (!gate.running) this.dropTunneledSessions()
+    else if (gate.connectorId !== null) {
+      const foreign = this.sessions.filter((s) => s.via === 'tunnel' && s.origin.connectorTag !== gate.connectorId)
+      for (const session of foreign) session.close(CLOSE_POLICY)
+      if (foreign.length > 0) this.tunnel.foreignConnectorSeen()
+    }
     const remoteHost = this.remoteHost
     if (remoteHost !== this.announcedRemoteHost) {
       this.announcedRemoteHost = remoteHost

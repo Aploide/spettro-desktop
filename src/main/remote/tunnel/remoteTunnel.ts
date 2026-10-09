@@ -56,6 +56,11 @@ const OUTDATED = 'Your cloudflared is over a year old. Spettro can use its own u
 const LOG_LIMIT = 60
 const CHECK_TIMEOUT_MS = 10_000
 
+const FOREIGN_CONNECTOR =
+  'Another cloudflared is also running this tunnel (a system service?). Stop it, or phones will sometimes be turned away.'
+/** How long a connection from another connector keeps the warning up. */
+const FOREIGN_CONNECTOR_WARNING_MS = 10 * 60_000
+
 /** Why the relay couldn't have the pinned port: something else holds it, or
  *  the OS won't let anything have it (on Windows, a range Hyper-V, WSL or
  *  Docker reserved). */
@@ -81,6 +86,9 @@ export class RemoteTunnel {
   private listenPort: number | null = null
   /** Why it isn't the pinned one, when it isn't. */
   private portRefusal: PortRefusal = 'in-use'
+  /** When a connection last came from a connector other than ours. */
+  private foreignConnectorAt: number | null = null
+  private foreignConnectorTimer: NodeJS.Timeout | null = null
   /** Bumped by every start and stop, so a start that finishes after it
    *  was overtaken does nothing. */
   private generation = 0
@@ -179,6 +187,9 @@ export class RemoteTunnel {
 
   private warning(): string | null {
     if (this.ingressWarning) return this.ingressWarning
+    if (this.foreignConnectorAt !== null && this.now() - this.foreignConnectorAt < FOREIGN_CONNECTOR_WARNING_MS) {
+      return FOREIGN_CONNECTOR
+    }
     if (this.binary?.source === 'system' && this.binary.version && isOutdated(this.binary.version, this.now())) return OUTDATED
     if (this.snapshot?.udpBlocked && this.snapshot.protocol === 'http2') return UDP_BLOCKED
     return null
@@ -194,6 +205,21 @@ export class RemoteTunnel {
     this.sync()
   }
 
+  /** A tunneled connection came from a connector that isn't ours: the same
+   *  tunnel run elsewhere, which Cloudflare shares phones out to. The
+   *  kill switch turned it away; the pane says why that keeps happening. */
+  foreignConnectorSeen(): void {
+    const wasShowing = this.warning() === FOREIGN_CONNECTOR
+    this.foreignConnectorAt = this.now()
+    if (this.foreignConnectorTimer) clearTimeout(this.foreignConnectorTimer)
+    this.foreignConnectorTimer = setTimeout(() => {
+      this.foreignConnectorTimer = null
+      this.publish()
+    }, FOREIGN_CONNECTOR_WARNING_MS)
+    this.foreignConnectorTimer.unref?.()
+    if (!wasShowing) this.publish()
+  }
+
   /** The relay stopped listening. */
   detach(): void {
     this.listenPort = null
@@ -203,6 +229,8 @@ export class RemoteTunnel {
   /** Quitting: cloudflared is signalled now, without waiting on anything. */
   shutdown(): void {
     this.generation++
+    if (this.foreignConnectorTimer) clearTimeout(this.foreignConnectorTimer)
+    this.foreignConnectorTimer = null
     this.listenPort = null
     this.installer.cancel()
     this.process?.stopNow()
@@ -220,7 +248,10 @@ export class RemoteTunnel {
 
   setEnabled(enabled: boolean): void {
     if (enabled !== this.enabled) this.store.update({ enabled })
-    if (!enabled) this.localError = null
+    if (!enabled) {
+      this.localError = null
+      this.foreignConnectorAt = null
+    }
     this.sync()
   }
 

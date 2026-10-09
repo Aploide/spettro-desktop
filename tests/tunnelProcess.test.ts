@@ -285,6 +285,17 @@ describe('TunnelProcess', () => {
     }
   })
 
+  it('forgets the last run’s connector id when it starts again', async () => {
+    const p = supervisor()
+    p.start()
+    children[0].say(LINES.connector)
+    expect(last().connectorId).toBe(CONNECTOR)
+    children[0].exit(1)
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(children).toHaveLength(2)
+    expect(last().connectorId).toBeNull()
+  })
+
   it('starts the backoff over after two minutes connected', async () => {
     const p = supervisor()
     p.start()

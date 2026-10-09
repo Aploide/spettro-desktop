@@ -5,10 +5,10 @@
 // The file is only used once it matches the checksum GitHub lists for it
 // (the asset's `digest`, or failing that the release notes' "SHA256
 // Checksums" block — no checksum, no install). It is written beside the
-// final path and renamed over it once verified and made executable, so a
-// download that dies halfway never leaves a broken binary where the locator
-// looks. Then it is asked its version, which catches the wrong
-// architecture and noexec mounts before the tunnel trips over them.
+// final path, made executable and asked its version there — which catches
+// the wrong architecture and noexec mounts before the tunnel trips over
+// them — and only then renamed over the final path. A download that dies
+// halfway, or a copy that won't run, never takes the place of one that does.
 //
 // The checksum comes from the same place the binary does, so this guards
 // against a corrupt or truncated download, not a compromised release.
@@ -26,6 +26,11 @@ export const CLOUDFLARED_REPO = 'cloudflare/cloudflared'
 
 /** Same as the CLI installer's: about 40–55 MB on a slow line still fits. */
 export const CLOUDFLARED_INSTALL_TIMEOUT_MS = 3 * 60_000
+
+/** How long a fresh download gets to say its version. Longer than the
+ *  locator's: an antivirus scans a new 50 MB executable before its first
+ *  run, and a copy that was only slow must not be thrown away. */
+export const FRESH_VERSION_TIMEOUT_MS = 30_000
 
 /** The release asset for this machine, or null when Cloudflare builds none
  *  it can run. Windows on Arm runs the x64 build under emulation (Windows 11)
@@ -94,7 +99,11 @@ export interface CloudflaredInstallerOptions {
 
 export class CloudflaredInstaller {
   private readonly options: CloudflaredInstallerOptions
+  /** Ends the install in progress. Cleared the moment it is called, so a
+   *  new install can begin while the cancelled one tidies up. */
   private abort: ((error: CloudflaredInstallError) => void) | null = null
+  /** Settles once the last install has finished with its files. */
+  private settled: Promise<void> = Promise.resolve()
 
   constructor(options: CloudflaredInstallerOptions) {
     this.options = options
@@ -105,7 +114,9 @@ export class CloudflaredInstaller {
   }
 
   cancel(): void {
-    this.abort?.(new CloudflaredInstallError('cancelled', 'Cancelled.'))
+    const abort = this.abort
+    this.abort = null
+    abort?.(new CloudflaredInstallError('cancelled', 'Cancelled.'))
   }
 
   /** Downloads, verifies and installs; resolves with the installed copy.
@@ -115,24 +126,35 @@ export class CloudflaredInstaller {
     const platform = this.options.platform ?? process.platform
     const target = downloadedCloudflaredPath(this.options.dataDir, platform)
     const partial = `${target}.part`
+    // Verified and executable, but not yet known to run.
+    const candidate = platform === 'win32' ? `${target.slice(0, -'.exe'.length)}-new.exe` : `${target}-new`
     let response: IncomingMessage | null = null
     let aborted: CloudflaredInstallError | null = null
+    let abort!: (error: CloudflaredInstallError) => void
     const abortion = new Promise<never>((_, reject) => {
-      this.abort = (error) => {
+      abort = (error) => {
         aborted = error
         response?.destroy()
         reject(error)
       }
     })
     abortion.catch(() => undefined)
+    this.abort = abort
+    // A cancelled install may still be removing the partial file this one
+    // is about to write.
+    const previous = this.settled
+    let settle!: () => void
+    this.settled = new Promise<void>((resolve) => (settle = resolve))
     const timer = setTimeout(
-      () => this.abort?.(new CloudflaredInstallError('download-failed', 'Getting cloudflared took too long. Check your connection and try again.')),
+      () => abort(new CloudflaredInstallError('download-failed', 'Getting cloudflared took too long. Check your connection and try again.')),
       this.options.timeoutMs ?? CLOUDFLARED_INSTALL_TIMEOUT_MS
     )
     timer.unref?.()
     const race = <T>(promise: Promise<T>): Promise<T> => Promise.race([promise, abortion])
 
     try {
+      await previous
+      if (aborted) throw aborted
       onProgress(null)
       const release = await race((this.options.fetchRelease ?? fetchLatestRelease)(CLOUDFLARED_REPO)).catch(
         (error: unknown) => {
@@ -171,13 +193,17 @@ export class CloudflaredInstaller {
         throw new CloudflaredInstallError('download-failed', 'The downloaded cloudflared didn’t match its checksum, so Spettro didn’t use it.')
       }
       if (platform !== 'win32') await chmod(partial, 0o755)
-      await rename(partial, target)
-
-      const version = await (this.options.readVersion ?? readCloudflaredVersion)(target)
+      // Run under a name of its own (Windows only runs .exe files, and the
+      // locator never looks there), so the copy it replaces stays usable
+      // until this one has proved it runs.
+      await rename(partial, candidate)
+      const version = await race(
+        (this.options.readVersion ?? ((path: string) => readCloudflaredVersion(path, FRESH_VERSION_TIMEOUT_MS)))(candidate)
+      )
       if (version === null) {
-        await rm(target, { force: true })
         throw new CloudflaredInstallError('download-failed', 'The downloaded cloudflared doesn’t run on this computer.')
       }
+      await rename(candidate, target)
       await writeFile(
         join(dirname(target), 'cloudflared.json'),
         JSON.stringify({ version, asset: name, sha256, tag: release.tag, installedAt: Date.now() }, null, 2)
@@ -186,10 +212,12 @@ export class CloudflaredInstaller {
       return { path: target, version, asset: name, sha256 }
     } catch (error) {
       await rm(partial, { force: true }).catch(() => undefined)
+      await rm(candidate, { force: true }).catch(() => undefined)
       throw aborted ?? asInstallError(error, 'Couldn’t get cloudflared.')
     } finally {
       clearTimeout(timer)
-      this.abort = null
+      if (this.abort === abort) this.abort = null
+      settle()
     }
   }
 }

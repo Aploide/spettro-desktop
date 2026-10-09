@@ -110,10 +110,10 @@ export function cloudflaredCandidates(options: LocatorOptions): { path: string; 
 }
 
 /** `cloudflared --version`, whichever stream it lands on. */
-export function readCloudflaredVersion(path: string): Promise<string | null> {
+export function readCloudflaredVersion(path: string, timeoutMs: number = VERSION_TIMEOUT_MS): Promise<string | null> {
   return new Promise((resolve) => {
     try {
-      execFile(path, ['--version'], { timeout: VERSION_TIMEOUT_MS, encoding: 'utf8', windowsHide: true }, (_err, stdout, stderr) => {
+      execFile(path, ['--version'], { timeout: timeoutMs, encoding: 'utf8', windowsHide: true }, (_err, stdout, stderr) => {
         resolve(parseCloudflaredVersion(`${stdout ?? ''}\n${stderr ?? ''}`))
       })
     } catch {

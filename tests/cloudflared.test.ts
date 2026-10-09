@@ -252,6 +252,23 @@ describe('CloudflaredInstaller', () => {
     const { installer: it_ } = installer({ readVersion: async () => null })
     await expect(it_.install()).rejects.toMatchObject({ message: 'The downloaded cloudflared doesn’t run on this computer.' })
     expect(existsSync(join(dir, 'bin', 'cloudflared'))).toBe(false)
+    expect(existsSync(join(dir, 'bin', 'cloudflared-new'))).toBe(false)
+  })
+
+  it('asks the new copy its version before it replaces the old one, and keeps the old one if it won’t say', async () => {
+    mkdirSync(join(dir, 'bin'), { recursive: true })
+    writeFileSync(join(dir, 'bin', 'cloudflared'), 'old')
+    const asked: string[] = []
+    const { installer: it_ } = installer({
+      readVersion: async (path) => {
+        asked.push(path)
+        return null
+      }
+    })
+    await expect(it_.install()).rejects.toMatchObject({ kind: 'download-failed' })
+    expect(asked).toEqual([join(dir, 'bin', 'cloudflared-new')])
+    expect(readFileSync(join(dir, 'bin', 'cloudflared'), 'utf8')).toBe('old')
+    expect(existsSync(join(dir, 'bin', 'cloudflared-new'))).toBe(false)
   })
 
   it('says so on a machine Cloudflare builds nothing for', async () => {
@@ -267,6 +284,23 @@ describe('CloudflaredInstaller', () => {
     await new Promise((resolve) => setImmediate(resolve))
     it_.cancel()
     await expect(running).rejects.toMatchObject({ kind: 'cancelled' })
+    expect(it_.isRunning).toBe(false)
+  })
+
+  it('takes a new install at once after a cancel, without the two tripping over each other', async () => {
+    const stalled = new PassThrough() as unknown as IncomingMessage
+    ;(stalled as unknown as { headers: Record<string, string> }).headers = {}
+    let calls = 0
+    const { installer: it_ } = installer({ request: async () => (++calls === 1 ? stalled : respond(binary)) })
+    const first = it_.install()
+    await new Promise((resolve) => setImmediate(resolve))
+    it_.cancel()
+    expect(it_.isRunning).toBe(false)
+    const second = it_.install()
+    expect(it_.isRunning).toBe(true)
+    await expect(first).rejects.toMatchObject({ kind: 'cancelled' })
+    await expect(second).resolves.toMatchObject({ path: join(dir, 'bin', 'cloudflared') })
+    expect(readFileSync(join(dir, 'bin', 'cloudflared'))).toEqual(binary)
     expect(it_.isRunning).toBe(false)
   })
 

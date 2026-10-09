@@ -117,19 +117,27 @@ from the LAN at `wss://<hostname>/`:
   1, 2, 5, 10, 30, 60 s; a refused token or deleted tunnel is not
   restarted. Quitting signals it synchronously.
 - **Port**: the relay listens on the pinned port (7879, configurable) the
-  dashboard's service URL (`HTTP`, `localhost:<port>`) names. Only
-  `EADDRINUSE` moves the LAN elsewhere, and then the tunnel reports
-  `port-in-use` and doesn't start.
-- **Who gets in** (`connectionGuard.ts`): a tunneled connection is one from
-  loopback carrying `Cf-Warp-Tag-Id`; only then is `Cf-Connecting-Ip`
-  believed. Tunneled connections need this computer's running connector
-  (the kill switch), can't pair unless "Allow pairing over the internet"
-  is on (`-33003 Pair on the same network as this computer first.`), and
-  see `pairingOpen: false` and the name "Spettro" in `hello`. Every socket
-  gets 15 s to sign in, ten frames of ≤ 64 KiB before it has, and a 30 s
-  ping; failed sign-ins are limited per address (5 in 5 min blocks for
-  15); at most 32 sockets, 8 unauthenticated through the tunnel; frames
-  ≤ 32 MiB.
+  dashboard's service URL (`HTTP`, `localhost:<port>`) names. `EADDRINUSE`
+  (or `EACCES`/`EPERM`, a port Windows reserves) moves the LAN elsewhere,
+  and then the tunnel reports `port-in-use` and doesn't start. Starts and
+  moves of the listener run one at a time; one overtaken by a stop closes
+  what it opened.
+- **Who gets in** (`connectionGuard.ts`): a tunneled connection is any
+  carrying `Cf-Warp-Tag-Id`, wherever from (cloudflared may dial the LAN
+  address); `Cf-Connecting-Ip` is believed only from loopback or this
+  machine's own addresses. Tunneled connections need this computer's
+  running connector (the kill switch; another connector's are turned away
+  with a warning, and dropped once ours is known), can't pair unless
+  "Allow pairing over the internet" is on (`-33003 Pair on the same
+  network as this computer first.`), and see `pairingOpen: false` and the
+  name "Spettro" in `hello`. Every socket gets 15 s to sign in, ten frames
+  of ≤ 64 KiB and 128 KiB off the wire before it has, and a 30 s ping;
+  failed sign-ins are limited per peer (5 in 5 min blocks for 15; an IPv6
+  peer through the tunnel is its /64; idling past the deadline or sending
+  too much counts too); at most 32 sockets, 8 unauthenticated through the
+  tunnel and 2 per peer; frames ≤ 32 MiB. Over 50 failed sign-ins through
+  the tunnel in 10 min stop internet pairing until a new code is shown,
+  with a notification.
 - **Phones learn the hostname** from the QR (`r=`), the auth result and
   `host/state`, broadcast again whenever it changes.
 

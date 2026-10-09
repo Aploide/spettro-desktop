@@ -23,7 +23,7 @@ import { base64urlDecode, computeProof } from '@main/remote/pairing'
 import type { JSONValue } from '@shared/acp'
 import type { ChatSummary, StoredSession, TranscriptItem } from '@shared/model'
 import { REMOTE_HOST_FEATURES, RemoteFeature, RemoteMethod } from '@shared/remote'
-import { FakeAgent, Reply, settle as settleAll } from './fakeAgent'
+import { FakeAgent, type Handler, Reply, deferred, settle as settleAll } from './fakeAgent'
 import { configOptionUpdate, configOptions, initializeResult, permissionAttached, rpcError } from './wire'
 
 type Frame = { [key: string]: JSONValue }
@@ -720,11 +720,13 @@ describe('projects/files', () => {
 
 describe('Workflow Studio scratch chats', () => {
   /** A live chat, and a studio run of `ship` from it on ACP session s2,
-   *  its turn left running. */
-  async function studioRun(): Promise<{ chat: ChatSession; scratchId: string }> {
+   *  its turn left running (on `prompt`, by default for good). */
+  async function studioRun(
+    prompt: Handler = () => new Promise(() => undefined)
+  ): Promise<{ chat: ChatSession; scratchId: string }> {
     const chat = await liveChat()
     fake.handlers['session/new'] = () => ({ sessionId: 's2', configOptions: configOptions({}) })
-    fake.handlers['session/prompt'] = () => new Promise(() => undefined)
+    fake.handlers['session/prompt'] = prompt
     const scratchId = model.runWorkflow(chat.id, 'ship') as string
     await settleAll()
     expect(model.sessionById(scratchId)?.acpSessionId).toBe('s2')
@@ -768,6 +770,76 @@ describe('Workflow Studio scratch chats', () => {
     expect(mentioning(socket, scratchId)).toEqual([
       expect.objectContaining({ method: RemoteMethod.chatRemoved, params: { chatID: scratchId } })
     ])
+  })
+
+  it('stay off once discarded, when the run they cancelled winds down', async () => {
+    // The studio discards a run still going when its editor closes: the
+    // cancelled turn ends after the chat/removed, and its last chat/state
+    // would put a "Workflow · ship" row back on the phone for good.
+    liveHost()
+    const socket = await attached()
+    const turn = deferred<JSONValue>()
+    const { scratchId } = await studioRun(() => turn.promise)
+    expect(model.sessionById(scratchId)?.isBusy).toBe(true)
+
+    model.discardScratchChat(scratchId)
+    expect(fake.calls('session/cancel')).toHaveLength(1)
+    turn.resolve({ stopReason: 'cancelled' })
+    await settleAll()
+
+    expect(mentioning(socket, scratchId)).toEqual([
+      expect.objectContaining({ method: RemoteMethod.chatRemoved, params: { chatID: scratchId } })
+    ])
+  })
+
+  it('can’t be driven, changed or deleted by a phone that knows the id', async () => {
+    liveHost()
+    const socket = await attached()
+    const { scratchId } = await studioRun()
+    const scratch = model.sessionById(scratchId) as ChatSession
+    const prompts = fake.calls('session/prompt').length
+    const configs = fake.calls('session/set_config_option').length
+
+    await call(socket, RemoteMethod.chatPrompt, { chatID: scratchId, blocks: [{ type: 'text', text: 'hi' }] })
+    const config = await call(socket, RemoteMethod.chatConfig, { chatID: scratchId, configID: 'thinking', stringValue: 'max' })
+    const rename = await call(socket, RemoteMethod.chatRename, { chatID: scratchId, title: 'Mine now' })
+    await call(socket, RemoteMethod.chatFlag, { chatID: scratchId, isPinned: true, isArchived: true })
+    await call(socket, RemoteMethod.chatCancel, { chatID: scratchId })
+    await call(socket, RemoteMethod.chatDelete, { chatID: scratchId })
+    await settleAll()
+
+    expect((config.error as Frame).code).toBe(-32001)
+    expect((rename.error as Frame).code).toBe(-32001)
+    expect(model.sessionById(scratchId)).toBe(scratch)
+    expect(scratch).toMatchObject({ title: 'Workflow · ship', isPinned: false, isArchived: false, isBusy: true })
+    expect(fake.calls('session/prompt')).toHaveLength(prompts)
+    expect(fake.calls('session/set_config_option')).toHaveLength(configs)
+    expect(fake.calls('session/cancel')).toHaveLength(0)
+    expect(fake.calls('session/close')).toHaveLength(0)
+    expect(mentioning(socket, scratchId).filter((f) => f.method !== undefined)).toEqual([])
+  })
+})
+
+describe('chats/delete', () => {
+  it('leaves a deleted chat gone when the turn it cancelled winds down', async () => {
+    liveHost()
+    const chat = await liveChat()
+    const turn = deferred<JSONValue>()
+    fake.handlers['session/prompt'] = () => turn.promise
+    const socket = await attached()
+    await call(socket, RemoteMethod.chatPrompt, { chatID: chat.id, blocks: [{ type: 'text', text: 'hi' }] })
+    await settleAll()
+    expect(chat.isBusy).toBe(true)
+
+    await call(socket, RemoteMethod.chatDelete, { chatID: chat.id })
+    turn.resolve({ stopReason: 'cancelled' })
+    await settleAll()
+
+    const methods = socket.sent
+      .filter((f) => f.method !== undefined && JSON.stringify(f).includes(chat.id))
+      .map((f) => f.method)
+    expect(methods.at(-1)).toBe(RemoteMethod.chatRemoved)
+    expect(methods.filter((m) => m === RemoteMethod.chatRemoved)).toHaveLength(1)
   })
 })
 

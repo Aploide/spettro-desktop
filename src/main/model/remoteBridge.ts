@@ -37,11 +37,19 @@ export function buildRemoteBridge(model: AppModel): RemoteBridge {
   const events = new EventEmitter()
   events.setMaxListeners(100)
 
+  // Chats the phones have been told are gone. A turn still running when its
+  // chat goes (deleted, or a studio run discarded as the editor closes) is
+  // cancelled on the way out, and its last chat-state lands after the
+  // chat/removed — the phone would put the row straight back.
+  const removed = new Set<string>()
+  model.on('chat-removed-remote', (chatId: string) => removed.add(chatId))
+
   // Workflow Studio's scratch chats are the studio's alone: kept out of the
   // sidebar and off disk, and so never shown to a phone either, which would
-  // otherwise list a "Workflow · name" chat it could never get rid of.
-  const isScratch = (chatId: string | null | undefined): boolean =>
-    typeof chatId === 'string' && model.sessionById(chatId)?.isScratch === true
+  // otherwise list a "Workflow · name" chat it could never get rid of. A
+  // discarded one is no longer in the model to ask, so `removed` answers.
+  const hidden = (chatId: string | null | undefined): boolean =>
+    typeof chatId === 'string' && (removed.has(chatId) || model.sessionById(chatId)?.isScratch === true)
   /** The chats a phone may see and act on. */
   const visible = (chatId: string): ChatSession | null => {
     const session = model.sessionById(chatId)
@@ -49,10 +57,11 @@ export function buildRemoteBridge(model: AppModel): RemoteBridge {
   }
 
   // Re-emit the model's remote-facing events under the bridge's names,
-  // dropping any about a scratch chat (`chatOf` says which chat that is).
+  // dropping any about a scratch chat or one already removed (`chatOf` says
+  // which chat that is).
   const forward = (from: string, to: string, chatOf?: (args: unknown[]) => string | null | undefined): void => {
     model.on(from, (...args: unknown[]) => {
-      if (chatOf && isScratch(chatOf(args))) return
+      if (chatOf && hidden(chatOf(args))) return
       events.emit(to, ...args)
     })
   }
@@ -192,7 +201,7 @@ export function buildRemoteBridge(model: AppModel): RemoteBridge {
 
     agentReady: () => model.agentReady(),
 
-    pendingPrompts: () => model.pendingPrompts().filter((p) => !isScratch(p.chatId)),
+    pendingPrompts: () => model.pendingPrompts().filter((p) => !hidden(p.chatId)),
 
     events
   }

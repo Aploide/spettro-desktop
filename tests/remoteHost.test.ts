@@ -716,3 +716,56 @@ describe('projects/files', () => {
     expect((reply.result as Frame).files).toHaveLength(5000)
   })
 })
+
+describe('Workflow Studio scratch chats', () => {
+  /** A live chat, and a studio run of `ship` from it on ACP session s2,
+   *  its turn left running. */
+  async function studioRun(): Promise<{ chat: ChatSession; scratchId: string }> {
+    const chat = await liveChat()
+    fake.handlers['session/new'] = () => ({ sessionId: 's2', configOptions: configOptions({}) })
+    fake.handlers['session/prompt'] = () => new Promise(() => undefined)
+    const scratchId = model.runWorkflow(chat.id, 'ship') as string
+    await settleAll()
+    expect(model.sessionById(scratchId)?.acpSessionId).toBe('s2')
+    return { chat, scratchId }
+  }
+
+  /** Every frame that names `chatId` anywhere. */
+  const mentioning = (socket: FakeSocket, chatId: string): Frame[] =>
+    socket.sent.filter((f) => JSON.stringify(f).includes(chatId))
+
+  it('are never listed, opened or emitted to a phone', async () => {
+    liveHost()
+    const socket = await attached()
+    const { chat, scratchId } = await studioRun()
+    fake.update('s2', { sessionUpdate: 'tool_call', toolCallId: 'call-1', title: 'Run tests', kind: 'execute', status: 'in_progress' })
+    fake.ask(9, 'session/request_permission', permissionAttached({ sessionId: 's2', toolCallId: 'call-1', command: 'npm test' }))
+    await settleAll()
+
+    const list = await call(socket, RemoteMethod.chatsList, {})
+    expect(((list.result as Frame).chats as Frame[]).map((c) => c.id)).toEqual([chat.id])
+    const open = await call(socket, RemoteMethod.chatOpen, { chatID: scratchId })
+    expect((open.error as Frame).code).toBe(-32001)
+    const projects = await call(socket, RemoteMethod.projectsList, {})
+    expect((projects.result as Frame).projects).toEqual([expect.objectContaining({ path: dir, chatCount: 1 })])
+    // Not its chat/user, chat/state, chat/update or permission/ask.
+    expect(mentioning(socket, scratchId)).toEqual([])
+    expect(socket.notifications(RemoteMethod.permissionAsk)).toHaveLength(0)
+
+    // Nor replayed to a phone attaching while the run waits on it.
+    const late = await attached('phone-2')
+    expect(late.notifications(RemoteMethod.permissionAsk)).toHaveLength(0)
+  })
+
+  it('are taken off the phones when the studio discards one', async () => {
+    liveHost()
+    const socket = await attached()
+    const { scratchId } = await studioRun()
+
+    model.discardScratchChat(scratchId)
+
+    expect(mentioning(socket, scratchId)).toEqual([
+      expect.objectContaining({ method: RemoteMethod.chatRemoved, params: { chatID: scratchId } })
+    ])
+  })
+})

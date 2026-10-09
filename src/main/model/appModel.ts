@@ -1833,6 +1833,9 @@ export class AppModel extends EventEmitter {
     if (acpId) this.sessionsByACPID.delete(acpId)
     this.relayedConfig.delete(chatId)
     this.pushEvent({ type: 'chat-removed', chatId })
+    // Phones are never shown a scratch chat (remoteBridge); should one ever
+    // have slipped through, this takes it back off.
+    this.emit('chat-removed-remote', chatId)
   }
 
   /** The project's recent workflow runs, newest first, each with the name

@@ -12,8 +12,10 @@ import { statSync } from 'fs'
 import { basename } from 'path'
 import type { ACPContentBlock, ACPQuestionAnswer, JSONValue } from '../../shared/acp'
 import { ExtensionMethod } from '../../shared/extensions'
+import type { ChatSummary } from '../../shared/model'
 import type { RemoteBridge } from '../remote/bridge'
 import type { AppModel, PromptAttachment } from './appModel'
+import type { ChatSession } from './chatSession'
 import { listProjectFiles } from './projectFiles'
 
 /** The `_spettro/*` calls a phone can make that change state this process
@@ -35,29 +37,48 @@ export function buildRemoteBridge(model: AppModel): RemoteBridge {
   const events = new EventEmitter()
   events.setMaxListeners(100)
 
-  // Re-emit the model's remote-facing events under the bridge's names.
-  const forward = (from: string, to: string): void => {
+  // Workflow Studio's scratch chats are the studio's alone: kept out of the
+  // sidebar and off disk, and so never shown to a phone either, which would
+  // otherwise list a "Workflow · name" chat it could never get rid of.
+  const isScratch = (chatId: string | null | undefined): boolean =>
+    typeof chatId === 'string' && model.sessionById(chatId)?.isScratch === true
+  /** The chats a phone may see and act on. */
+  const visible = (chatId: string): ChatSession | null => {
+    const session = model.sessionById(chatId)
+    return session && !session.isScratch ? session : null
+  }
+
+  // Re-emit the model's remote-facing events under the bridge's names,
+  // dropping any about a scratch chat (`chatOf` says which chat that is).
+  const forward = (from: string, to: string, chatOf?: (args: unknown[]) => string | null | undefined): void => {
     model.on(from, (...args: unknown[]) => {
+      if (chatOf && isScratch(chatOf(args))) return
       events.emit(to, ...args)
     })
   }
-  forward('chat-update-raw', 'chat-update')
-  forward('chat-user', 'chat-user')
-  forward('chat-state', 'chat-state')
+  const chatArg = (args: unknown[]): string => args[0] as string
+  const summaryArg = (args: unknown[]): string => (args[0] as ChatSummary).id
+  const promptChatArg = (args: unknown[]): string | null => args[1] as string | null
+  forward('chat-update-raw', 'chat-update', chatArg)
+  forward('chat-user', 'chat-user', chatArg)
+  forward('chat-state', 'chat-state', summaryArg)
   // A notice alone: a chat/state with a notice and no stopReason, which
   // ends nothing on the phone.
-  forward('chat-notice', 'chat-state')
+  forward('chat-notice', 'chat-state', summaryArg)
+  // Also sent for a discarded scratch chat, which is gone by then: a phone
+  // that somehow had it drops it.
   forward('chat-removed-remote', 'chat-removed')
   forward('host-state', 'host-state')
-  forward('permission-ask', 'permission-ask')
+  forward('permission-ask', 'permission-ask', promptChatArg)
   forward('permission-resolved', 'permission-resolved')
-  forward('question-ask', 'question-ask')
+  forward('question-ask', 'question-ask', promptChatArg)
   forward('question-resolved', 'question-resolved')
   forward('agent-notification', 'agent-notification')
 
   const listProjects = (): { path: string; name: string }[] => {
     const counts = new Map<string, number>()
     for (const session of model.sessions) {
+      if (session.isScratch) continue
       counts.set(session.projectPath, (counts.get(session.projectPath) ?? 0) + 1)
     }
     // The default folder is always offered, even with no chats in it yet —
@@ -72,10 +93,10 @@ export function buildRemoteBridge(model: AppModel): RemoteBridge {
   }
 
   return {
-    listChats: () => model.sessions.map((s) => s.summary()),
+    listChats: () => model.sessions.filter((s) => !s.isScratch).map((s) => s.summary()),
 
     openChat: (chatId) => {
-      const session = model.sessionById(chatId)
+      const session = visible(chatId)
       if (!session) return null
       return {
         chat: session.snapshot(),
@@ -101,15 +122,15 @@ export function buildRemoteBridge(model: AppModel): RemoteBridge {
     },
 
     deleteChat: (chatId) => {
-      model.closeChat(chatId)
+      if (visible(chatId)) model.closeChat(chatId)
     },
 
     flagChat: (chatId, flags) => {
-      model.flagChat(chatId, flags)
+      if (visible(chatId)) model.flagChat(chatId, flags)
     },
 
     renameChat: (chatId, title) => {
-      if (!model.sessionById(chatId)) return false
+      if (!visible(chatId)) return false
       model.renameChat(chatId, title)
       return true
     },
@@ -126,15 +147,17 @@ export function buildRemoteBridge(model: AppModel): RemoteBridge {
     // Mentions go the same way as the composer's: each still in the text is
     // sent as the file it names (send keeps only real project files).
     prompt: async (chatId, blocks, sourceDeviceId, mentions) => {
+      if (!visible(chatId)) return
       const { text, attachments } = decomposeBlocks(blocks)
       model.send(chatId, text, attachments, sourceDeviceId, mentions)
     },
 
     cancelChat: (chatId) => {
-      model.cancel(chatId)
+      if (visible(chatId)) model.cancel(chatId)
     },
 
     setConfig: async (chatId, configId, value) => {
+      if (!visible(chatId)) return null
       const next = typeof value.stringValue === 'string' ? value.stringValue : value.boolValue
       if (next === undefined) return null
       const options = await model.setConfigValueForDevice(chatId, configId, next)
@@ -169,7 +192,7 @@ export function buildRemoteBridge(model: AppModel): RemoteBridge {
 
     agentReady: () => model.agentReady(),
 
-    pendingPrompts: () => model.pendingPrompts(),
+    pendingPrompts: () => model.pendingPrompts().filter((p) => !isScratch(p.chatId)),
 
     events
   }

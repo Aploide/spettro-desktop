@@ -67,6 +67,7 @@ export const REMOTE_HOST_FEATURES: readonly RemoteFeatureName[] = [
   RemoteFeature.configResult,
   RemoteFeature.notices,
   RemoteFeature.pendingReplay,
+  RemoteFeature.mentions,
   RemoteFeature.snapshotV2
 ]
 
@@ -270,6 +271,10 @@ export interface RemoteChatPromptParams {
   chatID: string
   /** ACP content blocks: {type:'text',text} | {type:'image',data,mimeType}. */
   blocks: JSONValue[]
+  /** Files @-mentioned in the text, project-relative with forward slashes
+   *  ("src/a.ts"); each one still in the text as "@src/a.ts" goes to the
+   *  agent as a resource link (feature `mentions`). */
+  mentions?: string[]
 }
 
 export interface RemoteChatConfigParams {

@@ -35,7 +35,8 @@ export interface RemoteBridge {
   deleteChat(chatId: string): void
   flagChat(chatId: string, flags: { isPinned?: boolean; isArchived?: boolean }): void
   listProjects(): { path: string; name: string }[]
-  prompt(chatId: string, blocks: ACPContentBlock[], sourceDeviceId: string): Promise<void>
+  /** `mentions`: the project-relative files @-mentioned in the text. */
+  prompt(chatId: string, blocks: ACPContentBlock[], sourceDeviceId: string, mentions: string[]): Promise<void>
   cancelChat(chatId: string): void
   /** Resolves once the change is in, to the chat's options (either shape,
    *  as for openChat), or null when there is no such chat. Rejects when the

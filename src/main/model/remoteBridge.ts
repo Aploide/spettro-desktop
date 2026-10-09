@@ -107,9 +107,11 @@ export function buildRemoteBridge(model: AppModel): RemoteBridge {
         .map(({ path, name }) => ({ path, name }))
     },
 
-    prompt: async (chatId, blocks, sourceDeviceId) => {
+    // Mentions go the same way as the composer's: each still in the text is
+    // sent as the file it names (send keeps only real project files).
+    prompt: async (chatId, blocks, sourceDeviceId, mentions) => {
       const { text, attachments } = decomposeBlocks(blocks)
-      model.send(chatId, text, attachments, sourceDeviceId)
+      model.send(chatId, text, attachments, sourceDeviceId, mentions)
     },
 
     cancelChat: (chatId) => {

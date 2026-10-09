@@ -94,6 +94,13 @@ function optString(obj: { [key: string]: JSONValue }, key: string): string | und
   return value
 }
 
+function optStringArray(obj: { [key: string]: JSONValue }, key: string): string[] | undefined {
+  const value = obj[key]
+  if (value === undefined || value === null) return undefined
+  if (!Array.isArray(value) || !value.every((v) => typeof v === 'string')) throw invalidParams()
+  return value as string[]
+}
+
 function optBool(obj: { [key: string]: JSONValue }, key: string): boolean | undefined {
   const value = obj[key]
   if (value === undefined || value === null) return undefined
@@ -305,9 +312,10 @@ export class RemoteHostSession {
         const rawBlocks = obj.blocks
         if (!Array.isArray(rawBlocks)) throw invalidParams()
         const blocks = rawBlocks.map(parseContentBlock)
+        const mentions = optStringArray(obj, 'mentions') ?? []
         // Fire-and-forget, like the Swift host: progress comes back as
         // broadcasts, the same ones the local UI renders from.
-        void bridge.prompt(chatId, blocks, this.authedDeviceId as string).catch((error) => {
+        void bridge.prompt(chatId, blocks, this.authedDeviceId as string, mentions).catch((error) => {
           console.error('[remote] prompt failed', error)
         })
         return null

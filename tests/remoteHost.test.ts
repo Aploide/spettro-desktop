@@ -600,3 +600,47 @@ describe('chats/open', () => {
     )
   })
 })
+
+describe('chats/prompt mentions', () => {
+  it('sends each mention still in the text as the file it names', async () => {
+    liveHost()
+    const chat = await liveChat()
+    let prompt: JSONValue = null
+    fake.handlers['session/prompt'] = (params) => {
+      prompt = params
+      return { stopReason: 'end_turn' }
+    }
+    const socket = await attached()
+
+    const reply = await call(socket, RemoteMethod.chatPrompt, {
+      chatID: chat.id,
+      blocks: [{ type: 'text', text: 'look at @src/a.ts and @../secret' }],
+      mentions: ['src/a.ts', '../secret']
+    })
+    await settleAll()
+
+    expect(reply.result).toBeNull()
+    const blocks = (prompt as unknown as { prompt: Frame[] }).prompt
+    expect(blocks.filter((b) => b.type === 'resource_link')).toEqual([
+      expect.objectContaining({ name: 'src/a.ts' })
+    ])
+    // Outside the project: never a link, left as typed.
+    expect(blocks.at(-1)).toEqual({ type: 'text', text: ' and @../secret' })
+    expect(chat.items.find((i) => i.kind === 'message' && i.message.role === 'user')).toMatchObject({
+      message: { mentions: ['src/a.ts'] }
+    })
+    expect(REMOTE_HOST_FEATURES).toContain(RemoteFeature.mentions)
+  })
+
+  it('refuses mentions that aren’t a list of paths', async () => {
+    liveHost()
+    const chat = await liveChat()
+    const socket = await attached()
+    const reply = await call(socket, RemoteMethod.chatPrompt, {
+      chatID: chat.id,
+      blocks: [{ type: 'text', text: 'hi' }],
+      mentions: [42]
+    })
+    expect((reply.error as Frame).code).toBe(-32602)
+  })
+})

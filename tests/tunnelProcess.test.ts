@@ -19,6 +19,7 @@ import {
 } from '@main/remote/tunnel/tunnelLog'
 import {
   RESTART_BACKOFF_S,
+  EXIT_DRAIN_MS,
   STABLE_RESET_MS,
   STUCK_RESTART_MS,
   TunnelProcess,
@@ -201,9 +202,11 @@ class FakeChild extends EventEmitter {
     for (const line of lines) this.stderr.emit('data', Buffer.from(`${line}\n`))
   }
 
+  /** Exits, its output drained: 'exit', then 'close'. */
   exit(code: number | null): void {
     this.exited = true
     this.emit('exit', code)
+    this.emit('close', code)
   }
 }
 
@@ -316,6 +319,24 @@ describe('TunnelProcess', () => {
     })
     await vi.advanceTimersByTimeAsync(120_000)
     expect(children).toHaveLength(1)
+  })
+
+  it('reads why it stopped even when that arrives after the exit', async () => {
+    const p = supervisor()
+    p.start()
+    children[0].emit('exit', 255)
+    children[0].say(LINES.badToken)
+    children[0].emit('close', 255)
+    expect(last()).toMatchObject({ phase: 'failed', error: { kind: 'bad-token' } })
+  })
+
+  it('acts on an exit whose output never finishes draining', async () => {
+    const p = supervisor()
+    p.start()
+    children[0].emit('exit', 1)
+    expect(last().phase).toBe('starting')
+    await vi.advanceTimersByTimeAsync(EXIT_DRAIN_MS)
+    expect(last()).toMatchObject({ phase: 'reconnecting', error: { kind: 'exited' } })
   })
 
   it('doesn’t restart on any usage error', async () => {

@@ -33,6 +33,9 @@ export const READY_POLL_MS = 5_000
 export const STUCK_RESTART_MS = 90_000
 /** How long a stop waits before SIGKILL. */
 export const KILL_AFTER_MS = 3_000
+/** How long after exiting a process's output may take to drain before the
+ *  exit is acted on without it. */
+export const EXIT_DRAIN_MS = 1_000
 /** Diagnostics lines kept. */
 export const LOG_LIMIT = 60
 
@@ -240,14 +243,28 @@ export class TunnelProcess {
       this.options.onPid?.(null)
       this.launchFailed(error)
     })
-    child.on('exit', (code) => {
+    // 'exit' can come before the last of stdout and stderr has been read —
+    // the line saying why, often — so the exit is acted on at 'close', once
+    // both are drained. A grandchild holding them open would keep 'close'
+    // from ever coming; cloudflared starts none, but the wait is bounded.
+    let exitCode: number | null = null
+    let drainTimer: NodeJS.Timeout | null = null
+    const finish = (code: number | null): void => {
+      if (drainTimer) clearTimeout(drainTimer)
+      drainTimer = null
       if (buffer.trim() !== '') this.readLine(buffer)
       buffer = ''
       if (this.child !== child) return
       this.child = null
       this.options.onPid?.(null)
       this.exited(code)
+    }
+    child.on('exit', (code) => {
+      exitCode = code
+      drainTimer = setTimeout(() => finish(exitCode), EXIT_DRAIN_MS)
+      drainTimer.unref?.()
     })
+    child.on('close', (code: number | null) => finish(code ?? exitCode))
   }
 
   /** Stops cloudflared and waits (a few seconds at most) for it to go. */

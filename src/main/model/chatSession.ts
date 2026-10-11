@@ -31,6 +31,7 @@ import type {
   TranscriptItem,
   TurnSummary
 } from '../../shared/model'
+import { previewLine } from './previewText'
 import { sameJSON } from './sameJSON'
 
 /** The CLI's acknowledgement that a message sent mid-turn was queued for the
@@ -402,10 +403,8 @@ export class ChatSession {
     for (let i = this.items.length - 1; i >= 0; i--) {
       const item = this.items[i]
       if (item.kind !== 'message') continue
-      const trimmed = item.message.text.trim()
-      if (trimmed === '') continue
-      const firstLine = trimmed.split(/\r?\n/, 1)[0] ?? trimmed
-      return firstLine.slice(0, 120)
+      const line = previewLine(item.message.text)
+      if (line !== '') return line
     }
     return ''
   }

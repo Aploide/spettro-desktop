@@ -30,11 +30,13 @@ import Popover from '@renderer/views/common/Popover'
 import { drawEmbers, planEmbers } from './embers'
 import { drawMeteor, meteorTiming, planMeteor, readPalette } from './meteor'
 import {
+  OFF_CAPTION,
   PERMISSION_ID,
   RESTRICTED,
   ULTRA_CAPTION,
   ULTRA_ID,
   callsFor,
+  isOff,
   modelReasons,
   previewState,
   thinkingState,
@@ -43,9 +45,9 @@ import {
 } from './thinking'
 import './thinkingSlider.css'
 
-const OFF_CAPTION = 'Thinking is off — the model answers straight away'
-/** Where the thumb rests while thinking is off: left of the Low stop, just
- *  clear of the bar's end (its cap, 8px, plus the 12px ring's radius). */
+/** Where the thumb rests while the level is unset (none of the stops): left
+ *  of the first stop, just clear of the bar's end (its cap, 8px, plus the
+ *  12px ring's radius). */
 const OFF_THUMB = '-14px'
 const PAUSED_CAPTION = 'Ultra is saved, but workflows don’t run under Ask first'
 /** How long a move's preview outlives its calls when the options never come
@@ -284,7 +286,7 @@ export default function ThinkingSlider({
         break
       case 'ArrowLeft':
       case 'ArrowDown':
-        // From Off there is nothing further left.
+        // From Off, or an unset level, there is nothing further left.
         next = at < 0 ? null : Math.max(0, at - 1)
         break
       case 'Home':
@@ -917,7 +919,7 @@ export function ThinkingChip({ chat }: { chat: ChatDetail }): JSX.Element | null
         )}
         <span className="config-chip-label">
           {/* A bare "Off" in a toolbar reads as something broken. */}
-          {state.index < 0 ? 'Thinking off' : state.label}
+          {isOff(state) ? 'Thinking off' : state.label}
           {state.paused && <span className="config-chip-hint"> · Paused</span>}
         </span>
         <svg className="config-chip-chevron" width="9" height="9" viewBox="0 0 16 16" fill="none" aria-hidden>

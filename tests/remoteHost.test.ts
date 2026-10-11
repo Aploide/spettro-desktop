@@ -20,6 +20,7 @@ import type { RemoteBridge } from '@main/remote/bridge'
 import { Prefs } from '@main/model/prefs'
 import type { ConnectionOrigin } from '@main/remote/connectionGuard'
 import { RemoteHost } from '@main/remote/host'
+import { RemoteHostSession } from '@main/remote/hostSession'
 import { base64urlDecode, computeProof } from '@main/remote/pairing'
 import type { JSONValue } from '@shared/acp'
 import type { ChatSummary, StoredSession, TranscriptItem } from '@shared/model'
@@ -244,11 +245,27 @@ describe('the handshake', () => {
     expect(auth.features).toEqual([...REMOTE_HOST_FEATURES])
   })
 
-  it('leaves remoteHost out of the auth result while there is no tunnel', async () => {
+  it('puts no internet address in hello, the auth result or the pairing code', async () => {
     makeHost()
     const socket = await attached()
+    const hello = socket.notifications(RemoteMethod.hello)[0].params as Frame
     const auth = socket.sent.find((f) => f.id === 1)?.result as Frame
     expect('remoteHost' in auth).toBe(false)
+    expect(auth.features).not.toContain('remoteHost')
+    expect(hello.features).not.toContain('remoteHost')
+    ;(host as unknown as { advertiser: { start(): void; stop(): void } }).advertiser = {
+      start: () => undefined,
+      stop: () => undefined
+    }
+    ;(host as unknown as { listen(port: number): Promise<WebSocketServer> }).listen = () =>
+      new Promise((resolve) => {
+        const wss = new WebSocketServer({ port: 0, host: '127.0.0.1' })
+        wss.once('listening', () => resolve(wss))
+      })
+    await host.openPairing()
+    const url = new URL(host.getState().pairingURL as string)
+    expect(url.searchParams.has('r')).toBe(false)
+    expect(url.searchParams.get('h')).toBe(host.hostId)
   })
 
   it('sends the first host/state after the auth reply, not before it', async () => {
@@ -260,7 +277,7 @@ describe('the handshake', () => {
     const stateAt = socket.sent.findIndex((f) => f.method === RemoteMethod.hostState)
     expect(replyAt).toBeGreaterThan(0)
     expect(stateAt).toBeGreaterThan(replyAt)
-    expect(socket.sent[stateAt].params).toEqual({ agentReady: true, shuttingDown: false, remoteHost: '' })
+    expect(socket.sent[stateAt].params).toEqual({ agentReady: true, shuttingDown: false })
   })
 
   it('serves nothing but auth before the device has proved itself', async () => {
@@ -272,9 +289,7 @@ describe('the handshake', () => {
     expect(socket.notifications(RemoteMethod.hostState)).toHaveLength(0)
   })
 
-  it('says nothing about the public hostname in a goodbye', async () => {
-    // A goodbye is about this launch; a phone that cleared its hostname
-    // here could not find the host over the internet after the next one.
+  it('says goodbye with the agent down and nothing more', async () => {
     makeHost()
     const socket = await attached()
     bridge.events.emit('host-state', { agentReady: false, shuttingDown: true })
@@ -998,16 +1013,7 @@ describe('connections the host turns away', () => {
     return id
   }
 
-  const tunneled: ConnectionOrigin = { via: 'tunnel', peerIp: '203.0.113.9', connectorTag: '6f0c9a52-6f43-4bd4-9a7e-3b55e2d3c1aa' }
-  const lan = (peerIp: string): ConnectionOrigin => ({ via: 'lan', peerIp, connectorTag: null })
-
-  it('turns a tunneled connection away while there is no tunnel', () => {
-    makeHost()
-    const { socket, session } = connect(tunneled)
-    expect(session).toBeNull()
-    expect(socket.closeCode).toBe(1008)
-    expect(socket.sent).toHaveLength(0)
-  })
+  const lan = (peerIp: string): ConnectionOrigin => ({ peerIp })
 
   it('closes a socket that hasn’t signed in within 15 seconds', () => {
     vi.useFakeTimers()
@@ -1032,6 +1038,18 @@ describe('connections the host turns away', () => {
       resume(socket, 'phone-1', key)
       vi.advanceTimersByTime(60_000)
       expect(socket.closed).toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('doesn’t count a phone idling past the deadline against its address', () => {
+    vi.useFakeTimers()
+    try {
+      makeHost()
+      for (let i = 0; i < 6; i++) connect(lan('192.168.1.40'))
+      vi.advanceTimersByTime(15_000)
+      expect(connect(lan('192.168.1.40')).session).not.toBeNull()
     } finally {
       vi.useRealTimers()
     }
@@ -1090,5 +1108,203 @@ describe('connections the host turns away', () => {
     // One the host closed itself gives its place back at once.
     sockets[0].socket.receive({ jsonrpc: '2.0', id: 1, method: RemoteMethod.auth, params: { pad: 'x'.repeat(70 * 1024) } })
     expect(connect(lan('192.168.1.201')).session).not.toBeNull()
+  })
+})
+
+describe('the listener', () => {
+  /** What the host needs from a WebSocketServer. */
+  class FakeServer extends EventEmitter {
+    readonly clients = new Set<WebSocket>()
+    closed = false
+    constructor(readonly port: number) {
+      super()
+    }
+    address(): { port: number } {
+      return { port: this.port }
+    }
+    close(): void {
+      this.closed = true
+    }
+  }
+
+  let sharing: boolean[]
+
+  /** A host whose listen() the test speaks for, advertising nothing. */
+  function fakeListenHost(listen: (port: number) => Promise<WebSocketServer>): RemoteHost {
+    sharing = []
+    bridge = fakeBridge()
+    host = new RemoteHost(bridge, { dataDir: dir, onStateChanged: () => undefined, onSharingChanged: (on) => sharing.push(on) })
+    const internals = host as unknown as {
+      advertiser: { start(): void; stop(): void }
+      listen(port: number): Promise<WebSocketServer>
+    }
+    internals.advertiser = { start: () => undefined, stop: () => undefined }
+    internals.listen = listen
+    return host
+  }
+
+  it('listens on 7879, and falls back when it’s taken or the OS reserves it', async () => {
+    for (const code of [null, 'EADDRINUSE', 'EACCES', 'EPERM']) {
+      fakeListenHost(async (port) => {
+        if (code && port === 7879) throw Object.assign(new Error(`listen ${code}`), { code })
+        return new FakeServer(port === 0 ? 50123 : port) as unknown as WebSocketServer
+      })
+      await host.setEnabled(true)
+      expect(host.getState().enabled).toBe(true)
+      expect(host.getState().port).toBe(code ? 50123 : 7879)
+      host.shutdown()
+    }
+  })
+
+  it('doesn’t fall back over a listen error that isn’t about the port', async () => {
+    fakeListenHost(async () => {
+      throw Object.assign(new Error('listen EMFILE'), { code: 'EMFILE' })
+    })
+    await expect(host.setEnabled(true)).rejects.toThrow('EMFILE')
+    expect(host.getState().enabled).toBe(false)
+  })
+
+  it('stays off when turned off while the listener was opening', async () => {
+    const opened: FakeServer[] = []
+    let release!: () => void
+    fakeListenHost(
+      (port) =>
+        new Promise((resolve) => {
+          release = () => {
+            const server = new FakeServer(port)
+            opened.push(server)
+            resolve(server as unknown as WebSocketServer)
+          }
+        })
+    )
+    const on = host.setEnabled(true)
+    await settle()
+    await host.setEnabled(false)
+    release()
+    await on
+    for (let i = 0; i < 5; i++) await settle()
+    expect(host.getState().enabled).toBe(false)
+    expect(opened[0].closed).toBe(true)
+    expect(sharing).toEqual([false])
+  })
+})
+
+describe('the real listener', () => {
+  /** A port nothing listens on right now. */
+  async function freePort(): Promise<number> {
+    const { createServer } = await import('node:net')
+    return new Promise((resolve) => {
+      const server = createServer()
+      server.listen(0, '127.0.0.1', () => {
+        const port = (server.address() as { port: number }).port
+        server.close(() => resolve(port))
+      })
+    })
+  }
+
+  async function realHost(preferredPort?: number): Promise<RemoteHost> {
+    bridge = fakeBridge()
+    host = new RemoteHost(bridge, {
+      dataDir: dir,
+      onStateChanged: () => undefined,
+      preferredPort: preferredPort ?? (await freePort())
+    })
+    ;(host as unknown as { advertiser: { start(): void; stop(): void } }).advertiser = {
+      start: () => undefined,
+      stop: () => undefined
+    }
+    return host
+  }
+
+  it('settles for another port when the preferred one is taken', async () => {
+    const { createServer } = await import('node:net')
+    const port = await freePort()
+    const squatter = createServer()
+    await new Promise<void>((resolve) => squatter.listen(port, resolve))
+    try {
+      await realHost(port)
+      await host.setEnabled(true)
+      expect(host.getState().port).not.toBe(port)
+      expect(host.getState().port).toBeGreaterThan(0)
+    } finally {
+      squatter.close()
+    }
+  })
+
+  it('cuts off a frame too big before sign-in while it arrives, without reading it', async () => {
+    const { WebSocket: Client } = await import('ws')
+    const handled = vi.spyOn(RemoteHostSession.prototype as unknown as { handleMessage(data: unknown): void }, 'handleMessage')
+    try {
+      await realHost()
+      await host.setEnabled(true)
+      const client = new Client(`ws://127.0.0.1:${host.getState().port}/`)
+      const closed = new Promise<void>((resolve) => client.on('close', () => resolve()))
+      client.on('error', () => undefined)
+      client.once('message', () => client.send('x'.repeat(4 * 1024 * 1024)))
+      await closed
+      expect(handled).not.toHaveBeenCalled()
+    } finally {
+      handled.mockRestore()
+    }
+  })
+
+  it('takes big frames once signed in', async () => {
+    const { WebSocket: Client } = await import('ws')
+    await realHost()
+    await host.setEnabled(true)
+    const key = host.pairDevice('phone-1', 'Pixel', 'android')
+    const client = new Client(`ws://127.0.0.1:${host.getState().port}/`)
+    const reply = await new Promise<Frame>((resolve) => {
+      client.on('message', (data) => {
+        const frame = JSON.parse(data.toString()) as Frame
+        if (frame.method === RemoteMethod.hello) {
+          const challenge = base64urlDecode((frame.params as Frame).challenge as string) as Buffer
+          client.send(
+            JSON.stringify({
+              jsonrpc: '2.0',
+              id: 1,
+              method: RemoteMethod.auth,
+              params: { mode: 'resume', deviceID: 'phone-1', proof: computeProof(key, challenge, host.hostId), protocolVersion: 1 }
+            })
+          )
+        } else if (frame.id === 1) {
+          client.send(JSON.stringify({ jsonrpc: '2.0', id: 2, method: RemoteMethod.chatsList, params: { pad: 'x'.repeat(2 * 1024 * 1024) } }))
+        } else if (frame.id === 2) {
+          resolve(frame)
+          client.close()
+        }
+      })
+    })
+    expect(reply.result).toEqual({ chats: [] })
+  })
+
+  it('turns an upgrade a Cloudflare tunnel relayed away before hello, and serves the LAN', async () => {
+    // A cloudflared left running, or pointed at this port by hand, must not
+    // put the relay on the internet.
+    const { WebSocket: Client } = await import('ws')
+    await realHost()
+    await host.setEnabled(true)
+    const url = `ws://127.0.0.1:${host.getState().port}/`
+    for (const headers of [
+      { 'cf-warp-tag-id': '6f0c9a52-6f43-4bd4-9a7e-3b55e2d3c1aa' },
+      { 'cf-connecting-ip': '203.0.113.9' }
+    ]) {
+      const { code, frames } = await new Promise<{ code: number; frames: number }>((resolve) => {
+        let frames = 0
+        const client = new Client(url, { headers })
+        client.on('message', () => frames++)
+        client.on('close', (code) => resolve({ code, frames }))
+      })
+      expect(code).toBe(1008)
+      expect(frames).toBe(0)
+    }
+    const first = await new Promise<Frame>((resolve) => {
+      const client = new Client(url)
+      client.on('message', (data) => {
+        resolve(JSON.parse(data.toString()) as Frame)
+        client.close()
+      })
+    })
+    expect(first.method).toBe(RemoteMethod.hello)
   })
 })

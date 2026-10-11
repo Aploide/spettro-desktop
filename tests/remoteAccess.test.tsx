@@ -27,8 +27,6 @@ function remoteWith(extra: Partial<RemoteHostState> = {}): RemoteHostState {
       { deviceId: 'd2', name: 'Carlo’s iPhone', platform: 'iOS 19', pairedAt: 0, lastSeenAt: null, revoked: false }
     ],
     connectedDeviceIds: [],
-    // The view reads none of the tunnel's state any more.
-    ...({ tunnel: null, tunneledDeviceIds: [] } as unknown as Pick<RemoteHostState, 'tunnel' | 'tunneledDeviceIds'>),
     ...extra
   }
 }

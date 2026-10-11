@@ -55,8 +55,6 @@ export const RemoteFeature = {
   rename: 'rename',
   /** projects/files. */
   projectFiles: 'projectFiles',
-  /** The auth result and host/state carry `remoteHost`. */
-  remoteHost: 'remoteHost',
   /** chats/open's transcript keeps the fields listed at transcriptItemToWire. */
   snapshotV2: 'snapshotV2'
 } as const
@@ -71,7 +69,6 @@ export const REMOTE_HOST_FEATURES: readonly RemoteFeatureName[] = [
   RemoteFeature.mentions,
   RemoteFeature.rename,
   RemoteFeature.projectFiles,
-  RemoteFeature.remoteHost,
   RemoteFeature.snapshotV2
 ]
 
@@ -100,10 +97,6 @@ export const PAIRING_WINDOW_MS = 5 * 60 * 1000
 
 /** URL scheme of the pairing QR payload. */
 export const PAIRING_URL_SCHEME = 'spettro-pair'
-
-/** QR query key carrying the public tunnel hostname (`wss://<r>/`). Older
- *  phones ignore keys they don't know. */
-export const PAIRING_KEY_REMOTE_HOST = 'r'
 
 export type RemoteHostKind = 'app' | 'tui'
 
@@ -216,9 +209,6 @@ export interface RemoteAuthResultPayload {
   /** REMOTE_HOST_FEATURES, again: a phone that resumed may not have kept the
    *  hello it built its proof from. */
   features: string[]
-  /** The bare public hostname phones can reach this host at from outside
-   *  the network (`wss://<remoteHost>/`). Omitted when there is none. */
-  remoteHost?: string
 }
 
 // ---------------------------------------------------------------------------
@@ -333,10 +323,6 @@ export interface RemoteHostStateParams {
   agentReady: boolean
   shuttingDown: boolean
   message?: string
-  /** As in the auth result, but always sent while the host is up: '' means
-   *  there is no public hostname (any the phone kept is stale). Left out of
-   *  a goodbye (shuttingDown), which says nothing about the next launch. */
-  remoteHost?: string
 }
 
 // ---------------------------------------------------------------------------

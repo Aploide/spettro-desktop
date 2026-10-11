@@ -36,8 +36,7 @@ import {
   PREAUTH_MAX_BYTES,
   PREAUTH_MAX_FRAMES,
   PREAUTH_MAX_FRAME_BYTES,
-  type ConnectionOrigin,
-  type ConnectionVia
+  type ConnectionOrigin
 } from './connectionGuard'
 import { base64urlEncode, randomKey, verifyProof } from './pairing'
 
@@ -48,11 +47,6 @@ export interface RemoteHostSessionDelegate {
   readonly hostName: string
   readonly hostVersion: string
   readonly bridge: RemoteBridge
-  /** The public hostname phones reach this host at from outside the
-   *  network, or undefined when there is none. */
-  readonly remoteHost: string | undefined
-  /** Whether a phone may pair through the tunnel (resume always may). */
-  readonly internetPairingAllowed: boolean
   /** The live pairing secret, or null when the window is shut or expired. */
   openPairingSecret(): Buffer | null
   /** Close the pairing window — called on the FIRST successful pair. */
@@ -68,10 +62,8 @@ export interface RemoteHostSessionDelegate {
   sessionAuthenticated(session: RemoteHostSession): void
   sessionClosed(session: RemoteHostSession): void
   /** An auth attempt failed in a way that counts against the peer's
-   *  address (a bad proof, an unknown or removed device, garbage). `soft`:
-   *  no attempt, but a socket that let the deadline pass or sent too much
-   *  before signing in. */
-  authFailed(session: RemoteHostSession, options?: { soft?: boolean }): void
+   *  address (a bad proof, an unknown or removed device, garbage). */
+  authFailed(session: RemoteHostSession): void
 }
 
 /** The TCP socket under a WebSocket, as far as counting what arrives on it
@@ -90,10 +82,6 @@ const COUNTED_AUTH_FAILURES = new Set<number>([
   RemoteAuthError.revoked,
   -32602
 ])
-
-/** What a phone on the other side of the tunnel is told this host is
- *  called before it proves itself; the real name is in the auth result. */
-const TUNNELED_HELLO_NAME = 'Spettro'
 
 /** A frame's size in bytes, before anything is made of it. */
 function rawLength(data: RawData): number {
@@ -182,10 +170,10 @@ export class RemoteHostSession {
     ws.on('error', () => this.didClose())
     if (wire) this.watchWire(wire)
     // A socket that never proves itself doesn't get to sit here: a phone
-    // that means it answers hello within a second.
+    // that means it answers hello within a second. Not counted against the
+    // address — on the LAN that's a phone having a bad moment.
     this.authDeadline = setTimeout(() => {
       if (this.isAuthenticated) return
-      this.delegate.authFailed(this, { soft: true })
       this.close(CLOSE_POLICY)
     }, AUTH_DEADLINE_MS)
     this.authDeadline.unref?.()
@@ -201,10 +189,6 @@ export class RemoteHostSession {
 
   get isAuthenticated(): boolean {
     return this.authedDeviceId !== null
-  }
-
-  get via(): ConnectionVia {
-    return this.origin.via
   }
 
   close(code?: number): void {
@@ -238,7 +222,6 @@ export class RemoteHostSession {
       received += chunk.length
       if (received <= PREAUTH_MAX_BYTES) return
       this.unwatchWire?.()
-      this.delegate.authFailed(this, { soft: true })
       try {
         wire.destroy()
       } catch {
@@ -256,12 +239,6 @@ export class RemoteHostSession {
   private clearDeadline(): void {
     if (this.authDeadline) clearTimeout(this.authDeadline)
     this.authDeadline = null
-  }
-
-  /** Whether this connection may pair: on the LAN whenever a code is open;
-   *  through the tunnel only if the user allowed pairing over the internet. */
-  private get mayPair(): boolean {
-    return this.origin.via === 'lan' || this.delegate.internetPairingAllowed
   }
 
   /** Sends a JSON-RPC notification (one message per text frame). */
@@ -282,11 +259,11 @@ export class RemoteHostSession {
     const hello: RemoteHelloParams = {
       protocolVersion: REMOTE_PROTOCOL_VERSION,
       hostID: this.delegate.hostId,
-      hostName: this.origin.via === 'tunnel' ? TUNNELED_HELLO_NAME : this.delegate.hostName,
+      hostName: this.delegate.hostName,
       hostKind: 'app',
       hostVersion: this.delegate.hostVersion,
       challenge: base64urlEncode(this.challenge),
-      pairingOpen: this.mayPair && this.delegate.openPairingSecret() !== null,
+      pairingOpen: this.delegate.openPairingSecret() !== null,
       features: [...REMOTE_HOST_FEATURES]
     }
     this.notify(RemoteMethod.hello, hello as unknown as JSONValue)
@@ -301,7 +278,6 @@ export class RemoteHostSession {
     if (!this.isAuthenticated) {
       this.preAuthFrames += 1
       if (this.preAuthFrames > PREAUTH_MAX_FRAMES || rawLength(data) > PREAUTH_MAX_FRAME_BYTES) {
-        this.delegate.authFailed(this, { soft: true })
         this.close(CLOSE_POLICY)
         return
       }
@@ -581,11 +557,6 @@ export class RemoteHostSession {
 
     let mintedKey: Buffer | null = null
     if (mode === 'pair') {
-      // A phone pairs where it can see the QR, which is the same network.
-      // Over the internet it only resumes, unless the user allowed more.
-      if (!this.mayPair) {
-        throw new RPCFault(RemoteAuthError.pairingExpired, 'Pair on the same network as this computer first.')
-      }
       const secret = this.delegate.openPairingSecret()
       if (!secret) {
         throw new RPCFault(
@@ -608,9 +579,7 @@ export class RemoteHostSession {
     } else {
       const known = this.delegate.resumeDevice(deviceID)
       if (!known) {
-        // Through the tunnel the name stays out of it, as in hello.
-        const name = this.origin.via === 'tunnel' ? 'this computer' : this.delegate.hostName
-        throw new RPCFault(RemoteAuthError.notPaired, `this device isn't paired with ${name}`)
+        throw new RPCFault(RemoteAuthError.notPaired, `this device isn't paired with ${this.delegate.hostName}`)
       }
       if (known.revoked) {
         throw new RPCFault(RemoteAuthError.revoked, 'access for this device was removed')
@@ -629,8 +598,6 @@ export class RemoteHostSession {
       agentReady: this.delegate.bridge.agentReady(),
       features: [...REMOTE_HOST_FEATURES]
     }
-    const remoteHost = this.delegate.remoteHost
-    if (remoteHost) result.remoteHost = remoteHost
     // The durable key travels exactly once, on the connection that minted it.
     // A resume proves the key the device already has.
     if (mintedKey) result.deviceKey = base64urlEncode(mintedKey)

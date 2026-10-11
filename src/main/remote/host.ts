@@ -12,15 +12,10 @@ import { networkInterfaces } from 'os'
 import { WebSocketServer, type WebSocket } from 'ws'
 import QRCodeLib from 'qrcode'
 import type { JSONValue } from '../../shared/acp'
-import type {
-  ChatSummary,
-  RemoteHostState,
-  RemoteTunnelCheck,
-  RemoteTunnelConfigureResult,
-  RemoteTunnelPatch
-} from '../../shared/model'
+import type { ChatSummary, RemoteHostState } from '../../shared/model'
 import {
   PAIRING_WINDOW_MS,
+  REMOTE_PREFERRED_PORT,
   REMOTE_PROTOCOL_VERSION,
   RemoteMethod,
   chatSummaryToWire,
@@ -36,12 +31,7 @@ import {
   LAN_ORIGIN,
   MAX_PAYLOAD_BYTES,
   MAX_SESSIONS,
-  MAX_UNAUTHENTICATED_TUNNELED,
-  MAX_UNAUTHENTICATED_TUNNELED_PER_PEER,
-  admitsTunneled,
-  classifyConnection,
-  localAddresses,
-  peerKey,
+  isProxiedConnection,
   type ConnectionOrigin
 } from './connectionGuard'
 import { RemoteAdvertiser } from './discovery'
@@ -53,22 +43,13 @@ import {
   isPairingWindowExpired,
   type PairingWindow
 } from './pairing'
-import { RemoteTunnel, type PortRefusal, type RemoteTunnelOptions } from './tunnel/remoteTunnel'
 
-/** What the user is told when the breaker trips: someone failing to sign
- *  in, over and over, through the tunnel. */
-export const REPEATED_SIGN_INS_NOTICE = {
-  title: 'Someone is repeatedly trying to connect to Spettro over the internet',
-  body: 'Pairing over the internet is off until you show a new pairing code.'
-} as const
-
-/** Why the pinned port couldn't be had, when that's worth falling back
- *  over. Any other listen error is a real failure. */
-function portRefusal(error: unknown): PortRefusal | null {
+/** Whether a listen error means only that the preferred port can't be had
+ *  — taken, or reserved by the OS (Windows keeps whole ranges) — which is
+ *  worth falling back over. Any other listen error is a real failure. */
+function portRefused(error: unknown): boolean {
   const code = (error as NodeJS.ErrnoException).code
-  if (code === 'EADDRINUSE') return 'in-use'
-  if (code === 'EACCES' || code === 'EPERM') return 'not-allowed'
-  return null
+  return code === 'EADDRINUSE' || code === 'EACCES' || code === 'EPERM'
 }
 
 function appVersion(): string {
@@ -114,29 +95,26 @@ export class RemoteHost implements RemoteHostSessionDelegate {
   readonly bridge: RemoteBridge
   private readonly onStateChanged: (s: RemoteHostState) => void
   private readonly onSharingChanged: (enabled: boolean) => void
-  private readonly onAttention: (notice: { title: string; body: string }) => void
   private readonly devices: PairedDeviceStore
   private readonly identity: HostIdentityStore
   private readonly advertiser = new RemoteAdvertiser()
   private readonly version = appVersion()
+  private readonly preferredPort: number
 
   private wss: WebSocketServer | null = null
   private port: number | null = null
   private enabled = false
   private starting: Promise<void> | null = null
-  /** Bumped by every start, stop and rebind: a listener that opens after
-   *  it was overtaken is closed again instead of taken on. */
+  /** Bumped by every start and stop: a listener that opens after it was
+   *  overtaken is closed again instead of taken on. */
   private listenGeneration = 0
-  /** Starts and rebinds, one at a time — each wants the pinned port, which
-   *  the one before may be about to take. */
+  /** Starts, one at a time — each wants the preferred port, which the one
+   *  before may be about to take. */
   private lifecycle: Promise<void> = Promise.resolve()
   private sessions: RemoteHostSession[] = []
   private connectedDeviceIds = new Set<string>()
   private readonly authLimiter = new FailedAuthLimiter()
   private heartbeat: NodeJS.Timeout | null = null
-  readonly tunnel: RemoteTunnel
-  /** The hostname phones were last told, to tell them again on a change. */
-  private announcedRemoteHost: string | undefined
 
   private pairingWindow: PairingWindow | null = null
   private pairingTimer: NodeJS.Timeout | null = null
@@ -159,21 +137,16 @@ export class RemoteHost implements RemoteHostSessionDelegate {
       /** The user turned sharing on or off — persisted so a launch can
        *  restore it. Not called when the app quits with sharing on. */
       onSharingChanged?: (enabled: boolean) => void
-      /** Something the user should hear about even with the window shut
-       *  (a notification, in the app). */
-      onAttention?: (notice: { title: string; body: string }) => void
-      /** Overrides for the tunnel's parts (tests). */
-      tunnel?: Omit<RemoteTunnelOptions, 'dataDir' | 'onChange'>
+      /** The port tried first (tests); REMOTE_PREFERRED_PORT otherwise. */
+      preferredPort?: number
     }
   ) {
     this.bridge = bridge
     this.onStateChanged = opts.onStateChanged
     this.onSharingChanged = opts.onSharingChanged ?? ((): void => undefined)
-    this.onAttention = opts.onAttention ?? ((): void => undefined)
+    this.preferredPort = opts.preferredPort ?? REMOTE_PREFERRED_PORT
     this.devices = new PairedDeviceStore(opts.dataDir)
     this.identity = new HostIdentityStore(opts.dataDir)
-    this.tunnel = new RemoteTunnel({ ...opts.tunnel, dataDir: opts.dataDir, onChange: () => this.tunnelChanged() })
-    this.announcedRemoteHost = this.tunnel.publicHost
     this.wireBridgeEvents()
   }
 
@@ -191,35 +164,8 @@ export class RemoteHost implements RemoteHostSessionDelegate {
     return this.version
   }
 
-  /** The public hostname the tunnel puts this host at, while it is on:
-   *  the auth result, every host/state and the QR pick it up from here. */
-  get remoteHost(): string | undefined {
-    return this.tunnel.publicHost
-  }
-
-  /** Pairing through the tunnel: off unless the user allowed it, and off
-   *  again while someone is hammering auth over the internet. */
-  get internetPairingAllowed(): boolean {
-    return this.tunnel.allowInternetPairing && !this.authLimiter.breakerTripped
-  }
-
-  /** What the kill switch checks a tunneled connection against. */
-  private tunnelGate(): { running: boolean; connectorId: string | null } {
-    return this.tunnel.gate
-  }
-
-  authFailed(session: RemoteHostSession, options: { soft?: boolean } = {}): void {
-    // A socket that idled past the deadline or sent too much counts only
-    // through the tunnel: on the LAN that's a phone having a bad moment.
-    if (options.soft && session.via !== 'tunnel') return
-    if (this.authLimiter.recordFailure(session.origin, options)) {
-      // A wave of failures over the internet: whatever pairing code is up
-      // stops working, pairing through the tunnel stays off until the user
-      // opens a new code, and the user is told.
-      console.error('[remote] repeated failed sign-ins over the internet; pairing through the tunnel is off')
-      this.closePairing()
-      this.onAttention(REPEATED_SIGN_INS_NOTICE)
-    }
+  authFailed(session: RemoteHostSession): void {
+    this.authLimiter.recordFailure(session.origin)
   }
 
   openPairingSecret(): Buffer | null {
@@ -280,12 +226,10 @@ export class RemoteHost implements RemoteHostSessionDelegate {
     this.publishState()
   }
 
-  /** A host/state as this host sends it: the public hostname rides along
-   *  while the host is up (see RemoteHostStateParams.remoteHost). */
+  /** A host/state as this host sends it. */
   private hostStateParams(agentReady: boolean, shuttingDown: boolean, message?: string): RemoteHostStateParams {
     const params: RemoteHostStateParams = { agentReady, shuttingDown }
     if (message !== undefined && message !== null) params.message = message
-    if (!shuttingDown) params.remoteHost = this.remoteHost ?? ''
     return params
   }
 
@@ -322,16 +266,15 @@ export class RemoteHost implements RemoteHostSessionDelegate {
     const generation = ++this.listenGeneration
     const starting = this.serialize(async () => {
       if (generation !== this.listenGeneration) return
-      const bound = await this.bind()
+      const wss = await this.bind()
       if (generation !== this.listenGeneration) {
         // Stopped while it was opening.
-        bound.wss.close()
+        wss.close()
         return
       }
-      this.adopt(bound.wss)
+      this.adopt(wss)
       this.enabled = true
       this.advertise()
-      this.tunnel.attach(this.port ?? 0, bound.refusal)
       this.publishState()
     })
     this.starting = starting
@@ -342,25 +285,22 @@ export class RemoteHost implements RemoteHostSessionDelegate {
     return starting
   }
 
-  /** Runs a start or rebind once the one before it is done. */
+  /** Runs a start once the one before it is done. */
   private serialize(task: () => Promise<void>): Promise<void> {
     const run = this.lifecycle.then(task)
     this.lifecycle = run.catch(() => undefined)
     return run
   }
 
-  /** Opens a listener on the pinned port — the one the tunnel's service
-   *  URL names, 7879 unless the user chose another. If something else holds
-   *  it, or the OS reserves it, the OS picks one instead: phones on the LAN
-   *  find the host by Bonjour, not port, and the tunnel reports why its
-   *  port couldn't be had. */
-  private async bind(): Promise<{ wss: WebSocketServer; refusal: PortRefusal | undefined }> {
+  /** Opens a listener on the preferred port (7879). If something else
+   *  holds it — another Spettro, or anything else — or the OS reserves it,
+   *  the OS picks one instead: phones find the host by Bonjour, not port. */
+  private async bind(): Promise<WebSocketServer> {
     try {
-      return { wss: await this.listen(this.tunnel.port), refusal: undefined }
+      return await this.listen(this.preferredPort)
     } catch (error) {
-      const refusal = portRefusal(error)
-      if (!refusal) throw error
-      return { wss: await this.listen(0), refusal }
+      if (!portRefused(error)) throw error
+      return await this.listen(0)
     }
   }
 
@@ -374,8 +314,15 @@ export class RemoteHost implements RemoteHostSessionDelegate {
         socket.close()
         return
       }
+      // Relayed by a Cloudflare tunnel: turned away before hello, so a
+      // cloudflared left running (or pointed here by hand) can't put the
+      // relay on the internet. See isProxiedConnection.
+      if (isProxiedConnection(req.headers)) {
+        socket.close(CLOSE_POLICY)
+        return
+      }
       this.watchHeartbeat(socket)
-      this.acceptSocket(socket, classifyConnection(req.socket.remoteAddress, req.headers, localAddresses()), req.socket)
+      this.acceptSocket(socket, { peerIp: req.socket.remoteAddress ?? 'unknown' }, req.socket)
     })
     this.startHeartbeat(wss)
     wss.on('error', (error) => {
@@ -383,48 +330,10 @@ export class RemoteHost implements RemoteHostSessionDelegate {
     })
   }
 
-  /** Moves the listener to the pinned port: the tunnel needs it there, and
-   *  the host is on another (the pinned one was taken at start, or the user
-   *  chose a new one). Attached phones drop and find the host again. Two in
-   *  a row move it once; one overtaken by a stop leaves it stopped. */
-  private rebind(): Promise<void> {
-    if (!this.enabled) return Promise.resolve()
-    const generation = ++this.listenGeneration
-    const current = (): boolean => generation === this.listenGeneration && this.enabled
-    return this.serialize(async () => {
-      if (!current()) return
-      for (const session of this.sessions) session.close()
-      this.sessions = []
-      this.connectedDeviceIds.clear()
-      this.stopHeartbeat()
-      this.wss?.close()
-      this.wss = null
-      this.port = null
-      let bound: { wss: WebSocketServer; refusal: PortRefusal | undefined }
-      try {
-        bound = await this.bind()
-      } catch (error) {
-        if (!current()) return
-        console.error('[remote] could not listen again', error)
-        this.stop()
-        return
-      }
-      if (!current()) {
-        bound.wss.close()
-        return
-      }
-      this.adopt(bound.wss)
-      this.advertise()
-      this.refreshPairingURL()
-      this.tunnel.attach(this.port ?? 0, bound.refusal)
-      this.publishState()
-    })
-  }
-
   /** Takes on a connection the listener accepted: it is sent `hello` at
    *  once, and nothing else until it authenticates. Null when it was turned
-   *  away instead: a tunneled connection the kill switch stops, an address
-   *  blocked for failing auth, or one socket too many. */
+   *  away instead: an address blocked for failing auth, or one socket too
+   *  many. */
   acceptSocket(socket: WebSocket, origin: ConnectionOrigin = LAN_ORIGIN, wire?: WireSocket): RemoteHostSession | null {
     const reject = (code: number): null => {
       try {
@@ -434,27 +343,10 @@ export class RemoteHost implements RemoteHostSessionDelegate {
       }
       return null
     }
-    const gate = this.tunnelGate()
-    if (!admitsTunneled(origin, gate)) {
-      if (origin.via === 'tunnel' && gate.running) this.tunnel.foreignConnectorSeen()
-      return reject(CLOSE_POLICY)
-    }
-    // A phone on the LAN that failed its way into a block can still pair
-    // while a code is up: that is how it gets a working key again.
-    if (this.authLimiter.isBlocked(origin) && !(origin.via === 'lan' && this.openPairingSecret())) {
-      return reject(CLOSE_POLICY)
-    }
+    // A phone that failed its way into a block can still pair while a code
+    // is up: that is how it gets a working key again.
+    if (this.authLimiter.isBlocked(origin) && !this.openPairingSecret()) return reject(CLOSE_POLICY)
     if (this.sessions.length >= MAX_SESSIONS) return reject(CLOSE_TRY_AGAIN_LATER)
-    if (origin.via === 'tunnel') {
-      const waiting = this.sessions.filter((s) => s.via === 'tunnel' && !s.isAuthenticated)
-      const peer = peerKey(origin)
-      if (
-        waiting.length >= MAX_UNAUTHENTICATED_TUNNELED ||
-        waiting.filter((s) => peerKey(s.origin) === peer).length >= MAX_UNAUTHENTICATED_TUNNELED_PER_PEER
-      ) {
-        return reject(CLOSE_TRY_AGAIN_LATER)
-      }
-    }
     const session = new RemoteHostSession(socket, this, origin, wire)
     this.sessions.push(session)
     return session
@@ -470,8 +362,8 @@ export class RemoteHost implements RemoteHostSessionDelegate {
   }
 
   /** Pings every socket each HEARTBEAT_MS and ends any that didn't answer
-   *  the last one: a phone that vanished behind the tunnel (or a NAT that
-   *  forgot it) otherwise holds its socket open forever. */
+   *  the last one: a phone that vanished (or a NAT that forgot it)
+   *  otherwise holds its socket open forever. */
   private startHeartbeat(wss: WebSocketServer): void {
     this.stopHeartbeat()
     this.heartbeat = setInterval(() => {
@@ -512,7 +404,7 @@ export class RemoteHost implements RemoteHostSessionDelegate {
   }
 
   private stop(): void {
-    // Whatever start or rebind is still opening a listener is overtaken.
+    // Whatever start is still opening a listener is overtaken.
     this.listenGeneration++
     this.starting = null
     if (!this.enabled && !this.wss) {
@@ -530,7 +422,6 @@ export class RemoteHost implements RemoteHostSessionDelegate {
     this.sessions = []
     this.connectedDeviceIds.clear()
     this.closePairingInternal()
-    this.tunnel.detach()
     this.advertiser.stop()
     this.stopHeartbeat()
     this.wss?.close()
@@ -557,9 +448,6 @@ export class RemoteHost implements RemoteHostSessionDelegate {
    *  be on for a scan to reach anything, so turning it on is part of "show me
    *  the code" rather than a separate step. */
   async openPairing(): Promise<void> {
-    // The user is back at the screen: a breaker tripped by failed sign-ins
-    // over the internet is theirs to reset.
-    this.authLimiter.resetBreaker()
     if (!this.enabled) {
       await this.start()
       if (!this.enabled) return
@@ -591,9 +479,7 @@ export class RemoteHost implements RemoteHostSessionDelegate {
     this.publishState()
   }
 
-  /** What the QR says for a window: who and where this host is, plus the
-   *  public hostname while the tunnel is on, so a phone that pairs on the
-   *  LAN can find the host from anywhere afterwards. */
+  /** What the QR says for a window: who and where this host is. */
   private buildPairingURLFor(window: PairingWindow): string {
     return buildPairingURL({
       protocolVersion: REMOTE_PROTOCOL_VERSION,
@@ -602,13 +488,11 @@ export class RemoteHost implements RemoteHostSessionDelegate {
       hostKind: 'app',
       secret: window.secret,
       address: primaryLANAddress(),
-      port: this.port ?? undefined,
-      remoteHost: this.remoteHost
+      port: this.port ?? undefined
     })
   }
 
-  /** Redraws an open code after what it carries changed (the name, the
-   *  port, the public hostname). */
+  /** Redraws an open code after what it carries changed (the name). */
   private refreshPairingURL(): void {
     if (!this.pairingWindow || isPairingWindowExpired(this.pairingWindow)) return
     const url = this.buildPairingURLFor(this.pairingWindow)
@@ -657,88 +541,6 @@ export class RemoteHost implements RemoteHostSessionDelegate {
     this.publishState()
   }
 
-  // MARK: Tunnel
-
-  /** The tunnel switch. Turning it on turns remote access on too (the
-   *  tunnel has nothing to carry otherwise), and moves the listener to the
-   *  pinned port if it had to settle for another. Turning it off drops
-   *  every phone that came in through it. */
-  async setTunnelEnabled(enabled: boolean): Promise<void> {
-    this.tunnel.setEnabled(enabled)
-    if (enabled) {
-      if (!this.enabled) {
-        await this.start()
-        if (this.enabled) this.onSharingChanged(true)
-      } else if (this.port !== this.tunnel.port) {
-        await this.rebind()
-      }
-    }
-    this.tunnelChanged()
-  }
-
-  async configureTunnel(patch: RemoteTunnelPatch): Promise<RemoteTunnelConfigureResult> {
-    const result = this.tunnel.configure(patch)
-    if (!result.ok) return { ok: false, field: result.field, message: result.message }
-    if (result.changed?.port && this.enabled && this.tunnel.enabled) await this.rebind()
-    this.tunnelChanged()
-    return { ok: true }
-  }
-
-  forgetTunnelToken(): void {
-    this.tunnel.forgetToken()
-  }
-
-  /** Try again: after the pinned port was taken, that means listening on
-   *  it again; otherwise restarting cloudflared now. */
-  async retryTunnel(): Promise<void> {
-    if (this.enabled && this.tunnel.enabled && this.port !== this.tunnel.port) await this.rebind()
-    else this.tunnel.retry()
-  }
-
-  installCloudflared(): Promise<void> {
-    return this.tunnel.installCloudflared()
-  }
-
-  checkTunnel(): Promise<RemoteTunnelCheck> {
-    return this.tunnel.checkFromInternet(this.identity.hostId)
-  }
-
-  /** The machine woke up from sleep. */
-  systemResumed(): void {
-    this.tunnel.resume()
-  }
-
-  /** Whatever changed in the tunnel: phones are told a new public hostname
-   *  (and an open QR redrawn with it), once the tunnel isn't running nobody
-   *  stays connected through it, and once its connector is known nobody
-   *  stays who came in through another (let in while it wasn't). */
-  private tunnelChanged(): void {
-    const gate = this.tunnel.gate
-    if (!gate.running) this.dropTunneledSessions()
-    else if (gate.connectorId !== null) {
-      const foreign = this.sessions.filter((s) => s.via === 'tunnel' && s.origin.connectorTag !== gate.connectorId)
-      for (const session of foreign) session.close(CLOSE_POLICY)
-      if (foreign.length > 0) this.tunnel.foreignConnectorSeen()
-    }
-    const remoteHost = this.remoteHost
-    if (remoteHost !== this.announcedRemoteHost) {
-      this.announcedRemoteHost = remoteHost
-      if (this.enabled) {
-        this.broadcast(
-          RemoteMethod.hostState,
-          this.hostStateParams(this.bridge.agentReady(), false) as unknown as JSONValue
-        )
-        this.refreshPairingURL()
-      }
-    }
-    this.publishState()
-  }
-
-  /** Closes every tunneled session: the kill switch, for sockets already in. */
-  private dropTunneledSessions(): void {
-    for (const session of this.sessions.filter((s) => s.via === 'tunnel')) session.close(CLOSE_POLICY)
-  }
-
   // MARK: State
 
   getState(): RemoteHostState {
@@ -753,22 +555,12 @@ export class RemoteHost implements RemoteHostSessionDelegate {
       pairingExpiresAt: this.pairingExpiresAt,
       pairingExpired: this.pairingExpired,
       devices: this.devices.toDTOs(),
-      connectedDeviceIds: [...this.connectedDeviceIds],
-      tunnel: { ...this.tunnel.getState(), internetPairingPaused: this.authLimiter.breakerTripped },
-      tunneledDeviceIds: [
-        ...new Set(
-          this.sessions
-            .filter((s) => s.via === 'tunnel' && s.deviceId !== null && this.connectedDeviceIds.has(s.deviceId))
-            .map((s) => s.deviceId as string)
-        )
-      ]
+      connectedDeviceIds: [...this.connectedDeviceIds]
     }
   }
 
-  /** Quitting: cloudflared is signalled first and synchronously — Electron
-   *  won't wait for anything after this returns. */
+  /** Quitting: phones are told goodbye and the listener closed. */
   shutdown(): void {
-    this.tunnel.shutdown()
     this.stop()
     for (const [event, listener] of this.bridgeListeners) {
       this.bridge.events.off(event, listener as (...args: unknown[]) => void)

@@ -17,7 +17,6 @@
 //                 question-multi | settings |
 //                 settings-<general|account|models|permissions|memory|remote|
 //                   updates|advanced|shortcuts|about> |
-//                 settings-remote-<setup|tunnel|error> |
 //                 onboarding | installing | install-failed | gate | gate-keys |
 //                 failure | reconnecting | confirm-delete | deleted-undo |
 //                 no-model | no-model-sent | no-model-connect |
@@ -813,94 +812,7 @@ const REMOTE: RemoteHostState = {
       revoked: false
     }
   ],
-  connectedDeviceIds: ['d1'],
-  tunnel: {
-    enabled: false,
-    hostname: '',
-    hasToken: false,
-    tunnelId: null,
-    port: 7879,
-    allowInternetPairing: false,
-    status: 'off',
-    downloadProgress: null,
-    connections: 0,
-    locations: [],
-    protocol: null,
-    error: null,
-    warning: null,
-    retryAt: null,
-    binary: null,
-    log: []
-  },
-  tunneledDeviceIds: []
-}
-
-/** Settings › Remote with the tunnel: `settings-remote-setup` (just turned
- *  on, the steps open on the token field), `settings-remote-tunnel`
- *  (connected, one phone in over the internet, internet pairing off) and
- *  `settings-remote-error` (the pinned port taken, and a routing warning). */
-const TUNNEL_CONNECTED: RemoteHostState['tunnel'] = {
-  ...REMOTE.tunnel,
-  enabled: true,
-  hostname: 'spettro.example.com',
-  hasToken: true,
-  tunnelId: '1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d',
-  status: 'connected',
-  connections: 4,
-  locations: ['fra08', 'ams02'],
-  protocol: 'quic',
-  binary: { path: '/usr/bin/cloudflared', version: '2026.8.2', source: 'system' },
-  log: [
-    'Using cloudflared 2026.8.2 at /usr/bin/cloudflared.',
-    'Found the public hostname spettro.example.com in the tunnel’s settings.',
-    'Registered tunnel connection connIndex=0 location=fra08 protocol=quic'
-  ]
-}
-
-function remoteFor(mode: string): RemoteHostState {
-  if (mode === 'settings-remote-setup') {
-    return { ...REMOTE, tunnel: { ...REMOTE.tunnel, enabled: true, status: 'needs-setup' } }
-  }
-  if (mode === 'settings-remote-tunnel') {
-    return {
-      ...REMOTE,
-      port: 7879,
-      devices: [
-        {
-          deviceId: 'd3',
-          name: 'Pixel 9',
-          platform: 'Android 16',
-          pairedAt: NOW - 5 * 24 * 60 * MIN,
-          lastSeenAt: NOW - MIN,
-          revoked: false
-        },
-        ...REMOTE.devices
-      ],
-      connectedDeviceIds: ['d3', 'd1'],
-      tunnel: TUNNEL_CONNECTED,
-      tunneledDeviceIds: ['d3']
-    }
-  }
-  if (mode === 'settings-remote-error') {
-    return {
-      ...REMOTE,
-      tunnel: {
-        ...TUNNEL_CONNECTED,
-        status: 'error',
-        connections: 0,
-        locations: [],
-        protocol: null,
-        error: {
-          kind: 'port-in-use',
-          message:
-            'Port 7879 is in use by another program, so the tunnel can’t reach Spettro. Close it, or choose another port and update the service URL in Cloudflare.'
-        },
-        warning:
-          'In Cloudflare, spettro.example.com sends traffic to http://localhost:8080. Set its service type to HTTP and the URL to localhost:7879.'
-      }
-    }
-  }
-  return REMOTE
+  connectedDeviceIds: ['d1']
 }
 
 const INSTALL_LOG = [
@@ -943,7 +855,7 @@ const app: AppStateDTO = {
     NO_MODEL ? { plan: 'unknown', email: null } : { plan: 'pro', email: 'carlo@example.com' },
   extensions: MODE.startsWith('gate') || NO_MODEL ? GATE_EXTENSIONS : EXTENSIONS,
   update: MODE === 'settings-updates' ? UPDATES : { ...EMPTY_UPDATE_STATE, app: { ...EMPTY_COMPONENT_UPDATE, current: '0.1.7' } },
-  remote: MODE.startsWith('settings') ? remoteFor(MODE) : null,
+  remote: MODE.startsWith('settings') ? REMOTE : null,
   // A first run starts in the home folder, which is exactly the case the
   // new-session view warns about.
   lastProjectPath: FIRST_RUN ? null : PROJECT,
@@ -1201,9 +1113,7 @@ function pushEvents(): void {
   // chosen in its sidebar.
   if (MODE.startsWith('settings-')) {
     setTimeout(() => press(','), 60)
-    // `settings-<pane>-<variant>` opens <pane> on a variant of its state.
-    const pane = MODE.slice('settings-'.length).split('-')[0]
-    setTimeout(() => click(`[data-testid="settings-pane-${pane}"]`), 140)
+    setTimeout(() => click(`[data-testid="settings-pane-${MODE.slice('settings-'.length)}"]`), 140)
   }
   // Delete… from a row's menu: the alert asking first.
   if (MODE === 'confirm-delete' || MODE === 'deleted-undo') {

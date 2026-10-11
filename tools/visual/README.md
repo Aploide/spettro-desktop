@@ -94,7 +94,6 @@ Pick the screen with `?mode=`:
 | `question-multi` | three questions, on the second (multi-select) with picks made and Other… open |
 | `settings` | Settings, opened the way a user does (Ctrl+,) |
 | `settings-<pane>` | one per pane — `general`, `account`, `models`, `permissions`, `memory`, `remote`, `updates` (the engine has an update waiting), `advanced`, `shortcuts`, `about` — chosen in Settings' sidebar |
-| `settings-remote-setup`, `settings-remote-tunnel`, `settings-remote-error` | Settings › Remote with Access over the internet: just turned on (the numbered steps open on the token field); connected as spettro.example.com with a phone in over the internet (its badge, Remove); the pinned port taken (the sentence, Try again, Choose another port) under a dashboard routing warning |
 | `onboarding`, `installing`, `install-failed` | setup, step 1 of 2: Install Spettro (Advanced folded), the determinate bar with Cancel, and "Couldn't download Spettro" with Try again |
 | `gate`, `gate-keys` | setup, step 2 of 2: Sign in to Spettro first, the quieter alternatives under it; and "Use my own API key" with one provider opened (its "Get a key" link) |
 | `failure` | the engine died: the sentence, Try again, and the log behind "Show details" |

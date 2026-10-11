@@ -91,9 +91,19 @@ phone knows what it may rely on:
 | `rename` | `chats/rename {chatID, title}` |
 | `projectFiles` | `projects/files {projectPath}` → `{files}` (≤ 5000) |
 | `snapshotV2` | `chats/open` keeps the transcript fields the Swift store lacks (see `transcriptItemToWire`); a thought's `startedAt`/`endedAt` keep their milliseconds |
+| `unpair` | `devices/unpair {}` → `null`: the calling device is taken off the paired devices (see Who gets in) |
+| `goodbyeReason` | the goodbye `host/state` carries `reason`, and there is exactly one per shutdown |
 
 A phone's first `host/state` follows the auth reply, never the other way
-round. Workflow Studio's scratch chats never reach a phone, nor does a
+round.
+
+Goodbye: one `host/state {agentReady: false, shuttingDown: true, reason}`
+per shutdown, and no `host/state` after it. `reason` is `quit`, `restart`
+(quitting to install an update; `index.ts` knows from the updater's quit
+callback) or `sharing-off`. Only sharing-off has a `message` ("Remote
+access was turned off."), which is all an older phone goes by to tell it
+from a quit. The app says goodbye before the model shuts down, so the
+model's own shutdown emission finds it said. Workflow Studio's scratch chats never reach a phone, nor does a
 removed chat's late `chat/state` (`remoteBridge.ts`).
 
 ## Who gets in
@@ -112,6 +122,11 @@ a server. `connectionGuard.ts` keeps it that way:
   LAN may still pair while a code is up, which is how it gets a working
   key again). A stale code or an old protocol doesn't count.
 - At most 32 sockets at once; frames ≤ 32 MiB.
+- `devices/unpair` removes the calling device's record (never another's:
+  it takes no id) and closes its socket with 1000, after the reply. The
+  record is deleted rather than revoked, so pairing again starts a fresh
+  row. Settings' Remove… revokes instead, and leaves a connected phone's
+  socket open until it reconnects.
 
 The listener tries port 7879 first and lets the OS pick another when it is
 taken or reserved (`EADDRINUSE`, `EACCES`, `EPERM`). Starts run one at a

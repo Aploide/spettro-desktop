@@ -471,6 +471,28 @@ describe('devices/unpair', () => {
     expect(deviceIds()).toEqual(['phone-1'])
   })
 
+  it('serves nothing that arrives behind it on the closing socket', async () => {
+    states = []
+    const cancelChat = vi.fn()
+    bridge = fakeBridge({ cancelChat })
+    host = new RemoteHost(bridge, { dataDir: dir, onStateChanged: (s) => states.push(s) })
+    const socket = await attached()
+    const unpairId = nextId++
+    const cancelId = nextId++
+    // Two frames back to back, as ws may still deliver them while closing.
+    socket.receive({ jsonrpc: '2.0', id: unpairId, method: RemoteMethod.devicesUnpair, params: {} })
+    socket.receive({
+      jsonrpc: '2.0',
+      id: cancelId,
+      method: RemoteMethod.chatCancel,
+      params: { chatID: '00000000-0000-4000-8000-000000000001' }
+    })
+    await settle()
+    expect(socket.reply(unpairId)?.result).toBeNull()
+    expect(socket.reply(cancelId)).toBeUndefined()
+    expect(cancelChat).not.toHaveBeenCalled()
+  })
+
   it('answers null when the record is already gone, and again after pairing anew', async () => {
     unpairHost()
     const socket = await attached()

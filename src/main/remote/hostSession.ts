@@ -275,6 +275,10 @@ export class RemoteHostSession {
   // MARK: Inbound frames
 
   private handleMessage(data: RawData): void {
+    // `ws` still delivers frames that arrive while the socket closes. A
+    // closed session serves nothing: after devices/unpair, the device's
+    // record is gone, and a request right behind it must not run.
+    if (this.closed) return
     // Before auth, a socket gets a handful of small frames: enough for an
     // auth request and a retry, not enough to make the host parse megabytes
     // for a stranger. Measured before it is turned into text.

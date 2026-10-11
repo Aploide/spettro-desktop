@@ -13,38 +13,27 @@ import { useApp } from '@renderer/state/store'
 import { Icon } from '@renderer/design/icons'
 import './common.css'
 
-/** Open and closed by its own hand unless `open` is passed, which makes the
- *  caller the owner (a status line's "Paste a new token" opening the steps
- *  that hold the field). */
 export default function Disclosure({
   label = 'Show details',
   openLabel = 'Hide details',
   children,
   defaultOpen = false,
-  open: controlled,
-  onOpenChange,
   className
 }: {
   label?: string
   openLabel?: string
   children: ReactNode
   defaultOpen?: boolean
-  open?: boolean
-  onOpenChange?: (open: boolean) => void
   className?: string
 }): JSX.Element {
-  const [own, setOwn] = useState(defaultOpen)
-  const open = controlled ?? own
+  const [open, setOpen] = useState(defaultOpen)
   return (
     <div className={`disclosure${open ? ' disclosure--open' : ''}${className ? ` ${className}` : ''}`}>
       <button
         type="button"
         className="disclosure-toggle"
         aria-expanded={open}
-        onClick={() => {
-          if (controlled === undefined) setOwn(!open)
-          onOpenChange?.(!open)
-        }}
+        onClick={() => setOpen((o) => !o)}
       >
         <span className="disclosure-chevron" aria-hidden>
           <Icon name="chevron.right" size={8} />

@@ -279,9 +279,10 @@ function ContextMeter({
   const ref = useDismiss(open, () => setOpen(false))
 
   const fraction = Math.min(1, Math.max(0, usage.used / usage.size))
-  // What the chat has cost: every turn's provider total, added up here; the
-  // CLI's own running count stands in until a turn has been filed.
-  const chatTotal = sessionTokens > 0 ? sessionTokens : (usage.tokensUsed ?? 0)
+  // What the chat has cost: every turn's provider total, added up here.
+  // Nothing until a turn has been filed: the CLI's `tokensUsed` counts the
+  // current run only, so it can't stand in for the chat's total.
+  const chatTotal = sessionTokens
   const reply = lastTurn ? lastReplyLine(lastTurn) : null
   const ringColor =
     fraction > 0.9 ? 'var(--diff-removed)' : fraction > 0.75 ? 'var(--mode-yellow)' : 'var(--accent)'

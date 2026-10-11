@@ -27,6 +27,9 @@ let didShutdown = false
 let quitApproved = false
 /** The quit question is on screen; a second Ctrl+Q doesn't stack another. */
 let askingQuit = false
+/** The quit is the updater handing over to the version it downloaded: the
+ *  phones are told Spettro is restarting, not that it quit. */
+let quitForUpdate = false
 
 /** The app icon, for the window and the Linux taskbar (Windows takes it from
  *  the packaged exe). Bundled as an extra resource; falls back to the repo
@@ -104,8 +107,10 @@ app.whenReady().then(() => {
     // A dev run has no installer to replace, and quitting is how the update
     // hands the machine over to the one it downloaded.
     isPackaged: app.isPackaged,
-    // The update already asked (or waited) before getting this far.
+    // The update already asked (or waited) before getting this far. Only
+    // the updater calls this.
     quit: () => {
+      quitForUpdate = true
       quitApproved = true
       app.quit()
     },
@@ -163,16 +168,23 @@ app.whenReady().then(() => {
 function shutdownAll(): void {
   if (didShutdown) return
   didShutdown = true
+  const reason = quitForUpdate ? 'restart' : 'quit'
   try {
-    // Stops the agent and tells attached devices the disconnect is
-    // deliberate (host/state with shuttingDown: true, per doc 34) — the
-    // bridge relays that emission before the host itself goes down.
+    // Attached phones hear first that the disconnect is deliberate, and
+    // why: one host/state with shuttingDown and the reason, before the
+    // agent teardown emits anything. The model's own shutdown emission and
+    // the host's shutdown below find it said and add nothing.
+    remoteHost?.sayGoodbye(reason)
+  } catch {
+    // best-effort
+  }
+  try {
     model?.shutdown()
   } catch {
     // best-effort
   }
   try {
-    remoteHost?.shutdown()
+    remoteHost?.shutdown(reason)
   } catch {
     // best-effort
   }

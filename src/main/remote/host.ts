@@ -20,6 +20,7 @@ import {
   RemoteMethod,
   chatSummaryToWire,
   rfc3339,
+  type RemoteGoodbyeReason,
   type RemoteHostStateParams
 } from '../../shared/remote'
 import type { RemoteBridge } from './bridge'
@@ -115,6 +116,10 @@ export class RemoteHost implements RemoteHostSessionDelegate {
   private connectedDeviceIds = new Set<string>()
   private readonly authLimiter = new FailedAuthLimiter()
   private heartbeat: NodeJS.Timeout | null = null
+  /** This listener's goodbye has gone out: one per shutdown, and nothing
+   *  after it that could read as the host being back. Reset when sharing
+   *  starts again. */
+  private goodbyeSent = false
 
   private pairingWindow: PairingWindow | null = null
   private pairingTimer: NodeJS.Timeout | null = null
@@ -227,10 +232,28 @@ export class RemoteHost implements RemoteHostSessionDelegate {
   }
 
   /** A host/state as this host sends it. */
-  private hostStateParams(agentReady: boolean, shuttingDown: boolean, message?: string): RemoteHostStateParams {
+  private hostStateParams(
+    agentReady: boolean,
+    shuttingDown: boolean,
+    message?: string,
+    reason?: RemoteGoodbyeReason
+  ): RemoteHostStateParams {
     const params: RemoteHostStateParams = { agentReady, shuttingDown }
     if (message !== undefined && message !== null) params.message = message
+    if (reason !== undefined) params.reason = reason
     return params
+  }
+
+  /** Tells every attached phone this disconnect is deliberate, and why —
+   *  once: whichever of the app's quit, the model's last emission and the
+   *  listener closing gets here first says it, and the rest are no-ops.
+   *  `message` stays as it always was (only sharing-off has one), so a
+   *  phone that predates `reason` still tells a quit from sharing off. */
+  sayGoodbye(reason: RemoteGoodbyeReason): void {
+    if (this.goodbyeSent) return
+    this.goodbyeSent = true
+    const message = reason === 'sharing-off' ? 'Remote access was turned off.' : undefined
+    this.broadcast(RemoteMethod.hostState, this.hostStateParams(false, true, message, reason) as unknown as JSONValue)
   }
 
   sessionClosed(session: RemoteHostSession): void {
@@ -288,6 +311,7 @@ export class RemoteHost implements RemoteHostSessionDelegate {
         return
       }
       this.adopt(wss)
+      this.goodbyeSent = false
       this.enabled = true
       this.advertise()
       this.publishState()
@@ -418,7 +442,7 @@ export class RemoteHost implements RemoteHostSessionDelegate {
     })
   }
 
-  private stop(): void {
+  private stop(reason: RemoteGoodbyeReason = 'sharing-off'): void {
     // Whatever start is still opening a listener is overtaken.
     this.listenGeneration++
     this.starting = null
@@ -427,12 +451,9 @@ export class RemoteHost implements RemoteHostSessionDelegate {
       return
     }
     // Tell attached phones this is deliberate before dropping them, so they
-    // show "sharing was turned off" instead of retrying against what looks
-    // like a flaky network.
-    this.broadcast(
-      RemoteMethod.hostState,
-      this.hostStateParams(false, true, 'Remote access was turned off.') as unknown as JSONValue
-    )
+    // show "sharing was turned off" (or "Spettro quit") instead of retrying
+    // against what looks like a flaky network.
+    this.sayGoodbye(reason)
     for (const session of this.sessions) session.close()
     this.sessions = []
     this.connectedDeviceIds.clear()
@@ -574,9 +595,13 @@ export class RemoteHost implements RemoteHostSessionDelegate {
     }
   }
 
-  /** Quitting: phones are told goodbye and the listener closed. */
-  shutdown(): void {
-    this.stop()
+  /** Quitting: phones are told goodbye and the listener closed. `restart`
+   *  when the app is quitting to install an update. */
+  shutdown(reason: RemoteGoodbyeReason = 'quit'): void {
+    // Said here as well as in stop(): stop() says nothing for a host that
+    // isn't listening, and a phone it took on is still owed one.
+    this.sayGoodbye(reason)
+    this.stop(reason)
     for (const [event, listener] of this.bridgeListeners) {
       this.bridge.events.off(event, listener as (...args: unknown[]) => void)
     }
@@ -661,6 +686,14 @@ export class RemoteHost implements RemoteHostSessionDelegate {
     })
 
     on('host-state', (state: { agentReady: boolean; shuttingDown: boolean; message?: string }) => {
+      // The model's last word as the app quits. A no-op when the app
+      // already said goodbye (with 'restart', for an update).
+      if (state.shuttingDown) {
+        this.sayGoodbye('quit')
+        return
+      }
+      // After the goodbye, the agent being torn down isn't news.
+      if (this.goodbyeSent) return
       const params = this.hostStateParams(state.agentReady, state.shuttingDown, state.message)
       this.broadcast(RemoteMethod.hostState, params as unknown as JSONValue)
     })

@@ -297,12 +297,104 @@ describe('the handshake', () => {
     expect(socket.notifications(RemoteMethod.hostState)).toHaveLength(0)
   })
 
-  it('says goodbye with the agent down and nothing more', async () => {
+  it('says goodbye with the agent down, and says why', async () => {
     makeHost()
     const socket = await attached()
     bridge.events.emit('host-state', { agentReady: false, shuttingDown: true })
     const goodbye = socket.notifications(RemoteMethod.hostState).at(-1)?.params as Frame
-    expect(goodbye).toEqual({ agentReady: false, shuttingDown: true })
+    expect(goodbye).toEqual({ agentReady: false, shuttingDown: true, reason: 'quit' })
+  })
+})
+
+describe('goodbye', () => {
+  /** A host listening on a loopback port of the OS's choosing, advertising
+   *  nothing. */
+  async function listeningHost(): Promise<RemoteHost> {
+    bridge = fakeBridge()
+    host = new RemoteHost(bridge, { dataDir: dir, onStateChanged: () => undefined })
+    const internals = host as unknown as {
+      advertiser: { start(): void; stop(): void }
+      listen(port: number): Promise<WebSocketServer>
+    }
+    internals.advertiser = { start: () => undefined, stop: () => undefined }
+    internals.listen = () =>
+      new Promise((resolve) => {
+        const wss = new WebSocketServer({ port: 0, host: '127.0.0.1' })
+        wss.once('listening', () => resolve(wss))
+      })
+    await host.setEnabled(true)
+    return host
+  }
+
+  const goodbyes = (socket: FakeSocket): Frame[] =>
+    socket
+      .notifications(RemoteMethod.hostState)
+      .map((f) => f.params as Frame)
+      .filter((p) => p.shuttingDown === true)
+
+  it('is announced as goodbyeReason in hello and the auth result', async () => {
+    makeHost()
+    const socket = await attached()
+    expect((socket.notifications(RemoteMethod.hello)[0].params as Frame).features).toContain(
+      RemoteFeature.goodbyeReason
+    )
+    expect((socket.reply(1)?.result as Frame).features).toContain(RemoteFeature.goodbyeReason)
+  })
+
+  it('is said once when the app quits, with no message', async () => {
+    await listeningHost()
+    const socket = await attached()
+    // What quitting does: the model's last emission, then the host's own.
+    bridge.events.emit('host-state', { agentReady: false, shuttingDown: true })
+    host.shutdown()
+    expect(goodbyes(socket)).toEqual([{ agentReady: false, shuttingDown: true, reason: 'quit' }])
+    expect(socket.closed).toBe(true)
+  })
+
+  it('says restarting when the app quits to install an update', async () => {
+    await listeningHost()
+    const socket = await attached()
+    // index.ts's order: the host first, then the model, then the host again.
+    host.sayGoodbye('restart')
+    bridge.events.emit('host-state', { agentReady: false, shuttingDown: true })
+    host.shutdown('restart')
+    expect(goodbyes(socket)).toEqual([{ agentReady: false, shuttingDown: true, reason: 'restart' }])
+  })
+
+  it('says sharing was turned off, with the words an older phone goes by', async () => {
+    await listeningHost()
+    const socket = await attached()
+    await host.setEnabled(false)
+    expect(goodbyes(socket)).toEqual([
+      { agentReady: false, shuttingDown: true, reason: 'sharing-off', message: 'Remote access was turned off.' }
+    ])
+  })
+
+  it('is said again after sharing comes back on', async () => {
+    await listeningHost()
+    const first = await attached('phone-1')
+    await host.setEnabled(false)
+    await host.setEnabled(true)
+    const second = await attached('phone-2')
+    host.shutdown()
+    expect(goodbyes(first)).toHaveLength(1)
+    expect(goodbyes(second)).toEqual([{ agentReady: false, shuttingDown: true, reason: 'quit' }])
+  })
+
+  it('reaches a phone on a host that isn’t listening', async () => {
+    makeHost()
+    const socket = await attached()
+    host.shutdown()
+    expect(goodbyes(socket)).toEqual([{ agentReady: false, shuttingDown: true, reason: 'quit' }])
+  })
+
+  it('is the last host/state: the agent going down after it isn’t sent', async () => {
+    makeHost()
+    const socket = await attached()
+    const before = socket.notifications(RemoteMethod.hostState).length
+    host.sayGoodbye('quit')
+    bridge.events.emit('host-state', { agentReady: false, shuttingDown: false })
+    expect(socket.notifications(RemoteMethod.hostState)).toHaveLength(before + 1)
   })
 })
 

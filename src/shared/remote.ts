@@ -59,7 +59,10 @@ export const RemoteFeature = {
   snapshotV2: 'snapshotV2',
   /** devices/unpair: a phone that forgets this computer takes itself off
    *  its paired devices. */
-  unpair: 'unpair'
+  unpair: 'unpair',
+  /** One goodbye per shutdown, with `reason` on it; `message` only for
+   *  sharing-off (see RemoteHostStateParams). */
+  goodbyeReason: 'goodbyeReason'
 } as const
 
 export type RemoteFeatureName = (typeof RemoteFeature)[keyof typeof RemoteFeature]
@@ -73,7 +76,8 @@ export const REMOTE_HOST_FEATURES: readonly RemoteFeatureName[] = [
   RemoteFeature.rename,
   RemoteFeature.projectFiles,
   RemoteFeature.snapshotV2,
-  RemoteFeature.unpair
+  RemoteFeature.unpair,
+  RemoteFeature.goodbyeReason
 ]
 
 /** Bonjour service type ("_spettro-remote._tcp" on the wire; bonjour-service
@@ -328,10 +332,19 @@ export interface RemoteChatStateParams {
   notice?: RemoteNoticeWire
 }
 
+/** Why a host said goodbye: the app quit, it quit to install an update
+ *  (it'll be back), or the user switched sharing off. */
+export type RemoteGoodbyeReason = 'quit' | 'sharing-off' | 'restart'
+
+/** A goodbye is `shuttingDown: true`. A host with `goodbyeReason` sends
+ *  exactly one per shutdown, with `reason` on it; `message` is there only
+ *  for sharing-off, which is all an older phone goes by. */
 export interface RemoteHostStateParams {
   agentReady: boolean
   shuttingDown: boolean
   message?: string
+  /** Only on a goodbye, and only from a host with `goodbyeReason`. */
+  reason?: RemoteGoodbyeReason
 }
 
 // ---------------------------------------------------------------------------

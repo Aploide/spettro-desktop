@@ -12,7 +12,7 @@
 //   (none)    the toolbar chips and the composer's glow
 //   thinking  the slider in every state it can be in, and its chip
 //   meteor    the meteor frozen at points of its flight, from Max and from
-//             Low; `&meteorProgress=0.3` (and `&meteorFrom=<stop>`) freezes
+//             Off; `&meteorProgress=0.3` (and `&meteorFrom=<stop>`) freezes
 //             one frame instead
 //   smoulder  lit Ultra at rest, frozen at moments of its idle fire;
 //             `&idleTime=1.5` freezes one frame instead
@@ -48,7 +48,12 @@ interface Options {
   ultra: boolean
   size?: string
   thinking?: string
+  /** The thinking levels the CLI lists; all six (Off first) when unset. */
+  levels?: string[]
 }
+
+/** The levels a CLI that doesn't list Off offers. */
+const NO_OFF = ['low', 'medium', 'high', 'x-high', 'max']
 
 function options(o: Options): ACPConfigOption[] {
   return [
@@ -109,7 +114,7 @@ function options(o: Options): ACPConfigOption[] {
           { value: 'high', name: 'High' },
           { value: 'x-high', name: 'X-High' },
           { value: 'max', name: 'Max' }
-        ]
+        ].filter((c) => !o.levels || o.levels.includes(c.value))
       }
     },
     {
@@ -326,7 +331,12 @@ function ThinkingPage(): JSX.Element {
         <Panel label="Ultra, settled (lit)" o={{ permission: 'yolo', ultra: true }} idleTime={1.2} />
         <Panel label="Ultra paused — Ask first" o={{ permission: 'ask-first', ultra: true }} />
         <Panel label="Extra high" o={{ permission: 'yolo', ultra: false, thinking: 'x-high' }} />
-        <Panel label="Off (set elsewhere)" o={{ permission: 'yolo', ultra: false, thinking: 'off' }} />
+        <Panel label="Off" o={{ permission: 'yolo', ultra: false, thinking: 'off' }} />
+        <Panel label="Low" o={{ permission: 'yolo', ultra: false, thinking: 'low' }} />
+        <Panel
+          label="Off, not on the CLI’s list"
+          o={{ permission: 'yolo', ultra: false, thinking: 'off', levels: NO_OFF }}
+        />
         <Panel
           label="A model that doesn’t reason"
           o={{ permission: 'yolo', ultra: false }}
@@ -345,7 +355,7 @@ function ThinkingPage(): JSX.Element {
   )
 }
 
-// Through the flight, the impact (from Max at ~0.4, from Low at ~0.57) and
+// Through the flight, the impact (from Max at ~0.4, from Off at ~0.57) and
 // the cooling.
 const FRAMES = [0.05, 0.15, 0.25, 0.35, 0.44, 0.5, 0.55, 0.6, 0.66, 0.75, 0.85, 0.95]
 
@@ -374,7 +384,7 @@ function MeteorPage(): JSX.Element {
       </div>
       <div className="hz-panels">
         {FRAMES.map((p) => (
-          <Panel key={p} label={`From Low · ${p}`} o={lit} meteorProgress={p} meteorFrom={0} />
+          <Panel key={p} label={`From Off · ${p}`} o={lit} meteorProgress={p} meteorFrom={0} />
         ))}
       </div>
     </div>

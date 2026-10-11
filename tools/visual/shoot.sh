@@ -86,6 +86,7 @@ SCENES=(
   app:settings-permissions
   app:settings-memory
   app:settings-remote
+  app:remote-unpaired
   app:settings-updates
   app:settings-advanced
   app:settings-shortcuts

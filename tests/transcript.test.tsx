@@ -375,6 +375,12 @@ describe('the run ticker’s token count', () => {
     expect(tokens()).toBe('700 tokens')
   })
 
+  it('counts a first update that arrives with the run’s start', () => {
+    const view = render(<RunTicker chat={chat(false, 9_800)} />)
+    view.rerender(<RunTicker chat={chat(true, 1_200)} />)
+    expect(tokens()).toBe('1.2k tokens')
+  })
+
   it('shows a chat opened mid-run nothing until its next update', () => {
     const view = render(<RunTicker chat={chat(true, 9_800)} />)
     expect(tokens()).toBeNull()

@@ -89,15 +89,16 @@ export function RunTicker({ chat }: { chat: ChatDetail }): JSX.Element | null {
   // This run has sent an update (kept beside the state so the effect below
   // sees a reset made earlier in the same commit).
   const updated = useRef(false)
-  // Read the latest count inside the busy-transition effect without
-  // re-arming it on every usage update.
-  const tokensRef = useRef(tokensUsed)
-  tokensRef.current = tokensUsed
+  // The count the chat held before this run: taken only while idle (or
+  // when the chat changes), so a run's first update that arrives in the
+  // same render as its start isn't taken for the count it started from.
+  const idle = useRef({ chatId: chat.id, tokens: tokensUsed })
+  if (!busy || idle.current.chatId !== chat.id) idle.current = { chatId: chat.id, tokens: tokensUsed }
   const busyRef = useRef(busy)
   busyRef.current = busy
 
   useEffect(() => {
-    tokensAtStart.current = tokensRef.current
+    tokensAtStart.current = idle.current.tokens
     updated.current = false
     setRunTokens(null)
     setStartedAt(busy ? Date.now() : null)

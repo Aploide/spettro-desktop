@@ -993,14 +993,17 @@ describe('the Off stop, by pointer', () => {
     expect(calls).toEqual([['setSelectOption', ['chat-1', 'thinking', 'off']]])
   })
 
-  it('a drag from Low to Off follows the hand, onto the empty bar', () => {
+  it('a drag from Low to Off follows the hand, onto the empty bar, and sends Off on release', async () => {
     render(<ThinkingSlider chat={chat(options({ thinking: 'low', ultra: false }))} />)
     pointerDown(50)
     pointerMove(0)
     expect(root().classList.contains('thinking-slider--tracking')).toBe(true)
     expect(thumbLeft()).toBe('0%')
     expect(root().classList.contains('thinking-slider--off')).toBe(true)
+    expect(calls).toEqual([])
     pointerUp()
+    await settle()
+    expect(calls).toEqual([['setSelectOption', ['chat-1', 'thinking', 'off']]])
   })
 
   it('a press in the left end cap, short of the rail, clamps to Off', async () => {
@@ -1009,6 +1012,26 @@ describe('the Off stop, by pointer', () => {
     pointerUp()
     await settle()
     expect(calls).toEqual([['setSelectOption', ['chat-1', 'thinking', 'off']]])
+  })
+
+  it('a CLI that offers only Off: one stop, the knob at the start, nowhere to go', async () => {
+    const onlyOff = options({ thinking: 'off', ultra: false, levels: ['off'] }).filter((o) => o.id !== 'ultra')
+    render(<ThinkingSlider chat={chat(onlyOff)} />)
+    expect(slider().getAttribute('aria-valuemin')).toBe('0')
+    expect(slider().getAttribute('aria-valuemax')).toBe('0')
+    expect(slider().getAttribute('aria-valuenow')).toBe('0')
+    expect(slider().getAttribute('aria-valuetext')).toBe('Off')
+    expect(thumbLeft()).toBe('0%')
+    expect(root().classList.contains('thinking-slider--off')).toBe(true)
+    for (const key of ['ArrowRight', 'ArrowUp', 'End', 'ArrowLeft', 'Home']) {
+      fireEvent.keyDown(slider(), { key })
+      fireEvent.keyUp(slider(), { key })
+    }
+    pointerDown(RAIL)
+    pointerUp()
+    await settle()
+    expect(thumbLeft()).toBe('0%')
+    expect(calls).toEqual([])
   })
 })
 

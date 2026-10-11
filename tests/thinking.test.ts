@@ -121,6 +121,14 @@ describe('where the thumb sits', () => {
     expect(isOff(state)).toBe(true)
   })
 
+  it('is a single Off stop when the CLI offers only off and no ultra', () => {
+    const state = thinkingState([thinking('off', ['off'])])!
+    expect(state.stops.map((s) => s.id)).toEqual(['off'])
+    expect(state.index).toBe(0)
+    expect(state.label).toBe('Off')
+    expect(isOff(state)).toBe(true)
+  })
+
   it('offers every level, Off included, when the CLI lists none', () => {
     // The fallback stands in for the CLI's own list, which always has Off.
     const state = thinkingState([thinking('high', [])])

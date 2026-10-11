@@ -114,8 +114,10 @@ export function signalFor(entry: LogEntry): LogSignal | null {
 
   // The edge turned the connector away. The permanent reasons — the tunnel
   // was deleted, or its token rotated — won't get better by retrying.
+  // "Failed to get tunnel" is the edge finding no such tunnel for the
+  // account: a deleted one, or a token for a tunnel that never existed.
   if (message === 'Register tunnel error from server side') {
-    if (/unauthori[sz]ed|invalid tunnel secret|tunnel not found|tunnel.*deleted|forbidden/i.test(error)) {
+    if (/unauthori[sz]ed|invalid tunnel secret|tunnel not found|tunnel.*deleted|forbidden|failed to get tunnel/i.test(error)) {
       return { kind: 'fatal', fatal: 'unauthorized', message: error }
     }
     return { kind: 'network', message: error || message }

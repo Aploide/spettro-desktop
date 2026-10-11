@@ -89,6 +89,10 @@ describe('reading the log', () => {
     expect(signal(LINES.retrying)).toEqual({ kind: 'retrying' })
     expect(signal(LINES.dialFailed)).toMatchObject({ kind: 'network' })
     expect(signal(LINES.serverRefused)).toMatchObject({ kind: 'fatal', fatal: 'unauthorized' })
+    // What the edge says, live, to a well-formed token for a tunnel it has no record of.
+    expect(
+      signal(json('Register tunnel error from server side', { connIndex: 0, error: 'Failed to get tunnel', ip: '2606:4700:a0::5' }, 'error'))
+    ).toMatchObject({ kind: 'fatal', fatal: 'unauthorized' })
     expect(signal(json('Register tunnel error from server side', { error: 'server busy, try again' }, 'error'))).toMatchObject({
       kind: 'network'
     })

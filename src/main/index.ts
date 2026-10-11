@@ -13,6 +13,7 @@ import { installAppMenu } from './menu'
 import { AppModel } from './model/appModel'
 import { buildRemoteBridge } from './model/remoteBridge'
 import { RemoteHost } from './remote/host'
+import { cleanUpLegacyTunnel } from './remote/legacyTunnelCleanup'
 import { TerminalManager } from './terminal/panels'
 
 let mainWindow: BrowserWindow | null = null
@@ -126,6 +127,15 @@ app.whenReady().then(() => {
   installAppMenu((command) => pushToWindow({ type: 'menu', command }))
 
   terminals = new TerminalManager(pushToWindow)
+  // Remote access is for the local network only now: what builds with the
+  // internet tunnel left in userData (its settings, Spettro's own
+  // cloudflared) goes, quietly.
+  try {
+    const removed = cleanUpLegacyTunnel(userDataDir)
+    if (removed.length > 0) console.log(`[remote] removed ${removed.length} file(s) the internet tunnel left behind`)
+  } catch {
+    // best-effort
+  }
   remoteHost = new RemoteHost(buildRemoteBridge(model), {
     dataDir: userDataDir,
     onStateChanged: (state) => model?.setRemoteState(state),

@@ -95,7 +95,8 @@ phone knows what it may rely on:
 | `goodbyeReason` | the goodbye `host/state` carries `reason`, and there is exactly one per shutdown |
 
 A phone's first `host/state` follows the auth reply, never the other way
-round.
+round. Workflow Studio's scratch chats never reach a phone, nor does a
+removed chat's late `chat/state` (`remoteBridge.ts`).
 
 Goodbye: one `host/state {agentReady: false, shuttingDown: true, reason}`
 per shutdown, and no `host/state` after it. `reason` is `quit`, `restart`
@@ -103,8 +104,7 @@ per shutdown, and no `host/state` after it. `reason` is `quit`, `restart`
 callback) or `sharing-off`. Only sharing-off has a `message` ("Remote
 access was turned off."), which is all an older phone goes by to tell it
 from a quit. The app says goodbye before the model shuts down, so the
-model's own shutdown emission finds it said. Workflow Studio's scratch chats never reach a phone, nor does a
-removed chat's late `chat/state` (`remoteBridge.ts`).
+model's own shutdown emission finds it said.
 
 ## Who gets in
 

@@ -153,6 +153,11 @@ describe('the slider', () => {
     expect(carrier?.style.getPropertyValue('--f')).toBe('0')
     expect(carrier?.style.getPropertyValue('--off')).toBe('0px')
     expect(container.querySelector('.thinking-label--current')?.textContent).toBe('Off')
+    const root = container.querySelector('.thinking-slider') as Element
+    expect(root.classList.contains('thinking-slider--off')).toBe(true)
+    expect(root.classList.contains('thinking-slider--unset')).toBe(false)
+    // Nothing is filled, so no stop is passed — not even Off's own.
+    expect(container.querySelector('.thinking-tick--passed')).toBeNull()
     expect(container.querySelector('.thinking-caption')?.textContent).toBe(OFF_CAPTION)
     cleanup()
     render(<ThinkingChip chat={chat(options({ thinking: 'off', ultra: false }))} />)
@@ -276,6 +281,7 @@ describe('the slider', () => {
     // Not on the Low tick (0%): the label and the thumb agree.
     const carrier = container.querySelector<HTMLElement>('.thinking-carrier')
     expect(carrier?.style.getPropertyValue('--off')).toBe('-14px')
+    expect(container.querySelector('.thinking-slider')?.classList.contains('thinking-slider--unset')).toBe(true)
     expect(container.querySelector('.thinking-label--current')).toBeNull()
     expect(slider().getAttribute('aria-valuetext')).toBe('Off')
     expect(slider().getAttribute('aria-valuenow')).toBe('0')
@@ -411,7 +417,13 @@ describe('the Ultra stop', () => {
     expect(document.querySelector('.thinking-meteor')).not.toBeNull()
     const root = document.querySelector('.thinking-slider') as Element
     expect(root.classList.contains('thinking-slider--flying')).toBe(true)
+    // The fill waits, empty, at Off for the streak.
+    expect(root.classList.contains('thinking-slider--off')).toBe(true)
     expect((document.querySelector('.thinking-fill') as HTMLElement).style.getPropertyValue('--f')).toBe('0')
+    const passed = [...document.querySelectorAll('.thinking-tick')].map((t) =>
+      t.classList.contains('thinking-tick--passed')
+    )
+    expect(passed).toEqual([false, false, false, false, false, false, false])
     await settle()
     expect(calls).toEqual([['setSelectOption', ['chat-1', 'thinking', 'high']]])
     holding = false
@@ -981,12 +993,13 @@ describe('the Off stop, by pointer', () => {
     expect(calls).toEqual([['setSelectOption', ['chat-1', 'thinking', 'off']]])
   })
 
-  it('a drag from Low to Off follows the hand', () => {
+  it('a drag from Low to Off follows the hand, onto the empty bar', () => {
     render(<ThinkingSlider chat={chat(options({ thinking: 'low', ultra: false }))} />)
     pointerDown(50)
     pointerMove(0)
     expect(root().classList.contains('thinking-slider--tracking')).toBe(true)
     expect(thumbLeft()).toBe('0%')
+    expect(root().classList.contains('thinking-slider--off')).toBe(true)
     pointerUp()
   })
 

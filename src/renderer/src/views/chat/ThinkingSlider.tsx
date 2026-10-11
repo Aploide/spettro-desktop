@@ -1,4 +1,4 @@
-// The thinking slider: how hard the model thinks, from Low to Max, and one
+// The thinking slider: how hard the model thinks, from Off to Max, and one
 // stop past Max — Ultra, where substantial tasks run as multi-agent
 // workflows. It replaces both the thinking menu and the Ultra toggle: two
 // controls for what users experience as one dial ("how much effort").
@@ -30,6 +30,7 @@ import Popover from '@renderer/views/common/Popover'
 import { drawEmbers, planEmbers } from './embers'
 import { drawMeteor, meteorTiming, planMeteor, readPalette } from './meteor'
 import {
+  OFF,
   OFF_CAPTION,
   PERMISSION_ID,
   RESTRICTED,
@@ -211,6 +212,9 @@ export default function ThinkingSlider({
   // far end if the CLI refused the move mid-flight.
   const at = flight && !landed ? flight.from : shown
   const fillFrac = frac(at)
+  // Off — the stop, or an unset level — fills nothing. It follows `at`, the
+  // stop the fill and thumb are drawn at: in flight, where the meteor left.
+  const atOff = at < 0 || stops[at]?.id === OFF
   // Lit and settled on Ultra, with nothing else moving: the bar smoulders —
   // for as long as someone could be looking at it.
   const smoulder =
@@ -325,7 +329,8 @@ export default function ThinkingSlider({
   const className =
     'thinking-slider' +
     (shownStop?.ultra ? (showPaused ? ' thinking-slider--paused' : ' thinking-slider--ultra') : '') +
-    (shown < 0 ? ' thinking-slider--off' : '') +
+    (atOff ? ' thinking-slider--off' : '') +
+    (at < 0 ? ' thinking-slider--unset' : '') +
     (disabled ? ' thinking-slider--disabled' : '') +
     (drag !== null ? ' thinking-slider--dragging' : '') +
     (drag?.moved ? ' thinking-slider--tracking' : '') +
@@ -367,7 +372,7 @@ export default function ThinkingSlider({
         onKeyDown={onKeyDown}
         onKeyUp={onKeyUp}
       >
-        {/* The rail is the stops' line, Low to Ultra; the bar is drawn round
+        {/* The rail is the stops' line, Off to Ultra; the bar is drawn round
             it, half its height further at each end, so every stop sits
             inside the pill. Positions in the bar are shares of the rail
             (--f), offset by that end cap. */}
@@ -387,7 +392,8 @@ export default function ThinkingSlider({
                 // Lit where the fill is: in flight, the ticks ahead of the head
                 // wait for the streak (which covers them as it passes).
                 className={
-                  'thinking-tick' + (i <= shown && frac(i) <= fillFrac ? ' thinking-tick--passed' : '')
+                  'thinking-tick' +
+                  (i <= shown && frac(i) <= fillFrac && !atOff ? ' thinking-tick--passed' : '')
                 }
                 style={{ '--f': frac(i) } as CSSProperties}
               />
@@ -405,10 +411,11 @@ export default function ThinkingSlider({
               />
             )}
           </div>
-          {/* Off is not a stop: its hollow thumb waits short of Low, so the
-              slider never looks as if it were on Low while saying Off. The
-              carrier slides the thumb along the rail by a transform, so a
-              move is the compositor's alone (thinkingSlider.css). */}
+          {/* An unset level's hollow thumb waits short of the first stop, so
+              the slider never looks as if it were on a stop while saying
+              Off. The carrier slides the thumb along the rail by a
+              transform, so a move is the compositor's alone
+              (thinkingSlider.css). */}
           <span
             className="thinking-carrier"
             style={{ '--f': frac(at), '--off': at < 0 ? OFF_THUMB : '0px' } as CSSProperties}

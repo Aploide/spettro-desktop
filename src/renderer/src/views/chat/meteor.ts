@@ -369,11 +369,12 @@ export function drawMeteor(
   // The streak as fill: the slider's bar, burnt in from where its fill stood
   // to the head, white-hot at the head and cooling back to ember. Painted,
   // not added, so it is the bar itself rather than light on it: its whole
-  // height, which the bar's pill clips round at the ends. Set out from Low,
-  // it burns Low's end cap too; set out from further along, the tail that
-  // reaches back over the fill already there fades in from nothing, so the
-  // accent turns to fire rather than being cut off by it. After
-  // impact the real fill is under it and it fades away.
+  // height, which the bar's pill clips round at the ends. Set out from the
+  // first stop (Off, or Low when the CLI lists no Off), it burns the end cap
+  // too; set out from further along, the tail that reaches back over the
+  // fill already there fades in from nothing, so the accent turns to fire
+  // rather than being cut off by it. After impact the real fill is under it
+  // and it fades away.
   const barAlpha = landed ? 1 - clamp01(since / 0.22) : 1
   const fromLow = Math.abs(run.fillX - (dir > 0 ? run.railLeft : run.railRight)) < 1
   const barEnd = dir > 0 ? run.railLeft - h / 2 : run.railRight + h / 2

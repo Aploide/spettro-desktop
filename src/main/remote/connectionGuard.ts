@@ -42,11 +42,6 @@ export const CLOSE_TRY_AGAIN_LATER = 1013
 /** Headers a Cloudflare tunnel adds to every request it relays. */
 const PROXY_HEADERS = ['cf-warp-tag-id', 'cf-connecting-ip'] as const
 
-export function isLoopback(address: string | undefined): boolean {
-  if (!address) return false
-  return /^127\./.test(address) || address === '::1' || /^::ffff:127\./i.test(address)
-}
-
 /** An address as compared here: no IPv4-mapped prefix, no zone, lowercase. */
 export function plainAddress(address: string): string {
   return address.replace(/^::ffff:(?=\d+\.\d+\.\d+\.\d+$)/i, '').replace(/%.*$/, '').toLowerCase()

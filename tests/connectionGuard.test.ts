@@ -4,7 +4,6 @@
 import { describe, expect, it } from 'vitest'
 import {
   FailedAuthLimiter,
-  isLoopback,
   isProxiedConnection,
   peerKey,
   plainAddress,
@@ -12,11 +11,6 @@ import {
 } from '@main/remote/connectionGuard'
 
 describe('addresses', () => {
-  it('knows loopback in all its spellings', () => {
-    for (const address of ['127.0.0.1', '127.1.2.3', '::1', '::ffff:127.0.0.1']) expect(isLoopback(address)).toBe(true)
-    for (const address of ['192.168.1.20', '::ffff:192.168.1.20', 'fe80::1', undefined]) expect(isLoopback(address)).toBe(false)
-  })
-
   it('spells an address one way: no mapped prefix, no zone, lowercase', () => {
     expect(plainAddress('::ffff:192.168.1.20')).toBe('192.168.1.20')
     expect(plainAddress('FE80::1C2B%wlan0')).toBe('fe80::1c2b')

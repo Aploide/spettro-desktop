@@ -184,30 +184,6 @@ export function registerIpc(
       remoteHost.renameHost(name)
       refreshRemoteState()
     },
-    remoteTunnelSetEnabled: async (enabled) => {
-      await remoteHost.setTunnelEnabled(enabled === true)
-      refreshRemoteState()
-    },
-    // The token goes one way: in here, then to cloudflared's environment.
-    // Nothing returns it, and it is never logged.
-    remoteTunnelConfigure: async (patch) => {
-      const result = await remoteHost.configureTunnel(typeof patch === 'object' && patch !== null ? patch : {})
-      refreshRemoteState()
-      return result
-    },
-    remoteTunnelForgetToken: async () => {
-      remoteHost.forgetTunnelToken()
-      refreshRemoteState()
-    },
-    remoteTunnelRetry: async () => {
-      await remoteHost.retryTunnel()
-      refreshRemoteState()
-    },
-    remoteTunnelInstallCloudflared: async () => {
-      await remoteHost.installCloudflared()
-      refreshRemoteState()
-    },
-    remoteTunnelCheck: async () => remoteHost.checkTunnel(),
 
     // -- Account / providers / models (the `_spettro/*` surface) ------------
     // Each of these refreshes the affected store, and every store change

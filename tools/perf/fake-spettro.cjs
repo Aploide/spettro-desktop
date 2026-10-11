@@ -32,6 +32,17 @@
 //                           false): Ultra lights only outside Ask first
 //
 // A prompt may carry overrides in its text: "perf:tokens=500 perf:tools=4".
+//
+// For end-to-end runs (a phone paired to the app, say) a prompt may also ask
+// for the CLI's interactive moments, scripted:
+//   e2e:permission   an Edit asks first (session/request_permission: Allow
+//                    once / Always allow / Deny); the turn waits for the
+//                    answer, then the edit completes or is shown denied
+//   e2e:question     the agent asks a two-question form (_spettro/question/ask)
+//                    and the turn waits, then says what was answered
+// And a prompt sent while a turn runs steers it the way bridge.go
+// steerRunningTurn does: "→ steering queued" at once (the steer's own prompt
+// ends there), "✔ steering delivered" a few updates later in the turn.
 
 'use strict'
 
@@ -98,6 +109,16 @@ const respond = (id, result) => write({ jsonrpc: '2.0', id, result })
 const respondError = (id, code, message, data) =>
   write({ jsonrpc: '2.0', id, error: data === undefined ? { code, message } : { code, message, data } })
 const update = (sessionId, upd) => write({ jsonrpc: '2.0', method: 'session/update', params: { sessionId, update: upd } })
+
+/** Requests to the client (permission, question), answered by id. */
+let outSeq = 0
+const outgoing = new Map() // id → (message) => void
+function request(method, params, onReply) {
+  const id = `fake-${++outSeq}`
+  outgoing.set(id, onReply)
+  log({ dir: 'out', method, id })
+  write({ jsonrpc: '2.0', id, method, params })
+}
 
 // ------------------------------------------------------------- shared state
 
@@ -274,7 +295,102 @@ function buildTurn(seed, opts) {
   talk()
   for (; tokenAt < tokens.length; tokenAt++) sid({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: tokens[tokenAt] } })
   plan(planEntries.length)
+  // The scripted asks come a little way into the turn, after some talk.
+  const at = Math.min(out.length, 1 + opts.thoughts + 12)
+  const asks = []
+  if (opts.permission) asks.push({ ask: 'permission', seed })
+  if (opts.question) asks.push({ ask: 'question', seed })
+  out.splice(at, 0, ...asks)
   return out
+}
+
+/** The edit that asks first: its pending card and the request for it. */
+function permissionAsk(session, seed, done) {
+  const id = `call-e2e-${seed}-perm`
+  const file = 'src/main/model/sessionStore.ts'
+  const abs = `${session.cwd || '/tmp/perf/project'}/${file}`
+  const oldText = 'export function persist(chats) {\n  writeFileSync(path, JSON.stringify(chats))\n}\n'
+  const newText = 'export function persist(chats) {\n  schedulePersist(chats)\n}\n'
+  update(session.id, { sessionUpdate: 'tool_call', toolCallId: id, title: `Edit ${file}`, kind: 'edit', status: 'pending', locations: [{ path: abs }], rawInput: { path: file, old_string: 'writeFileSync', new_string: 'schedulePersist' } })
+  request(
+    'session/request_permission',
+    {
+      sessionId: session.id,
+      toolCall: { toolCallId: id, status: 'pending', content: [{ type: 'diff', path: abs, oldText, newText }] },
+      options: [
+        { optionId: 'allow-once', name: 'Allow once', kind: 'allow_once' },
+        { optionId: 'allow-always', name: 'Always allow edits', kind: 'allow_always' },
+        { optionId: 'deny', name: 'Deny', kind: 'reject_once' }
+      ]
+    },
+    (msg) => {
+      const chosen = msg.result?.outcome?.optionId ?? msg.result?.outcome?.outcome ?? 'error'
+      log({ event: 'permission-answer', session: session.id, chosen })
+      if (chosen === 'allow-once' || chosen === 'allow-always') {
+        update(session.id, { sessionUpdate: 'tool_call_update', toolCallId: id, status: 'completed', content: [{ type: 'diff', path: abs, oldText, newText }], rawOutput: { output: `Edited ${file}` }, locations: [{ path: abs }] })
+        update(session.id, { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: `\n\nEdited \`${file}\` (you chose ${chosen}).\n\n` } })
+      } else {
+        update(session.id, { sessionUpdate: 'tool_call_update', toolCallId: id, status: 'failed', content: [{ type: 'content', content: { type: 'text', text: 'The user denied this edit.' } }], rawOutput: { output: 'denied', denied: true } })
+        update(session.id, { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: `\n\nLeft \`${file}\` alone (${chosen}).\n\n` } })
+      }
+      done()
+    }
+  )
+}
+
+/** The two-question form (question_form.go formPayload, v2). */
+function questionAsk(session, seed, done) {
+  const questions = [
+    {
+      id: 'q-0',
+      header: 'Storage',
+      question: 'Where should the chats be saved?',
+      options: [
+        { id: 'opt-0', label: 'One file', description: 'sessions.json, as today', isRecommended: true },
+        { id: 'opt-1', label: 'A file per chat', description: 'Smaller writes, more files' }
+      ],
+      multiSelect: false,
+      allowCustomInput: true
+    },
+    {
+      id: 'q-1',
+      header: 'Tests',
+      question: 'Which tests should I run afterwards?',
+      options: [
+        { id: 'opt-0', label: 'Unit' },
+        { id: 'opt-1', label: 'Typecheck' },
+        { id: 'opt-2', label: 'End to end' }
+      ],
+      multiSelect: true,
+      allowCustomInput: false
+    }
+  ]
+  const first = questions[0]
+  request(
+    '_spettro/question/ask',
+    {
+      sessionId: session.id,
+      version: 2,
+      header: first.header,
+      question: first.question,
+      options: first.options,
+      multiSelect: first.multiSelect,
+      allowCustomInput: first.allowCustomInput,
+      context: 'Before I change how chats are stored',
+      questions
+    },
+    (msg) => {
+      const answers = msg.result?.answers
+      log({ event: 'question-answer', session: session.id, answers: answers ?? msg.result ?? msg.error })
+      const said = Array.isArray(answers)
+        ? answers
+            .map((a) => `${a.header || a.questionId}: ${a.kind === 'text' ? a.text : (a.optionIds || [a.optionId]).join(', ')}`)
+            .join('; ')
+        : 'no answer'
+      update(session.id, { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: `\n\nYou answered — ${said}.\n\n` } })
+      done()
+    }
+  )
 }
 
 function promptOverrides(blocks) {
@@ -283,6 +399,8 @@ function promptOverrides(blocks) {
     .join(' ')
   const out = {}
   for (const m of text.matchAll(/perf:(\w+)=(\d+)/g)) out[m[1]] = Number(m[2])
+  if (/\be2e:permission\b/.test(text)) out.permission = true
+  if (/\be2e:question\b/.test(text)) out.question = true
   return out
 }
 
@@ -291,7 +409,7 @@ function runTurn(session, rpcId, blocks) {
   const opts = { ...settings(), ...promptOverrides(blocks) }
   const seed = 1000 + turnSeq++
   const updates = buildTurn(seed, opts)
-  const turn = { cancelled: false, timer: null }
+  const turn = { cancelled: false, timer: null, waiting: false, steers: [] }
   session.turn = turn
   const startBytes = bytesOut
   const t0 = Date.now()
@@ -306,18 +424,53 @@ function runTurn(session, rpcId, blocks) {
       _meta: { 'spettro.app/tokensUsed': 52000 + opts.tokens }
     })
   }
+  // Paced against `t0`; an ask that waited moves it on, so the stream
+  // doesn't burst to catch up afterwards.
+  let t0Pace = t0
+  const ask = (entry) => {
+    turn.waiting = true
+    const resume = () => {
+      turn.waiting = false
+      if (opts.rate > 0) t0Pace = Date.now() - (i / opts.rate) * 1000
+      if (session.turn === turn) pump()
+    }
+    if (entry.ask === 'permission') permissionAsk(session, entry.seed, resume)
+    else questionAsk(session, entry.seed, resume)
+  }
+  const emit = (upd) => {
+    if (upd.ask) {
+      ask(upd)
+      return false
+    }
+    update(session.id, upd)
+    // A steer is read at the agent's next step: a few updates on.
+    for (const st of turn.steers) {
+      if (!st.delivered && --st.left <= 0) {
+        st.delivered = true
+        update(session.id, { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: '✔ steering delivered' } })
+      }
+    }
+    return true
+  }
+  turn.finish = finish
   const pump = () => {
     if (turn.cancelled) return finish('cancelled')
+    if (turn.waiting) return
     if (opts.rate <= 0) {
       // As fast as possible, in slices, so a cancel can still get in.
       const end = Math.min(updates.length, i + 200)
-      for (; i < end; i++) update(session.id, updates[i])
+      for (; i < end; ) if (!emit(updates[i++])) return
     } else {
       // Paced against the clock, so timer jitter doesn't slow the stream.
-      const due = Math.min(updates.length, Math.floor(((Date.now() - t0) / 1000) * opts.rate) + 1)
-      for (; i < due; i++) update(session.id, updates[i])
+      const due = Math.min(updates.length, Math.floor(((Date.now() - t0Pace) / 1000) * opts.rate) + 1)
+      for (; i < due; ) if (!emit(updates[i++])) return
     }
-    if (i >= updates.length) return finish('end_turn')
+    if (i >= updates.length) {
+      for (const st of turn.steers) {
+        if (!st.delivered) update(session.id, { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: '✔ steering delivered' } })
+      }
+      return finish('end_turn')
+    }
     turn.timer = opts.rate <= 0 ? setImmediate(pump) : setTimeout(pump, 4)
   }
   pump()
@@ -371,6 +524,14 @@ function handleRequest(msg) {
     case 'session/prompt': {
       const session = sessions.get(params.sessionId)
       if (!session) return respondError(id, -32603, 'Internal error', { error: 'session not found' })
+      if (session.turn) {
+        // bridge.go steerRunningTurn: queued for the running agent, and
+        // this prompt's own turn is over.
+        session.turn.steers.push({ left: 8, delivered: false })
+        log({ event: 'steer', session: session.id })
+        update(session.id, { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: '→ steering queued: the running agent will see this message at its next step' } })
+        return respond(id, { stopReason: 'end_turn' })
+      }
       return runTurn(session, id, params.prompt)
     }
     case '_spettro/providers/list':
@@ -418,7 +579,11 @@ function handleNotification(msg) {
   log({ dir: 'in', method: msg.method, sessionId: params.sessionId })
   if (msg.method === 'session/cancel') {
     const s = sessions.get(params.sessionId)
-    if (s && s.turn) s.turn.cancelled = true
+    if (s && s.turn) {
+      s.turn.cancelled = true
+      // A turn waiting on an ask has no pump scheduled to notice.
+      if (s.turn.waiting) s.turn.finish('cancelled')
+    }
   }
 }
 
@@ -440,7 +605,12 @@ process.stdin.on('data', (chunk) => {
     }
     if (msg.method !== undefined && msg.id !== undefined) handleRequest(msg)
     else if (msg.method !== undefined) handleNotification(msg)
-    // Responses to requests we never make are ignored.
+    else if (msg.id !== undefined && outgoing.has(msg.id)) {
+      const onReply = outgoing.get(msg.id)
+      outgoing.delete(msg.id)
+      onReply(msg)
+    }
+    // Responses to requests we never made are ignored.
   }
 })
 process.stdin.on('end', () => process.exit(0))

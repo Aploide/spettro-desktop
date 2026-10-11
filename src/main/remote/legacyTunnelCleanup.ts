@@ -17,7 +17,7 @@
 // next launch tries again.
 
 import { lstatSync, readFileSync, readdirSync, rmdirSync, unlinkSync } from 'fs'
-import { join } from 'path'
+import { basename, join } from 'path'
 
 export interface LegacyTunnelCleanupOptions {
   platform?: NodeJS.Platform
@@ -64,6 +64,15 @@ function removeDirIfEmpty(path: string, removed: string[]): void {
   }
 }
 
+/** Whether a NUL-separated /proc cmdline is a cloudflared binary run with
+ *  `configFile` as an argument of its own — not merely naming the file, as
+ *  an editor that opened it would. */
+function isOurCloudflared(cmdline: string, configFile: string): boolean {
+  const argv = cmdline.split('\0').filter((arg) => arg.length > 0)
+  if (argv.length < 2 || basename(argv[0]) !== 'cloudflared') return false
+  return argv.slice(1).includes(configFile)
+}
+
 /** Removes what the tunnel left in `dataDir` (the app's userData folder).
  *  Returns the paths it removed. */
 export function cleanUpLegacyTunnel(dataDir: string, options: LegacyTunnelCleanupOptions = {}): string[] {
@@ -74,8 +83,9 @@ export function cleanUpLegacyTunnel(dataDir: string, options: LegacyTunnelCleanu
   const pidFile = join(dataDir, 'cloudflared.pid')
 
   // A cloudflared the app started and a crash left running is ended first —
-  // on Linux, and only when /proc says that pid is still a cloudflared run
-  // with the app's own config, since pids get reused.
+  // on Linux, and only when /proc says that pid is still a cloudflared
+  // (argv[0]) run with the app's own config file as one of its arguments,
+  // since pids get reused.
   if (isFile(pidFile) && platform === 'linux') {
     try {
       const pid = Number.parseInt(readFileSync(pidFile, 'utf8').trim(), 10)
@@ -90,7 +100,7 @@ export function cleanUpLegacyTunnel(dataDir: string, options: LegacyTunnelCleanu
             }
           })
         const cmdline = readCmdline(pid)
-        if (cmdline && /cloudflared/.test(cmdline) && cmdline.includes(configFile)) {
+        if (cmdline && isOurCloudflared(cmdline, configFile)) {
           ;(options.kill ?? ((p: number) => process.kill(p, 'SIGTERM')))(pid)
         }
       }

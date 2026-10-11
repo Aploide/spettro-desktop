@@ -103,16 +103,33 @@ describe('cleanUpLegacyTunnel', () => {
     })
     leaveTunnelBehind()
     cleanUpLegacyTunnel(dataDir, { platform: 'linux', readCmdline: () => '/usr/bin/firefox\0', kill: (pid) => killed.push(pid) })
+    // A reused pid whose program merely names the config (an editor that
+    // opened it) is not a cloudflared, whatever its arguments say.
+    leaveTunnelBehind()
+    cleanUpLegacyTunnel(dataDir, {
+      platform: 'linux',
+      readCmdline: () => `/usr/bin/vim\0${config}\0`,
+      kill: (pid) => killed.push(pid)
+    })
+    leaveTunnelBehind()
+    cleanUpLegacyTunnel(dataDir, {
+      platform: 'linux',
+      readCmdline: () => `/usr/bin/less\0/tmp/cloudflared\0${config}\0`,
+      kill: (pid) => killed.push(pid)
+    })
     expect(killed).toEqual([4242])
     expect(existsSync(join(dataDir, 'cloudflared.pid'))).toBe(false)
   })
 
   it('does nothing in a data folder that never had a tunnel, however often it runs', () => {
+    // The platform is pinned so the names planted are the names looked for
+    // on every CI runner, Windows included.
+    const linux = { platform: 'linux' as const, readCmdline: () => null }
     put(join(dataDir, 'preferences.json'), '{}')
-    expect(cleanUpLegacyTunnel(dataDir)).toEqual([])
+    expect(cleanUpLegacyTunnel(dataDir, linux)).toEqual([])
     leaveTunnelBehind()
-    expect(cleanUpLegacyTunnel(dataDir, { readCmdline: () => null }).length).toBeGreaterThan(0)
-    expect(cleanUpLegacyTunnel(dataDir)).toEqual([])
+    expect(cleanUpLegacyTunnel(dataDir, linux).length).toBeGreaterThan(0)
+    expect(cleanUpLegacyTunnel(dataDir, linux)).toEqual([])
     expect(readdirSync(dataDir)).toEqual(['preferences.json'])
   })
 })

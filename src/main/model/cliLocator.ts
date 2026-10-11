@@ -28,8 +28,7 @@ export interface LocatedCLI {
 
 const WIN = process.platform === 'win32'
 
-/** A regular file this user may run (on Windows, any file). */
-export function isExecutable(path: string): boolean {
+function isExecutable(path: string): boolean {
   try {
     const st = statSync(path)
     if (!st.isFile()) return false

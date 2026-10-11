@@ -64,8 +64,6 @@ export interface ReleaseAsset {
   name: string
   url: string
   size: number
-  /** GitHub's own checksum of the file, "sha256:<hex>", when it lists one. */
-  digest?: string
 }
 
 export interface GithubRelease {
@@ -73,8 +71,6 @@ export interface GithubRelease {
   /** tag with any leading `v` removed. */
   version: string
   notes: string | null
-  /** The release body in full (notes is cut for display). */
-  body: string
   htmlUrl: string
   assets: ReleaseAsset[]
 }
@@ -93,7 +89,7 @@ function isAllowedHost(host: string): boolean {
 
 /** GETs a URL, following up to 5 redirects, and hands the caller the final
  *  response stream. Non-2xx responses reject. */
-export function request(url: string, accept: string, redirects = 0): Promise<IncomingMessage> {
+function request(url: string, accept: string, redirects = 0): Promise<IncomingMessage> {
   return new Promise((resolve, reject) => {
     let parsed: URL
     try {
@@ -164,22 +160,17 @@ export async function fetchLatestRelease(repo: string): Promise<GithubRelease> {
   const assets = Array.isArray(raw.assets)
     ? (raw.assets as Record<string, unknown>[])
         .filter((a) => typeof a.name === 'string' && typeof a.browser_download_url === 'string')
-        .map((a) => {
-          const asset: ReleaseAsset = {
-            name: a.name as string,
-            url: a.browser_download_url as string,
-            size: typeof a.size === 'number' ? a.size : 0
-          }
-          if (typeof a.digest === 'string') asset.digest = a.digest
-          return asset
-        })
+        .map((a) => ({
+          name: a.name as string,
+          url: a.browser_download_url as string,
+          size: typeof a.size === 'number' ? a.size : 0
+        }))
     : []
 
   return {
     tag,
     version: tag.replace(/^v/i, ''),
     notes: body === '' ? null : body.length > NOTES_LIMIT ? `${body.slice(0, NOTES_LIMIT)}…` : body,
-    body,
     htmlUrl:
       typeof raw.html_url === 'string'
         ? raw.html_url

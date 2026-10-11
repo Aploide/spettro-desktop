@@ -8,7 +8,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
-import type { ChatMessage, ToolCallItem, TranscriptItem } from '@shared/model'
+import type { ChatDetail, ChatMessage, ToolCallItem, TranscriptItem } from '@shared/model'
 import type { MainEvent } from '@shared/ipc'
 import { TranscriptRowView, TranscriptItemView } from '@renderer/views/chat/transcript/TranscriptItemView'
 import { groupTranscript } from '@renderer/views/chat/transcript/orchestration'
@@ -17,7 +17,7 @@ import {
   TranscriptActionsProvider,
   transcriptAnchors
 } from '@renderer/views/chat/transcript/TranscriptActions'
-import { runPhase } from '@renderer/views/chat/transcript/RunTicker'
+import { RunTicker, runPhase } from '@renderer/views/chat/transcript/RunTicker'
 import { lastReplyLine } from '@renderer/views/chat/ChatHeader'
 import { initStore } from '@renderer/state/store'
 
@@ -312,6 +312,74 @@ describe('what the run ticker says the turn is doing', () => {
     expect(runPhase([say('user', 'a'), read('/a'), say('assistant', 'done'), say('user', 'b')], false)).toBe(
       'Working…'
     )
+  })
+})
+
+describe('the run ticker’s token count', () => {
+  /** A chat as the store holds it, with `tokensUsed` as its last usage. */
+  function chat(isBusy: boolean, tokensUsed?: number, id = 'c1'): ChatDetail {
+    return {
+      id,
+      title: 'A chat',
+      projectPath: '/p',
+      acpSessionId: 's',
+      isPinned: false,
+      isArchived: false,
+      isBusy,
+      createdAt: 0,
+      items: [say('user', 'go')],
+      configOptions: [],
+      commands: [],
+      plan: [],
+      usage: tokensUsed === undefined ? null : { used: 1000, size: 128_000, tokensUsed },
+      lastTurn: null,
+      sessionTokens: 0
+    }
+  }
+
+  const tokens = (): string | null => screen.getByRole('status').textContent?.match(/[\d.]+k? tokens/)?.[0] ?? null
+
+  it('shows nothing from before the run, then the run’s own count', () => {
+    // The last run's count (or a fresh attach's snapshot) is not this run's.
+    const view = render(<RunTicker chat={chat(false, 9_800)} />)
+    view.rerender(<RunTicker chat={chat(true, 9_800)} />)
+    expect(tokens()).toBeNull()
+    // The CLI counts per run: 1,200 is this run's, not 1,200 − 9,800.
+    view.rerender(<RunTicker chat={chat(true, 1_200)} />)
+    expect(tokens()).toBe('1.2k tokens')
+    view.rerender(<RunTicker chat={chat(true, 3_400)} />)
+    expect(tokens()).toBe('3.4k tokens')
+  })
+
+  it('shows the first run after attaching whole', () => {
+    const view = render(<RunTicker chat={chat(false)} />)
+    view.rerender(<RunTicker chat={chat(true)} />)
+    expect(tokens()).toBeNull()
+    view.rerender(<RunTicker chat={chat(true, 9_800)} />)
+    expect(tokens()).toBe('9.8k tokens')
+  })
+
+  it('starts the next run with no figure, and doesn’t take the last run’s back', () => {
+    const view = render(<RunTicker chat={chat(true)} />)
+    view.rerender(<RunTicker chat={chat(true, 5_000)} />)
+    expect(tokens()).toBe('5.0k tokens')
+    view.rerender(<RunTicker chat={chat(false, 5_000)} />)
+    expect(screen.queryByRole('status')).toBeNull()
+    view.rerender(<RunTicker chat={chat(true, 5_000)} />)
+    expect(tokens()).toBeNull()
+    // The store re-delivering the chat whole (chat-reset) with the same
+    // count is still the last run's.
+    view.rerender(<RunTicker chat={{ ...chat(true, 5_000) }} />)
+    expect(tokens()).toBeNull()
+    view.rerender(<RunTicker chat={chat(true, 700)} />)
+    expect(tokens()).toBe('700 tokens')
+  })
+
+  it('shows a chat opened mid-run nothing until its next update', () => {
+    const view = render(<RunTicker chat={chat(true, 9_800)} />)
+    expect(tokens()).toBeNull()
+    view.rerender(<RunTicker chat={chat(true, 10_400)} />)
+    expect(tokens()).toBe('10.4k tokens')
   })
 })
 

@@ -149,6 +149,17 @@ export class PairedDeviceStore {
     this.persist()
   }
 
+  /** Deletes the record outright — the phone asked (devices/unpair), and it
+   *  has dropped its key already, so there is nothing to tell it later. A
+   *  later pairing starts a fresh row. Returns whether there was one. */
+  remove(id: string): boolean {
+    const before = this.devices.length
+    this.devices = this.devices.filter((d) => d.deviceId !== id)
+    if (this.devices.length === before) return false
+    this.persist()
+    return true
+  }
+
   toDTOs(): PairedDeviceDTO[] {
     return this.devices.map((d) => ({
       deviceId: d.deviceId,

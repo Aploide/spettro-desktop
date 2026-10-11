@@ -242,6 +242,21 @@ export class RemoteHost implements RemoteHostSessionDelegate {
     }
   }
 
+  unpairDevice(session: RemoteHostSession): void {
+    const deviceId = session.deviceId
+    if (!deviceId) return
+    const name = this.devices.device(deviceId)?.name ?? deviceId
+    // Gone already (a second request racing the first) is fine: the phone
+    // wanted it gone, and it is.
+    this.devices.remove(deviceId)
+    // Normal closure: the phone asked for this, and stopped listening for a
+    // drop before it did.
+    for (const s of this.sessions.filter((s) => s.deviceId === deviceId)) s.close(1000)
+    this.connectedDeviceIds.delete(deviceId)
+    this.publishState()
+    console.info(`[remote] ${name} unpaired itself`)
+  }
+
   // MARK: Lifecycle
 
   async setEnabled(v: boolean): Promise<void> {

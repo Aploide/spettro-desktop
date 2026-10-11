@@ -56,7 +56,10 @@ export const RemoteFeature = {
   /** projects/files. */
   projectFiles: 'projectFiles',
   /** chats/open's transcript keeps the fields listed at transcriptItemToWire. */
-  snapshotV2: 'snapshotV2'
+  snapshotV2: 'snapshotV2',
+  /** devices/unpair: a phone that forgets this computer takes itself off
+   *  its paired devices. */
+  unpair: 'unpair'
 } as const
 
 export type RemoteFeatureName = (typeof RemoteFeature)[keyof typeof RemoteFeature]
@@ -69,7 +72,8 @@ export const REMOTE_HOST_FEATURES: readonly RemoteFeatureName[] = [
   RemoteFeature.mentions,
   RemoteFeature.rename,
   RemoteFeature.projectFiles,
-  RemoteFeature.snapshotV2
+  RemoteFeature.snapshotV2,
+  RemoteFeature.unpair
 ]
 
 /** Bonjour service type ("_spettro-remote._tcp" on the wire; bonjour-service
@@ -146,7 +150,12 @@ export const RemoteMethod = {
   // Projects.
   projectsList: '_spettro/remote/projects/list',
   /** {projectPath} → {files} (feature `projectFiles`). */
-  projectFiles: '_spettro/remote/projects/files'
+  projectFiles: '_spettro/remote/projects/files',
+
+  // Devices.
+  /** {} → null; removes the calling device (feature `unpair`). Never any
+   *  other device: there is no id to name one. */
+  devicesUnpair: '_spettro/remote/devices/unpair'
 } as const
 
 export type RemoteMethodName = (typeof RemoteMethod)[keyof typeof RemoteMethod]

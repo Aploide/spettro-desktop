@@ -21,9 +21,10 @@ import { Prefs } from '@main/model/prefs'
 import type { ConnectionOrigin } from '@main/remote/connectionGuard'
 import { RemoteHost } from '@main/remote/host'
 import { RemoteHostSession } from '@main/remote/hostSession'
+import { PairedDeviceStore } from '@main/remote/pairedDevices'
 import { base64urlDecode, computeProof } from '@main/remote/pairing'
 import type { JSONValue } from '@shared/acp'
-import type { ChatSummary, StoredSession, TranscriptItem } from '@shared/model'
+import type { ChatSummary, RemoteHostState, StoredSession, TranscriptItem } from '@shared/model'
 import { REMOTE_HOST_FEATURES, RemoteFeature, RemoteMethod } from '@shared/remote'
 import { FakeAgent, type Handler, Reply, deferred, settle as settleAll } from './fakeAgent'
 import {
@@ -44,6 +45,8 @@ class FakeSocket extends EventEmitter {
   readonly sent: Frame[] = []
   closed = false
   closeCode: number | undefined
+  /** How many frames had gone out when the socket was closed. */
+  sentAtClose: number | undefined
 
   send(data: string): void {
     this.sent.push(JSON.parse(data) as Frame)
@@ -53,6 +56,7 @@ class FakeSocket extends EventEmitter {
     if (this.closed) return
     this.closed = true
     this.closeCode = code
+    this.sentAtClose = this.sent.length
     this.emit('close')
   }
 
@@ -198,7 +202,11 @@ async function attached(deviceId = 'phone-1'): Promise<FakeSocket> {
 /** A socket whose resume has just been answered, before anything the host
  *  defers past the reply has run. */
 function authenticating(deviceId = 'phone-1'): { socket: FakeSocket; authId: number } {
-  const key = host.pairDevice(deviceId, 'Pixel', 'android')
+  return resuming(deviceId, host.pairDevice(deviceId, 'Pixel', 'android'))
+}
+
+/** A socket that has sent a resume signed with `key`. */
+function resuming(deviceId: string, key: Buffer): { socket: FakeSocket; authId: number } {
   const socket = new FakeSocket()
   host.acceptSocket(socket as unknown as WebSocket)
   const hello = socket.notifications(RemoteMethod.hello)[0].params as Frame
@@ -295,6 +303,107 @@ describe('the handshake', () => {
     bridge.events.emit('host-state', { agentReady: false, shuttingDown: true })
     const goodbye = socket.notifications(RemoteMethod.hostState).at(-1)?.params as Frame
     expect(goodbye).toEqual({ agentReady: false, shuttingDown: true })
+  })
+})
+
+describe('devices/unpair', () => {
+  let states: RemoteHostState[]
+
+  /** makeHost, keeping every state the host publishes. */
+  function unpairHost(): RemoteHost {
+    states = []
+    bridge = fakeBridge()
+    host = new RemoteHost(bridge, { dataDir: dir, onStateChanged: (s) => states.push(s) })
+    return host
+  }
+
+  const deviceIds = (): string[] => host.getState().devices.map((d) => d.deviceId)
+
+  it('is announced in hello and the auth result', async () => {
+    unpairHost()
+    const socket = await attached()
+    expect((socket.notifications(RemoteMethod.hello)[0].params as Frame).features).toContain(RemoteFeature.unpair)
+    expect((socket.reply(1)?.result as Frame).features).toContain(RemoteFeature.unpair)
+  })
+
+  it('answers null, then forgets the phone and closes its socket normally', async () => {
+    unpairHost()
+    const socket = await attached()
+    expect(host.getState().connectedDeviceIds).toEqual(['phone-1'])
+    const reply = await call(socket, RemoteMethod.devicesUnpair, {})
+    expect(reply).toEqual({ jsonrpc: '2.0', id: reply.id, result: null })
+    // The answer went out before the close did.
+    const replyAt = socket.sent.indexOf(reply)
+    expect(socket.closed).toBe(true)
+    expect(socket.closeCode).toBe(1000)
+    expect(replyAt).toBeLessThan(socket.sentAtClose as number)
+    expect(deviceIds()).not.toContain('phone-1')
+    expect(host.getState().connectedDeviceIds).toEqual([])
+    // Settings › Remote heard it: the last state has no row and no one attached.
+    const last = states.at(-1) as RemoteHostState
+    expect(last.devices.map((d) => d.deviceId)).not.toContain('phone-1')
+    expect(last.connectedDeviceIds).toEqual([])
+  })
+
+  it('takes the record off disk, so the old key no longer signs in', async () => {
+    unpairHost()
+    const key = host.pairDevice('phone-1', 'Pixel', 'android')
+    const first = resuming('phone-1', key)
+    await settle()
+    await call(first.socket, RemoteMethod.devicesUnpair, {})
+    expect(new PairedDeviceStore(dir).device('phone-1')).toBeUndefined()
+    const again = resuming('phone-1', key)
+    await settle()
+    expect((again.socket.reply(again.authId)?.error as Frame).code).toBe(-33001)
+  })
+
+  it('removes only the device that asked', async () => {
+    unpairHost()
+    const other = await attached('phone-2')
+    const socket = await attached('phone-1')
+    await call(socket, RemoteMethod.devicesUnpair, { deviceID: 'phone-2' })
+    expect(deviceIds()).toEqual(['phone-2'])
+    expect(other.closed).toBe(false)
+    expect(host.getState().connectedDeviceIds).toEqual(['phone-2'])
+    // phone-2 is still served.
+    expect((await call(other, RemoteMethod.chatsList, {})).result).toBeDefined()
+  })
+
+  it('refuses a socket that hasn’t signed in, and removes nothing', async () => {
+    unpairHost()
+    host.pairDevice('phone-1', 'Pixel', 'android')
+    const socket = new FakeSocket()
+    host.acceptSocket(socket as unknown as WebSocket)
+    const reply = await call(socket, RemoteMethod.devicesUnpair, {})
+    expect((reply.error as Frame).code).toBe(-33001)
+    expect(deviceIds()).toEqual(['phone-1'])
+  })
+
+  it('answers null when the record is already gone, and again after pairing anew', async () => {
+    unpairHost()
+    const socket = await attached()
+    ;(host as unknown as { devices: PairedDeviceStore }).devices.remove('phone-1')
+    expect((await call(socket, RemoteMethod.devicesUnpair, {})).result).toBeNull()
+    expect(socket.closeCode).toBe(1000)
+    // Paired again from a fresh QR: a fresh row, removable the same way.
+    const again = await attached()
+    expect(deviceIds()).toEqual(['phone-1'])
+    expect((await call(again, RemoteMethod.devicesUnpair, {})).result).toBeNull()
+    expect(deviceIds()).toEqual([])
+  })
+})
+
+describe('the paired device store', () => {
+  it('removes a record for good, and says whether there was one', () => {
+    const store = new PairedDeviceStore(dir)
+    store.pair('phone-1', 'Pixel', 'android')
+    store.pair('phone-2', 'Seeker', 'android')
+    expect(store.remove('phone-1')).toBe(true)
+    expect(store.remove('phone-1')).toBe(false)
+    expect(store.remove('nobody')).toBe(false)
+    const reloaded = new PairedDeviceStore(dir)
+    expect(reloaded.list().map((d) => d.deviceId)).toEqual(['phone-2'])
+    expect(reloaded.deviceKey('phone-1')).toBeNull()
   })
 })
 

@@ -61,6 +61,9 @@ export interface RemoteHostSessionDelegate {
    *  doesn't miss the first ones. */
   sessionAuthenticated(session: RemoteHostSession): void
   sessionClosed(session: RemoteHostSession): void
+  /** The signed-in device asked to be forgotten (devices/unpair). Called
+   *  once the reply is on the wire: the host closes the socket. */
+  unpairDevice(session: RemoteHostSession): void
   /** An auth attempt failed in a way that counts against the peer's
    *  address (a bad proof, an unknown or removed device, garbage). */
   authFailed(session: RemoteHostSession): void
@@ -333,6 +336,15 @@ export class RemoteHostSession {
       }
       if (!this.isAuthenticated) {
         fail(RemoteAuthError.notPaired, 'not authenticated')
+        return
+      }
+      if (method === RemoteMethod.devicesUnpair) {
+        // Here rather than in handleAuthenticated: the reply has to be on
+        // the wire before the close frame (ws keeps send/close order), and
+        // anything a handler set going would run before succeed(). Only
+        // ever this session's own device — the params name none.
+        succeed(null)
+        this.delegate.unpairDevice(this)
         return
       }
       succeed(await this.handleAuthenticated(method, params))

@@ -507,6 +507,34 @@ describe('devices/unpair', () => {
   })
 })
 
+describe('removing a device from Settings', () => {
+  it('closes that phone’s open socket, and its resume is then refused', async () => {
+    makeHost()
+    const key = host.pairDevice('phone-1', 'Pixel', 'android')
+    const first = resuming('phone-1', key)
+    await settle()
+    expect(host.getState().connectedDeviceIds).toEqual(['phone-1'])
+    host.revokeDevice('phone-1')
+    expect(first.socket.closed).toBe(true)
+    expect(first.socket.closeCode).toBe(1000)
+    expect(host.getState().connectedDeviceIds).toEqual([])
+    const again = resuming('phone-1', key)
+    await settle()
+    expect((again.socket.reply(again.authId)?.error as Frame).code).toBe(-33005)
+  })
+
+  it('leaves other phones attached', async () => {
+    makeHost()
+    const other = await attached('phone-2')
+    const socket = await attached('phone-1')
+    host.revokeDevice('phone-1')
+    expect(socket.closed).toBe(true)
+    expect(other.closed).toBe(false)
+    expect(host.getState().connectedDeviceIds).toEqual(['phone-2'])
+    expect((await call(other, RemoteMethod.chatsList, {})).result).toBeDefined()
+  })
+})
+
 describe('the paired device store', () => {
   it('removes a record for good, and says whether there was one', () => {
     const store = new PairedDeviceStore(dir)

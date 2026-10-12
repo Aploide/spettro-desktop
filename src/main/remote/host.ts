@@ -565,6 +565,10 @@ export class RemoteHost implements RemoteHostSessionDelegate {
 
   revokeDevice(id: string): void {
     this.devices.revoke(id)
+    // A phone attached right now goes too, not at its next reconnect: it
+    // comes straight back, and resume answers it with -33005.
+    for (const s of this.sessions.filter((s) => s.deviceId === id)) s.close(1000)
+    this.connectedDeviceIds.delete(id)
     this.publishState()
   }
 

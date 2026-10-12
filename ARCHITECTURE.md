@@ -125,8 +125,8 @@ a server. `connectionGuard.ts` keeps it that way:
 - `devices/unpair` removes the calling device's record (never another's:
   it takes no id) and closes its socket with 1000, after the reply. The
   record is deleted rather than revoked, so pairing again starts a fresh
-  row. Settings' Remove… revokes instead, and leaves a connected phone's
-  socket open until it reconnects.
+  row. Settings' Remove… revokes instead, and closes a connected phone's
+  socket with 1000 at once; the phone's resume then gets -33005.
 
 The listener tries port 7879 first and lets the OS pick another when it is
 taken or reserved (`EADDRINUSE`, `EACCES`, `EPERM`). Starts run one at a

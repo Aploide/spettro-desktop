@@ -13,9 +13,15 @@
 // sense of motion, and re-rendering a text run at 20 fps to advance a
 // seconds counter would be wasted work.
 //
-// The macOS model owns `runStartedAt` / `tokensAtRunStart`; here the ticker
-// derives both from the mirrored ChatDetail: the run starts when `isBusy`
-// flips true and ends when it flips false.
+// The macOS model owns `runStartedAt`; here the ticker derives it from the
+// mirrored ChatDetail: the run starts when `isBusy` flips true and ends when
+// it flips false.
+//
+// The token figure is the CLI's own count for this run: a usage_update's
+// tokensUsed is the run's cost so far (spettro's UsageEvent.TotalTokens),
+// not the chat's, so nothing is subtracted from it. Whatever usage the chat
+// already held when the run started belongs to an earlier run, and is not
+// shown; the figure appears with the run's first update.
 
 import { useEffect, useRef, useState } from 'react'
 import type { CSSProperties, JSX } from 'react'
@@ -69,26 +75,46 @@ export function runPhase(
 
 export function RunTicker({ chat }: { chat: ChatDetail }): JSX.Element | null {
   const busy = chat.isBusy
-  const tokensUsed = chat.usage?.tokensUsed ?? 0
+  const tokensUsed = chat.usage?.tokensUsed
   const awaiting = useStore((s) => s.permissions.some((p) => p.chatId === chat.id))
   const asking = useStore((s) => s.questions.some((q) => q.chatId === chat.id))
 
   const [startedAt, setStartedAt] = useState<number | null>(null)
   const [now, setNow] = useState(() => Date.now())
-  const tokensAtRunStart = useRef(0)
-  // Read the latest token total inside the busy-transition effect without
-  // re-arming it on every usage update.
-  const tokensRef = useRef(tokensUsed)
-  tokensRef.current = tokensUsed
+  // This run's tokens so far, from the usage updates it sent; null until
+  // the first one.
+  const [runTokens, setRunTokens] = useState<number | null>(null)
+  // The count the chat held when the run started: the last run's.
+  const tokensAtStart = useRef<number | undefined>(undefined)
+  // This run has sent an update (kept beside the state so the effect below
+  // sees a reset made earlier in the same commit).
+  const updated = useRef(false)
+  // The count the chat held before this run: taken only while idle (or
+  // when the chat changes), so a run's first update that arrives in the
+  // same render as its start isn't taken for the count it started from.
+  const idle = useRef({ chatId: chat.id, tokens: tokensUsed })
+  if (!busy || idle.current.chatId !== chat.id) idle.current = { chatId: chat.id, tokens: tokensUsed }
+  const busyRef = useRef(busy)
+  busyRef.current = busy
 
   useEffect(() => {
-    if (busy) {
-      tokensAtRunStart.current = tokensRef.current
-      setStartedAt(Date.now())
-    } else {
-      setStartedAt(null)
-    }
+    tokensAtStart.current = idle.current.tokens
+    updated.current = false
+    setRunTokens(null)
+    setStartedAt(busy ? Date.now() : null)
   }, [busy, chat.id])
+
+  // Declared after the effect above, so on the render a run starts it sees
+  // the count that run started from. Until this run has sent an update, the
+  // count it started from is the last run's — a chat-reset re-delivers it
+  // as a new object — and is passed over; from the first update on, every
+  // change is this run's.
+  useEffect(() => {
+    if (!busyRef.current || tokensUsed === undefined) return
+    if (!updated.current && tokensUsed === tokensAtStart.current) return
+    updated.current = true
+    setRunTokens(tokensUsed)
+  }, [tokensUsed])
 
   // Re-renders the elapsed label once a second while a run is active.
   useEffect(() => {
@@ -101,7 +127,7 @@ export function RunTicker({ chat }: { chat: ChatDetail }): JSX.Element | null {
   if (startedAt === null) return null
 
   const elapsed = elapsedLabel(startedAt, now)
-  const liveTokens = chat.usage?.tokensUsed != null ? Math.max(0, tokensUsed - tokensAtRunStart.current) : 0
+  const liveTokens = runTokens ?? 0
   const color = tickerModeColor(chat.configOptions)
   const phase = runPhase(chat.items, awaiting, asking)
   // While the turn waits on the user, Esc answers the sheet (deny, skip)

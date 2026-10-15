@@ -114,7 +114,8 @@ export interface ACPPlanEntry {
 export interface ACPUsage {
   used: number
   size: number
-  /** Spettro extension: cumulative session tokens (`_meta["spettro.app/tokensUsed"]`). */
+  /** Spettro extension: the current run's tokens so far, not the
+   *  session's (`_meta["spettro.app/tokensUsed"]`). */
   tokensUsed?: number
 }
 

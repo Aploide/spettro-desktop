@@ -1,14 +1,17 @@
 // Remote Access settings — port of RemoteAccessView.swift.
 //
-// One switch, one QR code, and the list of phones already allowed in. The
+// One switch, one QR code, and the list of phones already allowed in — the
+// iPhone app and the Android app alike. The
 // flow is deliberately two-tiered: turning sharing ON is the everyday action
 // (the phone is already paired and just needs the host listening); showing a
 // QR is the once-ever action. Collapsing them into one button would put a
 // pairing code on screen for no reason.
 //
 // It lives in Settings › Remote. A code that can't be drawn still pairs: the
-// link behind it is offered to copy. A code that runs out says so, with "Show
-// New Code", instead of quietly vanishing. Removing a device asks first.
+// link behind it is offered to copy, and opening it on the phone pairs it
+// (both apps take spettro-pair:// links). A code that runs out says so, with
+// "Show new code", instead of quietly vanishing. Removing a device asks
+// first.
 
 import { useEffect, useState } from 'react'
 import type { PairedDeviceDTO, RemoteHostState } from '@shared/model'
@@ -76,7 +79,7 @@ function Header({ onClose }: { onClose?: () => void }): JSX.Element {
       <div>
         <h2 className="remote__title">Remote Access</h2>
         <p className="remote__subtitle">
-          Drive these chats from Spettro on your iPhone or iPad, over your local network.
+          Drive these chats from Spettro on your phone or tablet.
         </p>
       </div>
       {onClose && (
@@ -227,12 +230,14 @@ function PairingPanel({ remote, now }: { remote: RemoteHostState; now: number })
       )}
       <div className="remote__pairing-text">
         <span className="remote__pairing-title">
-          {remote.pairingQR ? 'Scan this in Spettro on your iPhone' : 'Pair with the link instead'}
+          {remote.pairingQR ? 'Scan this in Spettro on your phone' : 'Pair with the link instead'}
         </span>
         <span className="remote__pairing-expiry">{expiryText}</span>
       </div>
       {remote.pairingURL && (
         <div className="remote__manual">
+          {/* Both apps open spettro-pair:// links: the iPhone app, and the
+              Android app through its deep link. */}
           <span className="remote__manual-text">
             Can&rsquo;t scan? Copy the pairing link and open it on your phone.
           </span>
@@ -310,6 +315,7 @@ function DeviceRow({
       </div>
       <button
         className="remote__remove"
+        aria-label={`Remove ${device.name}`}
         onClick={async () => {
           const answer = await confirmDialog({
             title: `Remove “${device.name}”?`,

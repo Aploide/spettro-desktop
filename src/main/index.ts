@@ -13,6 +13,7 @@ import { installAppMenu } from './menu'
 import { AppModel } from './model/appModel'
 import { buildRemoteBridge } from './model/remoteBridge'
 import { RemoteHost } from './remote/host'
+import { cleanUpLegacyTunnel } from './remote/legacyTunnelCleanup'
 import { TerminalManager } from './terminal/panels'
 
 let mainWindow: BrowserWindow | null = null
@@ -26,6 +27,9 @@ let didShutdown = false
 let quitApproved = false
 /** The quit question is on screen; a second Ctrl+Q doesn't stack another. */
 let askingQuit = false
+/** The quit is the updater handing over to the version it downloaded: the
+ *  phones are told Spettro is restarting, not that it quit. */
+let quitForUpdate = false
 
 /** The app icon, for the window and the Linux taskbar (Windows takes it from
  *  the packaged exe). Bundled as an extra resource; falls back to the repo
@@ -103,8 +107,10 @@ app.whenReady().then(() => {
     // A dev run has no installer to replace, and quitting is how the update
     // hands the machine over to the one it downloaded.
     isPackaged: app.isPackaged,
-    // The update already asked (or waited) before getting this far.
+    // The update already asked (or waited) before getting this far. Only
+    // the updater calls this.
     quit: () => {
+      quitForUpdate = true
       quitApproved = true
       app.quit()
     },
@@ -126,11 +132,26 @@ app.whenReady().then(() => {
   installAppMenu((command) => pushToWindow({ type: 'menu', command }))
 
   terminals = new TerminalManager(pushToWindow)
+  // Remote access is for the local network only now: what builds with the
+  // internet tunnel left in userData (its settings, Spettro's own
+  // cloudflared) goes, quietly.
+  try {
+    const removed = cleanUpLegacyTunnel(userDataDir)
+    if (removed.length > 0) console.log(`[remote] removed ${removed.length} file(s) the internet tunnel left behind`)
+  } catch {
+    // best-effort
+  }
   remoteHost = new RemoteHost(buildRemoteBridge(model), {
     dataDir: userDataDir,
-    onStateChanged: (state) => model?.setRemoteState(state)
+    onStateChanged: (state) => model?.setRemoteState(state),
+    onSharingChanged: (enabled) => {
+      if (model) model.remoteSharing = enabled
+    }
   })
   model.setRemoteState(remoteHost.getState())
+  remoteHost.restoreSharing(model.remoteSharing).catch((error) => {
+    console.error('[remote] could not turn remote access back on', error)
+  })
   ipcHandle = registerIpc(model, terminals, remoteHost, getMainWindow)
   // The app badge and notifications for approvals and questions waiting.
   wireAttention(model, getMainWindow)
@@ -147,16 +168,23 @@ app.whenReady().then(() => {
 function shutdownAll(): void {
   if (didShutdown) return
   didShutdown = true
+  const reason = quitForUpdate ? 'restart' : 'quit'
   try {
-    // Stops the agent and tells attached devices the disconnect is
-    // deliberate (host/state with shuttingDown: true, per doc 34) — the
-    // bridge relays that emission before the host itself goes down.
+    // Attached phones hear first that the disconnect is deliberate, and
+    // why: one host/state with shuttingDown and the reason, before the
+    // agent teardown emits anything. The model's own shutdown emission and
+    // the host's shutdown below find it said and add nothing.
+    remoteHost?.sayGoodbye(reason)
+  } catch {
+    // best-effort
+  }
+  try {
     model?.shutdown()
   } catch {
     // best-effort
   }
   try {
-    remoteHost?.shutdown()
+    remoteHost?.shutdown(reason)
   } catch {
     // best-effort
   }

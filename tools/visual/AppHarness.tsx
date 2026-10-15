@@ -16,7 +16,7 @@
 //                 permission-orphan | permission-denied | question |
 //                 question-multi | settings |
 //                 settings-<general|account|models|permissions|memory|remote|
-//                   updates|advanced|shortcuts|about> |
+//                   updates|advanced|shortcuts|about> | remote-unpaired |
 //                 onboarding | installing | install-failed | gate | gate-keys |
 //                 failure | reconnecting | confirm-delete | deleted-undo |
 //                 no-model | no-model-sent | no-model-connect |
@@ -855,7 +855,7 @@ const app: AppStateDTO = {
     NO_MODEL ? { plan: 'unknown', email: null } : { plan: 'pro', email: 'carlo@example.com' },
   extensions: MODE.startsWith('gate') || NO_MODEL ? GATE_EXTENSIONS : EXTENSIONS,
   update: MODE === 'settings-updates' ? UPDATES : { ...EMPTY_UPDATE_STATE, app: { ...EMPTY_COMPONENT_UPDATE, current: '0.1.7' } },
-  remote: MODE.startsWith('settings') ? REMOTE : null,
+  remote: MODE.startsWith('settings') || MODE === 'remote-unpaired' ? REMOTE : null,
   // A first run starts in the home folder, which is exactly the case the
   // new-session view warns about.
   lastProjectPath: FIRST_RUN ? null : PROJECT,
@@ -1114,6 +1114,21 @@ function pushEvents(): void {
   if (MODE.startsWith('settings-')) {
     setTimeout(() => press(','), 60)
     setTimeout(() => click(`[data-testid="settings-pane-${MODE.slice('settings-'.length)}"]`), 140)
+  }
+  // Settings › Remote as it was, then the state main publishes once the
+  // connected iPhone forgets this computer (devices/unpair): its row gone,
+  // live, with the pane open.
+  if (MODE === 'remote-unpaired') {
+    setTimeout(() => press(','), 60)
+    setTimeout(() => click('[data-testid="settings-pane-remote"]'), 140)
+    setTimeout(() => {
+      const remote: RemoteHostState = {
+        ...REMOTE,
+        devices: REMOTE.devices.filter((d) => d.deviceId !== 'd1'),
+        connectedDeviceIds: []
+      }
+      push({ type: 'app-state', state: { ...app, remote } })
+    }, 500)
   }
   // Delete… from a row's menu: the alert asking first.
   if (MODE === 'confirm-delete' || MODE === 'deleted-undo') {

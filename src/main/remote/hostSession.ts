@@ -9,9 +9,11 @@
 //
 // Framing: JSON-RPC 2.0, one message per WebSocket text frame.
 
-import type { WebSocket } from 'ws'
+import type { RawData, WebSocket } from 'ws'
 import type { ACPContentBlock, JSONValue } from '../../shared/acp'
 import {
+  REMOTE_HOST_FEATURES,
+  REMOTE_PROJECT_FILES_CAP,
   REMOTE_PROTOCOL_VERSION,
   RemoteAuthError,
   RemoteMethod,
@@ -27,6 +29,15 @@ import {
   type RemoteProjectWire
 } from '../../shared/remote'
 import type { RemoteBridge } from './bridge'
+import {
+  AUTH_DEADLINE_MS,
+  CLOSE_POLICY,
+  LAN_ORIGIN,
+  PREAUTH_MAX_BYTES,
+  PREAUTH_MAX_FRAMES,
+  PREAUTH_MAX_FRAME_BYTES,
+  type ConnectionOrigin
+} from './connectionGuard'
 import { base64urlEncode, randomKey, verifyProof } from './pairing'
 
 /** What a session needs from its RemoteHost. Kept as an interface so the two
@@ -45,8 +56,45 @@ export interface RemoteHostSessionDelegate {
   pairDevice(id: string, name: string, platform: string): Buffer
   /** Stored (possibly revoked) device lookup for `resume`. */
   resumeDevice(id: string): { key: Buffer; revoked: boolean } | null
+  /** Called once the auth reply is on the wire — never before it, so a
+   *  phone that only listens for notifications once it has its answer
+   *  doesn't miss the first ones. */
   sessionAuthenticated(session: RemoteHostSession): void
   sessionClosed(session: RemoteHostSession): void
+  /** The signed-in device asked to be forgotten (devices/unpair). Called
+   *  once the reply is on the wire: the host closes the socket. */
+  unpairDevice(session: RemoteHostSession): void
+  /** An auth attempt failed in a way that counts against the peer's
+   *  address (a bad proof, an unknown or removed device, garbage). */
+  authFailed(session: RemoteHostSession): void
+}
+
+/** The TCP socket under a WebSocket, as far as counting what arrives on it
+ *  goes (the upgrade request's `req.socket`). */
+export interface WireSocket {
+  on(event: 'data', listener: (chunk: Buffer) => void): unknown
+  off(event: 'data', listener: (chunk: Buffer) => void): unknown
+  destroy(): void
+}
+
+/** Auth refusals counted against the peer: wrong keys and garbage, not a
+ *  stale QR or a version mismatch, which honest phones hit. */
+const COUNTED_AUTH_FAILURES = new Set<number>([
+  RemoteAuthError.notPaired,
+  RemoteAuthError.badProof,
+  RemoteAuthError.revoked,
+  -32602
+])
+
+/** A frame's size in bytes, before anything is made of it. */
+function rawLength(data: RawData): number {
+  if (Array.isArray(data)) return data.reduce((n, chunk) => n + chunk.length, 0)
+  return data.byteLength
+}
+
+function rawText(data: RawData): string {
+  if (Array.isArray(data)) return Buffer.concat(data).toString('utf8')
+  return Buffer.isBuffer(data) ? data.toString('utf8') : Buffer.from(data).toString('utf8')
 }
 
 /** A JSON-RPC error to return from a request handler. */
@@ -87,6 +135,13 @@ function optString(obj: { [key: string]: JSONValue }, key: string): string | und
   return value
 }
 
+function optStringArray(obj: { [key: string]: JSONValue }, key: string): string[] | undefined {
+  const value = obj[key]
+  if (value === undefined || value === null) return undefined
+  if (!Array.isArray(value) || !value.every((v) => typeof v === 'string')) throw invalidParams()
+  return value as string[]
+}
+
 function optBool(obj: { [key: string]: JSONValue }, key: string): boolean | undefined {
   const value = obj[key]
   if (value === undefined || value === null) return undefined
@@ -101,16 +156,30 @@ export class RemoteHostSession {
    *  from an earlier one cannot be replayed onto this. */
   private readonly challenge = randomKey()
   private closed = false
+  /** Frames received before auth (PREAUTH_MAX_FRAMES). */
+  private preAuthFrames = 0
+  private authDeadline: NodeJS.Timeout | null = null
+  /** Stops counting the bytes that arrive before auth. */
+  private unwatchWire: (() => void) | null = null
 
   constructor(
     private readonly ws: WebSocket,
-    private readonly delegate: RemoteHostSessionDelegate
+    private readonly delegate: RemoteHostSessionDelegate,
+    readonly origin: ConnectionOrigin = LAN_ORIGIN,
+    wire?: WireSocket
   ) {
-    ws.on('message', (data) => {
-      this.handleFrame(data.toString())
-    })
+    ws.on('message', (data) => this.handleMessage(data))
     ws.on('close', () => this.didClose())
     ws.on('error', () => this.didClose())
+    if (wire) this.watchWire(wire)
+    // A socket that never proves itself doesn't get to sit here: a phone
+    // that means it answers hello within a second. Not counted against the
+    // address — on the LAN that's a phone having a bad moment.
+    this.authDeadline = setTimeout(() => {
+      if (this.isAuthenticated) return
+      this.close(CLOSE_POLICY)
+    }, AUTH_DEADLINE_MS)
+    this.authDeadline.unref?.()
     // The host speaks first: the client cannot build an auth proof until it
     // has the challenge, so `hello` goes out the moment the socket is open —
     // which, for a server-accepted `ws` connection, is right now.
@@ -125,20 +194,54 @@ export class RemoteHostSession {
     return this.authedDeviceId !== null
   }
 
-  close(): void {
+  close(code?: number): void {
     if (this.closed) return
-    this.closed = true
     try {
-      this.ws.close()
+      if (code === undefined) this.ws.close()
+      else this.ws.close(code)
     } catch {
       /* ignore */
     }
+    // The host forgets the session now rather than at the socket's close
+    // event: one that never finishes its closing handshake must not keep
+    // holding a slot (MAX_SESSIONS) or a device's place.
+    this.didClose()
   }
 
   private didClose(): void {
     if (this.closed) return
     this.closed = true
+    this.clearDeadline()
+    this.unwatchWire?.()
     this.delegate.sessionClosed(this)
+  }
+
+  /** Counts what arrives on the wire until auth: `ws` buffers a frame
+   *  whole before it says a word about it, so a stranger's 32 MiB frame is
+   *  cut off here while it arrives, not read and then refused. */
+  private watchWire(wire: WireSocket): void {
+    let received = 0
+    const onData = (chunk: Buffer): void => {
+      received += chunk.length
+      if (received <= PREAUTH_MAX_BYTES) return
+      this.unwatchWire?.()
+      try {
+        wire.destroy()
+      } catch {
+        /* gone */
+      }
+      this.didClose()
+    }
+    wire.on('data', onData)
+    this.unwatchWire = () => {
+      wire.off('data', onData)
+      this.unwatchWire = null
+    }
+  }
+
+  private clearDeadline(): void {
+    if (this.authDeadline) clearTimeout(this.authDeadline)
+    this.authDeadline = null
   }
 
   /** Sends a JSON-RPC notification (one message per text frame). */
@@ -163,12 +266,31 @@ export class RemoteHostSession {
       hostKind: 'app',
       hostVersion: this.delegate.hostVersion,
       challenge: base64urlEncode(this.challenge),
-      pairingOpen: this.delegate.openPairingSecret() !== null
+      pairingOpen: this.delegate.openPairingSecret() !== null,
+      features: [...REMOTE_HOST_FEATURES]
     }
     this.notify(RemoteMethod.hello, hello as unknown as JSONValue)
   }
 
   // MARK: Inbound frames
+
+  private handleMessage(data: RawData): void {
+    // `ws` still delivers frames that arrive while the socket closes. A
+    // closed session serves nothing: after devices/unpair, the device's
+    // record is gone, and a request right behind it must not run.
+    if (this.closed) return
+    // Before auth, a socket gets a handful of small frames: enough for an
+    // auth request and a retry, not enough to make the host parse megabytes
+    // for a stranger. Measured before it is turned into text.
+    if (!this.isAuthenticated) {
+      this.preAuthFrames += 1
+      if (this.preAuthFrames > PREAUTH_MAX_FRAMES || rawLength(data) > PREAUTH_MAX_FRAME_BYTES) {
+        this.close(CLOSE_POLICY)
+        return
+      }
+    }
+    this.handleFrame(rawText(data))
+  }
 
   private handleFrame(text: string): void {
     let root: JSONValue
@@ -202,11 +324,31 @@ export class RemoteHostSession {
 
     try {
       if (method === RemoteMethod.auth) {
-        succeed(this.authenticate(params))
+        try {
+          succeed(this.authenticate(params))
+        } catch (error) {
+          if (error instanceof RPCFault && COUNTED_AUTH_FAILURES.has(error.code)) this.delegate.authFailed(this)
+          throw error
+        }
+        this.clearDeadline()
+        this.unwatchWire?.()
+        // After the reply, not inside authenticate(): whatever the host
+        // sends a new session (its state, the prompts waiting) has to land
+        // behind the answer the phone is waiting for.
+        if (!this.closed) this.delegate.sessionAuthenticated(this)
         return
       }
       if (!this.isAuthenticated) {
         fail(RemoteAuthError.notPaired, 'not authenticated')
+        return
+      }
+      if (method === RemoteMethod.devicesUnpair) {
+        // Here rather than in handleAuthenticated: the reply has to be on
+        // the wire before the close frame (ws keeps send/close order), and
+        // anything a handler set going would run before succeed(). Only
+        // ever this session's own device — the params name none.
+        succeed(null)
+        this.delegate.unpairDevice(this)
         return
       }
       succeed(await this.handleAuthenticated(method, params))
@@ -287,15 +429,27 @@ export class RemoteHostSession {
         return null
       }
 
+      case RemoteMethod.chatRename: {
+        const obj = asObject(params)
+        const chatId = normalizeChatId(reqString(obj, 'chatID'))
+        const title = reqString(obj, 'title')
+        // A chat is never left nameless (ChatSession.rename refuses it).
+        if (title.trim() === '') throw invalidParams()
+        // Every screen hears the new title as a chat/state, this one too.
+        if (!bridge.renameChat(chatId, title)) throw new RPCFault(-32001, 'no such chat')
+        return null
+      }
+
       case RemoteMethod.chatPrompt: {
         const obj = asObject(params)
         const chatId = normalizeChatId(reqString(obj, 'chatID'))
         const rawBlocks = obj.blocks
         if (!Array.isArray(rawBlocks)) throw invalidParams()
         const blocks = rawBlocks.map(parseContentBlock)
+        const mentions = optStringArray(obj, 'mentions') ?? []
         // Fire-and-forget, like the Swift host: progress comes back as
         // broadcasts, the same ones the local UI renders from.
-        void bridge.prompt(chatId, blocks, this.authedDeviceId as string).catch((error) => {
+        void bridge.prompt(chatId, blocks, this.authedDeviceId as string, mentions).catch((error) => {
           console.error('[remote] prompt failed', error)
         })
         return null
@@ -315,10 +469,13 @@ export class RemoteHostSession {
         const boolValue = optBool(obj, 'boolValue')
         if (stringValue === undefined && boolValue === undefined) throw invalidParams()
         const value = stringValue !== undefined ? { stringValue } : { boolValue }
-        void bridge.setConfig(chatId, configId, value).catch((error) => {
-          console.error('[remote] setConfig failed', error)
-        })
-        return null
+        // Answered once the agent has: with the options the chat runs with
+        // now, so a phone can sequence dependent changes (Ultra is two) and
+        // take a refusal back off its screen. A refusal rejects, and goes
+        // back as the agent's code with the notice's words.
+        const options = await bridge.setConfig(chatId, configId, value)
+        if (options === null) throw new RPCFault(-32001, 'no such chat')
+        return { configOptions: normalizeConfigOptions(options) }
       }
 
       // Both of these take the prompt down everywhere, including the local
@@ -360,6 +517,13 @@ export class RemoteHostSession {
 
       case RemoteMethod.projectsList:
         return { projects: this.projects() as unknown as JSONValue[] }
+
+      case RemoteMethod.projectFiles: {
+        const obj = asObject(params)
+        const files = await bridge.projectFiles(reqString(obj, 'projectPath'))
+        if (files === null) throw new RPCFault(-32001, 'no such project')
+        return { files: files.slice(0, REMOTE_PROJECT_FILES_CAP) }
+      }
 
       default:
         throw new RPCFault(-32601, `method not supported: ${method}`)
@@ -431,10 +595,7 @@ export class RemoteHostSession {
     } else {
       const known = this.delegate.resumeDevice(deviceID)
       if (!known) {
-        throw new RPCFault(
-          RemoteAuthError.notPaired,
-          `this device isn't paired with ${this.delegate.hostName}`
-        )
+        throw new RPCFault(RemoteAuthError.notPaired, `this device isn't paired with ${this.delegate.hostName}`)
       }
       if (known.revoked) {
         throw new RPCFault(RemoteAuthError.revoked, 'access for this device was removed')
@@ -445,13 +606,13 @@ export class RemoteHostSession {
     }
 
     this.authedDeviceId = deviceID
-    this.delegate.sessionAuthenticated(this)
 
     const result: RemoteAuthResultPayload = {
       hostID: this.delegate.hostId,
       hostName: this.delegate.hostName,
       hostKind: 'app',
-      agentReady: this.delegate.bridge.agentReady()
+      agentReady: this.delegate.bridge.agentReady(),
+      features: [...REMOTE_HOST_FEATURES]
     }
     // The durable key travels exactly once, on the connection that minted it.
     // A resume proves the key the device already has.

@@ -1,7 +1,8 @@
 // Spettro Remote wire types — port of RemoteProtocol.swift.
 //
-// This is the protocol an iPhone/iPad speaks to a host driving the CLI. The
-// Swift host (spettro-apple/Platforms/macOS/Core/Remote/*) is the reference
+// This is the protocol a phone or tablet (the iOS and the Android app) speaks
+// to a host driving the CLI. The Swift host
+// (spettro-apple/Platforms/macOS/Core/Remote/*) is the reference
 // implementation and the shipped iOS client decodes every payload with Swift's
 // synthesized Codable, so the shapes below are byte-for-byte what that decoder
 // expects:
@@ -29,8 +30,55 @@ import type { ChatSummary, StoredSession, TranscriptItem } from './model'
 // Versioning / discovery
 // ---------------------------------------------------------------------------
 
-/** Bumped when the wire surface changes incompatibly. */
+/** Bumped when the wire surface changes incompatibly. Additions don't bump
+ *  it — a host rejects every other version outright (-33004), so a bump
+ *  would lock out every phone already in the field. They are announced in
+ *  `features` instead. */
 export const REMOTE_PROTOCOL_VERSION = 1
+
+/** Capabilities a host may announce in `hello` and the auth result. Each is
+ *  an addition to v1 that an older peer simply never sees: a phone that
+ *  finds a name here may rely on it, and falls back to v1 behaviour when it
+ *  is missing (an older desktop, or the Mac host). */
+export const RemoteFeature = {
+  /** chats/config answers once the set is done, with `{configOptions}`, and
+   *  every option change reaches every phone as a config_option_update. */
+  configResult: 'configResult',
+  /** Local notices ("Couldn't change Model…") arrive as chat/state with a
+   *  `notice` and no stopReason. */
+  notices: 'notices',
+  /** Prompts still waiting are sent again right after auth. */
+  pendingReplay: 'pendingReplay',
+  /** chats/prompt takes `mentions`. */
+  mentions: 'mentions',
+  /** chats/rename. */
+  rename: 'rename',
+  /** projects/files. */
+  projectFiles: 'projectFiles',
+  /** chats/open's transcript keeps the fields listed at transcriptItemToWire. */
+  snapshotV2: 'snapshotV2',
+  /** devices/unpair: a phone that forgets this computer takes itself off
+   *  its paired devices. */
+  unpair: 'unpair',
+  /** One goodbye per shutdown, with `reason` on it; `message` only for
+   *  sharing-off (see RemoteHostStateParams). */
+  goodbyeReason: 'goodbyeReason'
+} as const
+
+export type RemoteFeatureName = (typeof RemoteFeature)[keyof typeof RemoteFeature]
+
+/** What this host implements — exactly these, so a phone can trust them. */
+export const REMOTE_HOST_FEATURES: readonly RemoteFeatureName[] = [
+  RemoteFeature.configResult,
+  RemoteFeature.notices,
+  RemoteFeature.pendingReplay,
+  RemoteFeature.mentions,
+  RemoteFeature.rename,
+  RemoteFeature.projectFiles,
+  RemoteFeature.snapshotV2,
+  RemoteFeature.unpair,
+  RemoteFeature.goodbyeReason
+]
 
 /** Bonjour service type ("_spettro-remote._tcp" on the wire; bonjour-service
  *  takes it without the underscore/protocol decoration). */
@@ -76,6 +124,8 @@ export const RemoteMethod = {
   chatNew: '_spettro/remote/chats/new',
   chatDelete: '_spettro/remote/chats/delete',
   chatFlag: '_spettro/remote/chats/flag',
+  /** {chatID, title} → null (feature `rename`). */
+  chatRename: '_spettro/remote/chats/rename',
 
   // Driving a turn.
   chatPrompt: '_spettro/remote/chats/prompt',
@@ -102,7 +152,14 @@ export const RemoteMethod = {
   agentNotification: '_spettro/remote/agent/notification',
 
   // Projects.
-  projectsList: '_spettro/remote/projects/list'
+  projectsList: '_spettro/remote/projects/list',
+  /** {projectPath} → {files} (feature `projectFiles`). */
+  projectFiles: '_spettro/remote/projects/files',
+
+  // Devices.
+  /** {} → null; removes the calling device (feature `unpair`). Never any
+   *  other device: there is no id to name one. */
+  devicesUnpair: '_spettro/remote/devices/unpair'
 } as const
 
 export type RemoteMethodName = (typeof RemoteMethod)[keyof typeof RemoteMethod]
@@ -138,6 +195,8 @@ export interface RemoteHelloParams {
   /** base64url, 32 random bytes, fresh per connection. */
   challenge: string
   pairingOpen: boolean
+  /** REMOTE_HOST_FEATURES. Absent from older hosts. */
+  features: string[]
 }
 
 export type RemoteAuthMode = 'pair' | 'resume'
@@ -160,6 +219,9 @@ export interface RemoteAuthResultPayload {
   hostName: string
   hostKind: RemoteHostKind
   agentReady: boolean
+  /** REMOTE_HOST_FEATURES, again: a phone that resumed may not have kept the
+   *  hello it built its proof from. */
+  features: string[]
 }
 
 // ---------------------------------------------------------------------------
@@ -224,6 +286,10 @@ export interface RemoteChatPromptParams {
   chatID: string
   /** ACP content blocks: {type:'text',text} | {type:'image',data,mimeType}. */
   blocks: JSONValue[]
+  /** Files @-mentioned in the text, project-relative with forward slashes
+   *  ("src/a.ts"); each one still in the text as "@src/a.ts" goes to the
+   *  agent as a resource link (feature `mentions`). */
+  mentions?: string[]
 }
 
 export interface RemoteChatConfigParams {
@@ -257,16 +323,28 @@ export interface RemoteNoticeWire {
   isError: boolean
 }
 
+/** With a stopReason, the chat's turn ended (and `notice` is what it ended
+ *  on, if anything). Without one, `notice` is a line the host wrote into the
+ *  chat on its own — appended, ending nothing. */
 export interface RemoteChatStateParams {
   chat: RemoteChatSummaryWire
   stopReason?: string
   notice?: RemoteNoticeWire
 }
 
+/** Why a host said goodbye: the app quit, it quit to install an update
+ *  (it'll be back), or the user switched sharing off. */
+export type RemoteGoodbyeReason = 'quit' | 'sharing-off' | 'restart'
+
+/** A goodbye is `shuttingDown: true`. A host with `goodbyeReason` sends
+ *  exactly one per shutdown, with `reason` on it; `message` is there only
+ *  for sharing-off, which is all an older phone goes by. */
 export interface RemoteHostStateParams {
   agentReady: boolean
   shuttingDown: boolean
   message?: string
+  /** Only on a goodbye, and only from a host with `goodbyeReason`. */
+  reason?: RemoteGoodbyeReason
 }
 
 // ---------------------------------------------------------------------------
@@ -334,6 +412,26 @@ export interface RemoteProjectsListResult {
   projects: RemoteProjectWire[]
 }
 
+/** Files projects/files returns at most — the walk's own cap, and plenty
+ *  for a mention menu to search. */
+export const REMOTE_PROJECT_FILES_CAP = 5000
+
+export interface RemoteProjectFilesParams {
+  /** One of projects/list's paths (or a chat's projectPath). */
+  projectPath: string
+}
+
+/** What the desktop's @-mention menu lists: project-relative paths with
+ *  forward slashes, git's tracked and unignored files in a repository. */
+export interface RemoteProjectFilesResult {
+  files: string[]
+}
+
+export interface RemoteChatRenameParams {
+  chatID: string
+  title: string
+}
+
 // ---------------------------------------------------------------------------
 // Wire encoding helpers (ms epoch / local shapes → Swift Codable shapes)
 // ---------------------------------------------------------------------------
@@ -360,9 +458,22 @@ export function chatSummaryToWire(s: ChatSummary): RemoteChatSummaryWire {
   }
 }
 
+/** Images a stored tool carries on the wire, as on screen. */
+const MAX_WIRE_TOOL_IMAGES = 4
+
 /** One TranscriptItem → Swift StoredItem synthesized-enum encoding:
- *  `{"message":{"_0":{...}}}` / `{"tool":{"_0":{...}}}`. Field names and
- *  presence mirror SessionStore.swift's StoredMessage/StoredTool exactly. */
+ *  `{"message":{"_0":{...}}}` / `{"tool":{"_0":{...}}}`. The fields
+ *  SessionStore.swift's StoredMessage/StoredTool have come first, named and
+ *  present exactly as there.
+ *
+ *  After them, the ones the Swift store never had (`snapshotV2`), each left
+ *  out when it says nothing — Codable ignores keys it doesn't know:
+ *    message: steering, isStreaming (true), startedAt/endedAt (reasoning;
+ *             RFC3339 WITH milliseconds, "2026-08-01T10:00:00.400Z" — they
+ *             time a thought, and no Swift decoder reads them), mentions,
+ *             plain (true), contextCleared (true), endsTurn (true)
+ *    tool:    workflow (the `_meta["spettro.app/workflow"]` object),
+ *             rawOutput, denied (true), images ([{data, mimeType}], ≤4) */
 export function transcriptItemToWire(item: TranscriptItem): JSONValue {
   if (item.kind === 'message') {
     const m = item.message
@@ -381,6 +492,14 @@ export function transcriptItemToWire(item: TranscriptItem): JSONValue {
         mimeType: a.mimeType
       }))
     }
+    if (m.steering !== undefined) stored.steering = m.steering
+    if (m.isStreaming) stored.isStreaming = true
+    if (m.startedAt !== undefined) stored.startedAt = new Date(m.startedAt).toISOString()
+    if (m.endedAt !== undefined) stored.endedAt = new Date(m.endedAt).toISOString()
+    if (m.mentions !== undefined && m.mentions.length > 0) stored.mentions = [...m.mentions]
+    if (m.plain) stored.plain = true
+    if (m.contextCleared) stored.contextCleared = true
+    if (m.endsTurn) stored.endsTurn = true
     return { message: { _0: stored } }
   }
   const t = item.tool
@@ -400,6 +519,14 @@ export function transcriptItemToWire(item: TranscriptItem): JSONValue {
   }
   if (t.kind !== undefined) stored.kind = t.kind
   if (t.argsJSON !== undefined) stored.argsJSON = t.argsJSON
+  if (t.workflow !== undefined) stored.workflow = t.workflow
+  if (t.rawOutput !== undefined) stored.rawOutput = t.rawOutput
+  if (t.denied) stored.denied = true
+  if (t.images !== undefined && t.images.length > 0) {
+    stored.images = t.images
+      .slice(0, MAX_WIRE_TOOL_IMAGES)
+      .map((image) => ({ data: image.data, mimeType: image.mimeType }))
+  }
   return { tool: { _0: stored } }
 }
 
@@ -441,6 +568,31 @@ export function configOptionToWire(opt: ACPConfigOption): JSONValue {
         }))
       : [{ options: opt.kind.flat.map(configChoiceToWire) }] // ungrouped: name omitted (nil)
   wire.kind = { select: { current: opt.kind.currentValue ?? '', groups } }
+  return wire
+}
+
+/** Shared ACPConfigOption → the ACP wire shape the CLI itself sends in
+ *  `config_option_update` (what parseConfigOption reads back):
+ *  { id, name, description?, category?, type:'select', currentValue?,
+ *    options:[{value,name,description?}] | [{name,options:[…]}] }
+ *  | { …, type:'boolean', currentValue }. Grouped only when a group has a
+ *  name — an ungrouped list parses back as one nameless group. Used for the
+ *  update the host makes up when options change without the CLI saying so. */
+export function configOptionToAcpWire(opt: ACPConfigOption): JSONValue {
+  const wire: { [key: string]: JSONValue } = { id: opt.id, name: opt.name }
+  if (opt.description !== undefined) wire.description = opt.description
+  if (opt.category !== undefined) wire.category = opt.category
+  if (opt.kind.type === 'boolean') {
+    wire.type = 'boolean'
+    wire.currentValue = opt.kind.currentValue
+    return wire
+  }
+  wire.type = 'select'
+  if (opt.kind.currentValue !== null) wire.currentValue = opt.kind.currentValue
+  const grouped = opt.kind.groups.some((g) => g.name !== '')
+  wire.options = grouped
+    ? opt.kind.groups.map((g) => ({ name: g.name, options: g.options.map(configChoiceToWire) }))
+    : opt.kind.flat.map(configChoiceToWire)
   return wire
 }
 

@@ -223,6 +223,7 @@
   align-items: center;
   gap: var(--sp-xs);
   padding: 6px 14px;
+  font-family: inherit;
   font-size: 12px;
   font-weight: 500;
   color: var(--text-primary);
@@ -311,17 +312,28 @@
   color: var(--text-secondary);
 }
 
+/* Remove…: a pill in the danger colour rather than a stray red word —
+   shutting a device out has to be the easiest thing on its row to find. */
 .remote__remove {
-  border: none;
+  flex: none;
+  padding: 4px 12px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--danger);
   background: none;
-  padding: var(--sp-xs);
-  font-size: 11px;
-  color: var(--diff-removed);
+  border: 1px solid color-mix(in srgb, var(--danger) 45%, transparent);
+  border-radius: 999px;
   cursor: pointer;
 }
 
 .remote__remove:hover {
-  text-decoration: underline;
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
+
+.remote__remove:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
 }
 
 /* Empty state */

@@ -1,6 +1,6 @@
 /* The thinking slider (ThinkingSlider.tsx) and its toolbar chip.
 
-   Low → Max is a chunky pill of a slider: a neutral groove, an accent fill,
+   Off → Max is a chunky pill of a slider: a neutral groove, an accent fill,
    the stops as dots set into it, a white knob riding on it. The segment past
    Max is Ultra and is drawn in the --ultra-* fire, faint as a promise until
    Ultra is lit, then the fill runs into it and the knob glows. The meteor and
@@ -80,7 +80,7 @@
   touch-action: none;
 }
 
-/* The stops' line, Low to Ultra: what a pointer maps onto, and where the
+/* The stops' line, Off to Ultra: what a pointer maps onto, and where the
    thumb travels. It is drawn as nothing itself; the bar is round it. */
 .thinking-rail {
   position: absolute;
@@ -91,7 +91,7 @@
 }
 
 /* The bar: a thick pill, half its height longer than the rail at each end so
-   Low and Ultra sit inside its caps. Unfilled it is a neutral groove, the
+   the first stop and Ultra sit inside its caps. Unfilled it is a neutral groove, the
    same in either accent. It clips everything in it — fill, stops, and the
    meteor and the smoulder on their canvases — to its shape: the bar is the
    sky the fire crosses. A share of the rail (--f) lands at
@@ -149,14 +149,15 @@
   transition: transform var(--thinking-move);
 }
 
-/* Off fills nothing, not even Low's end cap. */
+/* Off (the stop, or a level the CLI doesn't list) fills nothing, not even
+   the end cap. */
 .thinking-slider--off .thinking-fill {
   transform: translateX(-100%);
 }
 
-/* Lit, the whole fill is Ultra's fire, heating from ember at Low to
-   white-hot at the Ultra stop — its own palette in either accent (a lilac or
-   ink bar running into orange would read as two controls). Its width is the
+/* Lit, the whole fill is Ultra's fire, heating from ember at the bar's
+   start to white-hot at the Ultra stop — its own palette in either accent
+   (a lilac or ink bar running into orange would read as two controls). Its width is the
    whole rail there, so the ramp's flame lands on Max, over the segment
    behind it (--fire-start is Max's share of the rail, set on the rail).
    The ramp is laid on the part of the fill that shows: from the bar's left
@@ -279,9 +280,10 @@
   outline-offset: 2px;
 }
 
-/* Off (set somewhere else — it is not a stop): a smaller hollow thumb
-   short of the Low tick, so position and label agree. */
-.thinking-slider--off .thinking-thumb {
+/* An unset level (one the CLI doesn't list, in practice its `off`): a
+   smaller hollow thumb short of the first stop, so position and label agree.
+   The Off stop itself wears the normal knob. */
+.thinking-slider--unset .thinking-thumb {
   width: 12px;
   height: 12px;
   margin: -6px 0 0 -6px;

@@ -20,6 +20,13 @@ import type { EventEmitter } from 'events'
 import type { ACPContentBlock, JSONValue } from '../../shared/acp'
 import type { ChatSummary, StoredSession } from '../../shared/model'
 
+export interface RemotePendingPrompt {
+  kind: 'permission' | 'question'
+  promptId: string
+  chatId: string | null
+  raw: JSONValue
+}
+
 export interface RemoteBridge {
   listChats(): ChatSummary[]
   openChat(chatId: string): { chat: StoredSession; configOptions: JSONValue; commands: JSONValue; plan: JSONValue; usage: JSONValue | null; isBusy: boolean } | null
@@ -27,13 +34,25 @@ export interface RemoteBridge {
   newChat(projectPath: string): ChatSummary
   deleteChat(chatId: string): void
   flagChat(chatId: string, flags: { isPinned?: boolean; isArchived?: boolean }): void
+  /** False when there is no such chat. */
+  renameChat(chatId: string, title: string): boolean
   listProjects(): { path: string; name: string }[]
-  prompt(chatId: string, blocks: ACPContentBlock[], sourceDeviceId: string): Promise<void>
+  /** The files the @-mention menu would list for one of listProjects'
+   *  folders; null for any other path. */
+  projectFiles(projectPath: string): Promise<string[] | null>
+  /** `mentions`: the project-relative files @-mentioned in the text. */
+  prompt(chatId: string, blocks: ACPContentBlock[], sourceDeviceId: string, mentions: string[]): Promise<void>
   cancelChat(chatId: string): void
-  setConfig(chatId: string, configId: string, value: { stringValue?: string; boolValue?: boolean }): Promise<void>
+  /** Resolves once the change is in, to the chat's options (either shape,
+   *  as for openChat), or null when there is no such chat. Rejects when the
+   *  agent refused it; the rejection's message and code go to the phone. */
+  setConfig(chatId: string, configId: string, value: { stringValue?: string; boolValue?: boolean }): Promise<JSONValue | null>
   agentCall(method: string, params: JSONValue): Promise<JSONValue>
   resolvePermission(promptId: string, selectedOptionId: string | null, deviceId: string): void
   answerQuestion(promptId: string, answers: JSONValue | null, deviceId: string): void
   agentReady(): boolean
+  /** Every permission and question still waiting on an answer, with the
+   *  same ids and payloads their -ask events carried. */
+  pendingPrompts(): RemotePendingPrompt[]
   events: EventEmitter // 'chat-update'(chatId, rawUpdate) 'chat-user'(chatId, text, attachments, timestamp, sourceDeviceId|null) 'chat-state'(summary, extra?) 'chat-removed'(chatId) 'host-state'({agentReady,shuttingDown,message?}) 'permission-ask'(promptId, chatId|null, raw) 'permission-resolved'(promptId, resolvedBy|null) 'question-ask'(promptId, chatId|null, raw) 'question-resolved'(promptId, resolvedBy|null) 'agent-notification'(method, params)
 }

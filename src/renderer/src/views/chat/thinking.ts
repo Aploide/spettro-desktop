@@ -35,9 +35,19 @@ export interface ThinkingStop {
   ultra: boolean
 }
 
-/** The levels in slider order, named in plain words. "X-High" is the CLI's
- *  menu label; on a slider it reads as a typo. */
+/** The CLI level that turns thinking off. It is the leftmost stop whenever
+ *  the CLI lists it (it is also the CLI's default, so the slider's most
+ *  common resting place). */
+export const OFF = 'off'
+
+/** Off's caption; also what an unset level (one the stops don't hold) says. */
+export const OFF_CAPTION = 'Answers straight away, without thinking first'
+
+/** The levels in slider order, named in plain words: always ours, whatever
+ *  the CLI calls them. "X-High" is the CLI's menu label; on a slider it reads
+ *  as a typo. */
 const LEVELS: Omit<ThinkingStop, 'ultra'>[] = [
+  { id: OFF, label: 'Off', caption: OFF_CAPTION },
   { id: 'low', label: 'Low', caption: 'Answers quickly with only a brief think' },
   { id: 'medium', label: 'Medium', caption: 'Thinks for a moment before acting' },
   { id: 'high', label: 'High', caption: 'Thinks things through — a good default for real work' },
@@ -56,13 +66,11 @@ export const ULTRA = {
   ultra: true
 } as const satisfies ThinkingStop
 
-/** A CLI level that turns thinking off. Not a stop: the user asked for "low
- *  to max", so Off is only ever shown, when something else set it. */
-const OFF = 'off'
-
 export interface ThinkingState {
   stops: ThinkingStop[]
-  /** The stop the thumb sits on; -1 is Off (the thumb rests at the far left). */
+  /** The stop the thumb sits on; -1 when the CLI's level is none of the
+   *  stops (in practice `off` from a CLI that doesn't list it); then the
+   *  thumb rests short of the first stop. */
   index: number
   /** The value's name: a stop's label, or "Off". */
   label: string
@@ -87,9 +95,10 @@ function choicesOf(option: ACPConfigOption | undefined): ACPConfigChoice[] {
  * CLI advertises no thinking option: then there is nothing to slide.
  *
  * The stops follow what the CLI offers — a level it drops disappears, one it
- * adds lands after Max under its own name — but always in Low → Max order,
- * whatever order the menu came in. Ultra is offered only beside an `ultra`
- * boolean.
+ * adds lands after Max under its own name — but always in Off → Max order,
+ * whatever order the menu came in. With no list at all, every level is
+ * offered, Off included: the CLI always lists Off. Ultra is offered only
+ * beside an `ultra` boolean.
  */
 export function thinkingState(options: ACPConfigOption[]): ThinkingState | null {
   const thinkingOption = options.find((o) => o.id === THINKING_ID)
@@ -97,7 +106,7 @@ export function thinkingState(options: ACPConfigOption[]): ThinkingState | null 
   const ultraOption = options.find((o) => o.id === ULTRA_ID)
   const permission = options.find((o) => o.id === PERMISSION_ID)
 
-  const offered = choicesOf(thinkingOption).filter((c) => c.value !== OFF)
+  const offered = choicesOf(thinkingOption)
   const stops: ThinkingStop[] =
     offered.length === 0
       ? LEVELS.map((l) => ({ ...l, ultra: false }))
@@ -156,7 +165,9 @@ export interface ConfigCall {
  *  - To Ultra: thinking high, then ultracode on.
  *  - From Ultra: ultracode off first (so nothing runs as a workflow at the
  *    new level even for a moment), then the level.
- *  - Elsewhere: the level alone.
+ *  - Elsewhere: the level alone — to Off (thinking off) and from Off alike.
+ *    From Ultra to Off is the From Ultra case: ultracode off, then thinking
+ *    off.
  */
 export function callsFor(ultraOn: boolean, target: ThinkingStop): ConfigCall[] {
   if (target.ultra) {
@@ -172,6 +183,13 @@ export function callsFor(ultraOn: boolean, target: ThinkingStop): ConfigCall[] {
     ]
   }
   return [{ configId: THINKING_ID, value: target.id }]
+}
+
+/** Whether thinking is off: on the Off stop, or at a level the stops don't
+ *  hold (an `off` from a CLI that doesn't list it). Lit or paused Ultra is
+ *  never off, whatever level runs under it. */
+export function isOff(state: ThinkingState): boolean {
+  return !state.ultraOn && (state.index < 0 || state.stops[state.index]?.id === OFF)
 }
 
 /** The state a pending move will produce, so the thumb goes where it was put

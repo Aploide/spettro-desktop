@@ -31,6 +31,7 @@ import type {
   TranscriptItem,
   TurnSummary
 } from '../../shared/model'
+import { previewLine } from './previewText'
 import { sameJSON } from './sameJSON'
 
 /** The CLI's acknowledgement that a message sent mid-turn was queued for the
@@ -193,6 +194,8 @@ export class ChatSession {
   /** One option's value changed in place (applyLocalConfigValue). Without a
    *  listener here the change goes out as the whole set, through onMeta. */
   onConfigValue: ((session: ChatSession, configId: string, value: ConfigValue) => void) | null = null
+  /** A notice was appended (appendNotice), after its onItem. */
+  onNotice: ((session: ChatSession, notice: ChatMessage) => void) | null = null
 
   /**
    * A throwaway chat the studio runs a workflow in.
@@ -400,10 +403,8 @@ export class ChatSession {
     for (let i = this.items.length - 1; i >= 0; i--) {
       const item = this.items[i]
       if (item.kind !== 'message') continue
-      const trimmed = item.message.text.trim()
-      if (trimmed === '') continue
-      const firstLine = trimmed.split(/\r?\n/, 1)[0] ?? trimmed
-      return firstLine.slice(0, 120)
+      const line = previewLine(item.message.text)
+      if (line !== '') return line
     }
     return ''
   }
@@ -639,6 +640,7 @@ export class ChatSession {
     const item: TranscriptItem = { kind: 'message', message }
     this.items.push(item)
     this.emitItem(item)
+    this.onNotice?.(this, message)
   }
 
   /** Appends to (or starts) the current streaming reasoning bubble. */

@@ -40,12 +40,13 @@ amber for Don't ask — and the model button), an @-mentioned file drawn as a
 chip, and the composer's glow: a lit phrase, a `+500k` budget directive with its hint, and the muted Ask-first
 variant with its "switch permission" line. `chrome:thinking` lays out the
 thinking slider in every state (High, Ultra lit, Ultra paused with its
-"Switch to Restricted?" prompt, Extra high, Off, a model that doesn't reason)
-and its chip; `chrome:meteor` freezes the meteor at twelve points of its run,
-from Max and from Low: the flight, the impact (from Max at about 0.4, from Low
-at about 0.57) and the cooling into the lit thumb. The meteor is a pure function
+"Switch to Restricted?" prompt, Extra high, Off, Low, Off from a CLI that
+doesn't list it — the hollow unset thumb short of Low — and a model that
+doesn't reason) and its chip; `chrome:meteor` freezes the meteor at twelve
+points of its run, from Max and from Off: the flight, the impact (from Max at
+about 0.4, from Off at about 0.57) and the cooling into the lit thumb. The meteor is a pure function
 of its progress and a fixed seed, so `chrome:meteor&meteorProgress=0.3`
-(optionally `&meteorFrom=<stop>`, 0 for Low) is the same frame every time. It
+(optionally `&meteorFrom=<stop>`, 0 for Off) is the same frame every time. It
 flies inside the slider's 16px bar, which clips it: `SHOT_SCALE=3` renders any
 scene at three times the density for looking closely. `chrome:smoulder`
 freezes lit Ultra's idle fire (heat running along the bar, embers drifting
@@ -94,6 +95,7 @@ Pick the screen with `?mode=`:
 | `question-multi` | three questions, on the second (multi-select) with picks made and Other… open |
 | `settings` | Settings, opened the way a user does (Ctrl+,) |
 | `settings-<pane>` | one per pane — `general`, `account`, `models`, `permissions`, `memory`, `remote`, `updates` (the engine has an update waiting), `advanced`, `shortcuts`, `about` — chosen in Settings' sidebar |
+| `remote-unpaired` | Settings › Remote after the connected iPhone forgot this computer (`devices/unpair`): the state main publishes arrives with the pane open, and its row is gone |
 | `onboarding`, `installing`, `install-failed` | setup, step 1 of 2: Install Spettro (Advanced folded), the determinate bar with Cancel, and "Couldn't download Spettro" with Try again |
 | `gate`, `gate-keys` | setup, step 2 of 2: Sign in to Spettro first, the quieter alternatives under it; and "Use my own API key" with one provider opened (its "Get a key" link) |
 | `failure` | the engine died: the sentence, Try again, and the log behind "Show details" |

@@ -11,6 +11,7 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import ThinkingSlider, { ThinkingChip } from '@renderer/views/chat/ThinkingSlider'
 import type { ChatDetail } from '@shared/model'
 import type { ACPConfigOption } from '@shared/acp'
+import { OFF_CAPTION } from '@renderer/views/chat/thinking'
 
 /** Every call, and a way to hold one open so ordering can be checked. */
 const calls: [string, unknown[]][] = []
@@ -48,7 +49,17 @@ beforeEach(() => {
   cleanup()
 })
 
-function options(o: { thinking: string; ultra: boolean; permission?: string; suspended?: boolean }): ACPConfigOption[] {
+/** The levels a CLI that doesn't list Off would offer. */
+const NO_OFF = ['low', 'medium', 'high', 'x-high', 'max']
+
+function options(o: {
+  thinking: string
+  ultra: boolean
+  permission?: string
+  suspended?: boolean
+  /** The thinking levels the CLI lists; all six by default, Off first. */
+  levels?: string[]
+}): ACPConfigOption[] {
   return [
     {
       id: 'permission',
@@ -71,7 +82,7 @@ function options(o: { thinking: string; ultra: boolean; permission?: string; sus
         type: 'select',
         currentValue: o.thinking,
         groups: [],
-        flat: ['off', 'low', 'medium', 'high', 'x-high', 'max'].map((v) => ({ value: v, name: v }))
+        flat: (o.levels ?? ['off', 'low', 'medium', 'high', 'x-high', 'max']).map((v) => ({ value: v, name: v }))
       }
     },
     {
@@ -120,8 +131,8 @@ describe('the slider', () => {
   it('is a real slider: role, range and the value in words', () => {
     render(<ThinkingSlider chat={chat(options({ thinking: 'x-high', ultra: false }))} />)
     expect(slider().getAttribute('aria-valuemin')).toBe('0')
-    expect(slider().getAttribute('aria-valuemax')).toBe('5')
-    expect(slider().getAttribute('aria-valuenow')).toBe('3')
+    expect(slider().getAttribute('aria-valuemax')).toBe('6')
+    expect(slider().getAttribute('aria-valuenow')).toBe('4')
     expect(slider().getAttribute('aria-valuetext')).toBe('Extra high')
   })
 
@@ -131,16 +142,23 @@ describe('the slider', () => {
     cleanup()
     render(<ThinkingSlider chat={chat(options({ thinking: 'off', ultra: false }))} />)
     expect(slider().getAttribute('aria-valuetext')).toBe('Off')
-    expect(screen.getByText('Off')).toBeTruthy()
+    expect(slider().getAttribute('aria-valuenow')).toBe('0')
+    expect(screen.getByText('Off', { selector: '.thinking-value' })).toBeTruthy()
   })
 
-  it('rests Off short of Low, and the chip names what is off', () => {
+  it('sits on the Off stop, and the chip names what is off', () => {
     const { container } = render(<ThinkingSlider chat={chat(options({ thinking: 'off', ultra: false }))} />)
-    // Not on the Low tick (0%): the label and the thumb agree.
+    // On the Off stop, the normal knob: no offset short of it.
     const carrier = container.querySelector<HTMLElement>('.thinking-carrier')
     expect(carrier?.style.getPropertyValue('--f')).toBe('0')
-    expect(carrier?.style.getPropertyValue('--off')).toBe('-14px')
-    expect(container.querySelector('.thinking-label--current')).toBeNull()
+    expect(carrier?.style.getPropertyValue('--off')).toBe('0px')
+    expect(container.querySelector('.thinking-label--current')?.textContent).toBe('Off')
+    const root = container.querySelector('.thinking-slider') as Element
+    expect(root.classList.contains('thinking-slider--off')).toBe(true)
+    expect(root.classList.contains('thinking-slider--unset')).toBe(false)
+    // Nothing is filled, so no stop is passed — not even Off's own.
+    expect(container.querySelector('.thinking-tick--passed')).toBeNull()
+    expect(container.querySelector('.thinking-caption')?.textContent).toBe(OFF_CAPTION)
     cleanup()
     render(<ThinkingChip chat={chat(options({ thinking: 'off', ultra: false }))} />)
     expect(screen.getByTestId('thinking-chip').textContent).toContain('Thinking off')
@@ -157,7 +175,7 @@ describe('the slider', () => {
     calls.length = 0
     press('Home')
     await settle()
-    expect(calls).toEqual([['setSelectOption', ['chat-1', 'thinking', 'low']]])
+    expect(calls).toEqual([['setSelectOption', ['chat-1', 'thinking', 'off']]])
   })
 
   it('moves the thumb at once, before the CLI answers', () => {
@@ -204,6 +222,70 @@ describe('the slider', () => {
 
   it('goes nowhere further left from Off', async () => {
     render(<ThinkingSlider chat={chat(options({ thinking: 'off', ultra: false }))} />)
+    press('ArrowLeft')
+    await settle()
+    expect(calls).toEqual([])
+    press('ArrowRight')
+    await settle()
+    expect(calls).toEqual([['setSelectOption', ['chat-1', 'thinking', 'low']]])
+  })
+
+  it('reaches Off with the arrow keys, and goes no further', async () => {
+    const { rerender } = render(<ThinkingSlider chat={chat(options({ thinking: 'low', ultra: false }))} />)
+    press('ArrowLeft')
+    await settle()
+    expect(calls).toEqual([['setSelectOption', ['chat-1', 'thinking', 'off']]])
+    calls.length = 0
+    rerender(<ThinkingSlider chat={chat(options({ thinking: 'off', ultra: false }))} />)
+    await settle()
+    press('ArrowLeft')
+    press('ArrowDown')
+    await settle()
+    expect(calls).toEqual([])
+  })
+
+  it('a held key runs down through Off and sends it once', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      render(<ThinkingSlider chat={chat(options({ thinking: 'medium', ultra: false }))} />)
+      fireEvent.keyDown(slider(), { key: 'ArrowLeft' })
+      await settle()
+      expect(calls).toEqual([['setSelectOption', ['chat-1', 'thinking', 'low']]])
+      fireEvent.keyDown(slider(), { key: 'ArrowLeft', repeat: true })
+      expect(slider().getAttribute('aria-valuetext')).toBe('Off')
+      await settle()
+      expect(calls).toHaveLength(1)
+      fireEvent.keyUp(slider(), { key: 'ArrowLeft' })
+      await settle()
+      expect(calls).toEqual([
+        ['setSelectOption', ['chat-1', 'thinking', 'low']],
+        ['setSelectOption', ['chat-1', 'thinking', 'off']]
+      ])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('clicking the Off label selects it', async () => {
+    const { container } = render(<ThinkingSlider chat={chat(options({ thinking: 'high', ultra: false }))} />)
+    const label = [...container.querySelectorAll('.thinking-label')].find((l) => l.textContent === 'Off')
+    fireEvent.click(label as Element)
+    await settle()
+    expect(calls).toEqual([['setSelectOption', ['chat-1', 'thinking', 'off']]])
+  })
+
+  it('rests short of the first stop when the CLI lists no Off but is set to it', async () => {
+    const { container } = render(
+      <ThinkingSlider chat={chat(options({ thinking: 'off', ultra: false, levels: NO_OFF }))} />
+    )
+    // Not on the Low tick (0%): the label and the thumb agree.
+    const carrier = container.querySelector<HTMLElement>('.thinking-carrier')
+    expect(carrier?.style.getPropertyValue('--off')).toBe('-14px')
+    expect(container.querySelector('.thinking-slider')?.classList.contains('thinking-slider--unset')).toBe(true)
+    expect(container.querySelector('.thinking-label--current')).toBeNull()
+    expect(slider().getAttribute('aria-valuetext')).toBe('Off')
+    expect(slider().getAttribute('aria-valuenow')).toBe('0')
+    expect(slider().getAttribute('aria-valuemax')).toBe('5')
     press('ArrowLeft')
     await settle()
     expect(calls).toEqual([])
@@ -295,7 +377,72 @@ describe('the Ultra stop', () => {
     fireEvent.click(screen.getByText('Keep Ask first'))
     expect(screen.queryByText('Switch')).toBeNull()
     expect(calls).toEqual([])
-    expect(slider().getAttribute('aria-valuenow')).toBe('5')
+    expect(slider().getAttribute('aria-valuenow')).toBe('6')
+  })
+
+  it('from Ultra to Off: ultracode off first, then thinking off, the fire out at once', async () => {
+    render(<ThinkingSlider chat={chat(options({ thinking: 'high', ultra: true }))} />)
+    press('Home')
+    expect(document.querySelector('.thinking-meteor')).toBeNull()
+    expect(document.querySelector('.thinking-embers')).toBeNull()
+    expect(document.querySelector('.thinking-slider')?.classList.contains('thinking-slider--ultra')).toBe(false)
+    expect(slider().getAttribute('aria-valuetext')).toBe('Off')
+    await settle()
+    expect(calls).toEqual([
+      ['setBoolOption', ['chat-1', 'ultra', false]],
+      ['setSelectOption', ['chat-1', 'thinking', 'off']]
+    ])
+  })
+
+  it('from paused Ultra to Off, the Paused prompt goes at once', async () => {
+    render(
+      <ThinkingSlider
+        chat={chat(options({ thinking: 'high', ultra: true, permission: 'ask-first', suspended: true }))}
+      />
+    )
+    expect(screen.getByText('Switch')).toBeTruthy()
+    press('Home')
+    expect(screen.queryByText('Switch')).toBeNull()
+    await settle()
+    expect(calls).toEqual([
+      ['setBoolOption', ['chat-1', 'ultra', false]],
+      ['setSelectOption', ['chat-1', 'thinking', 'off']]
+    ])
+  })
+
+  it('from Off to Ultra: thinking high, then ultracode on, the meteor setting out from Off', async () => {
+    holding = true
+    render(<ThinkingSlider chat={chat(options({ thinking: 'off', ultra: false }))} />)
+    press('End')
+    expect(document.querySelector('.thinking-meteor')).not.toBeNull()
+    const root = document.querySelector('.thinking-slider') as Element
+    expect(root.classList.contains('thinking-slider--flying')).toBe(true)
+    // The fill waits, empty, at Off for the streak.
+    expect(root.classList.contains('thinking-slider--off')).toBe(true)
+    expect((document.querySelector('.thinking-fill') as HTMLElement).style.getPropertyValue('--f')).toBe('0')
+    const passed = [...document.querySelectorAll('.thinking-tick')].map((t) =>
+      t.classList.contains('thinking-tick--passed')
+    )
+    expect(passed).toEqual([false, false, false, false, false, false, false])
+    await settle()
+    expect(calls).toEqual([['setSelectOption', ['chat-1', 'thinking', 'high']]])
+    holding = false
+    await act(async () => hold?.release())
+    await settle()
+    expect(calls).toEqual([
+      ['setSelectOption', ['chat-1', 'thinking', 'high']],
+      ['setBoolOption', ['chat-1', 'ultra', true]]
+    ])
+  })
+
+  it('Off → Ultra under Ask first is paused at once, with no meteor', () => {
+    holding = true
+    render(<ThinkingSlider chat={chat(options({ thinking: 'off', ultra: false, permission: 'ask-first' }))} />)
+    press('End')
+    expect(document.querySelector('.thinking-meteor')).toBeNull()
+    expect(document.querySelector('.thinking-slider')?.classList.contains('thinking-slider--paused')).toBe(true)
+    expect(screen.getByText('Ultra · Paused')).toBeTruthy()
+    expect(screen.getByText('Switch')).toBeTruthy()
   })
 })
 
@@ -425,7 +572,7 @@ describe('the meteor', () => {
     const passed = [...document.querySelectorAll('.thinking-tick')].map((t) =>
       t.classList.contains('thinking-tick--passed')
     )
-    expect(passed).toEqual([true, false, false, false, false, false])
+    expect(passed).toEqual([true, true, false, false, false, false, false])
   })
 
   it('does not play for a slider drawn with Ultra already on, or re-drawn there', () => {
@@ -475,10 +622,13 @@ describe('arriving at Ultra, frame by frame', () => {
   // turning to fire, then both snapping back to Max for a short meteor; the
   // smoulder and the slides starting in the frame the meteor appeared. Each
   // of these reads the slider the way a frame would draw it.
+  //
+  // Every slider here is a CLI that lists no Off: six stops, Low first, so
+  // the arithmetic below (Low at 0%, impact ≈420ms from it) is that case's.
   const meteor = (): Element | null => document.querySelector('.thinking-meteor')
   const root = (): Element => document.querySelector('.thinking-slider') as Element
-  // Where the thumb's carrier puts it, as a share of the rail (or Off's
-  // offset short of Low).
+  // Where the thumb's carrier puts it, as a share of the rail (or an unset
+  // level's offset short of the first stop).
   const thumbLeft = (): string => {
     const carrier = document.querySelector('.thinking-carrier') as HTMLElement
     const off = carrier.style.getPropertyValue('--off')
@@ -518,7 +668,7 @@ describe('arriving at Ultra, frame by frame', () => {
 
   it('follows a drag at once, measuring the rail once per press, and slides only for a press', () => {
     // Stops at 0, 60, 120, 180, 240, 300.
-    render(<ThinkingSlider chat={chat(options({ thinking: 'low', ultra: false }))} />)
+    render(<ThinkingSlider chat={chat(options({ levels: NO_OFF, thinking: 'low', ultra: false }))} />)
     const tracking = (): boolean => root().classList.contains('thinking-slider--tracking')
     const railReads = (): number =>
       (HTMLElement.prototype.getBoundingClientRect as unknown as { mock: { contexts: HTMLElement[] } }).mock.contexts.filter(
@@ -546,7 +696,7 @@ describe('arriving at Ultra, frame by frame', () => {
 
   it('a press on the bar’s Ultra end lights nothing and moves nothing until it lets go', async () => {
     holding = true
-    render(<ThinkingSlider chat={chat(options({ thinking: 'low', ultra: false }))} />)
+    render(<ThinkingSlider chat={chat(options({ levels: NO_OFF, thinking: 'low', ultra: false }))} />)
     press(RAIL)
     // Pressed: the words say where a release goes; the bar stays as it is.
     expect(screen.getByText('Ultra', { selector: '.thinking-value' })).toBeTruthy()
@@ -568,7 +718,7 @@ describe('arriving at Ultra, frame by frame', () => {
 
   it('a drag onto Ultra leaves the thumb on the last stop it crossed, and flies from there', () => {
     holding = true
-    render(<ThinkingSlider chat={chat(options({ thinking: 'low', ultra: false }))} />)
+    render(<ThinkingSlider chat={chat(options({ levels: NO_OFF, thinking: 'low', ultra: false }))} />)
     press(0)
     move(240) // Max
     expect(thumbLeft()).toBe('80%')
@@ -583,7 +733,7 @@ describe('arriving at Ultra, frame by frame', () => {
   })
 
   it('a drag off a lit Ultra and back stays on Ultra, with no meteor', () => {
-    render(<ThinkingSlider chat={chat(options({ thinking: 'high', ultra: true }))} />)
+    render(<ThinkingSlider chat={chat(options({ levels: NO_OFF, thinking: 'high', ultra: true }))} />)
     press(RAIL)
     move(240)
     expect(thumbLeft()).toBe('80%')
@@ -604,7 +754,7 @@ describe('arriving at Ultra, frame by frame', () => {
     } as never
     try {
       holding = true
-      render(<ThinkingSlider chat={chat(options({ thinking: 'max', ultra: false }))} />)
+      render(<ThinkingSlider chat={chat(options({ levels: NO_OFF, thinking: 'max', ultra: false }))} />)
       press(240) // on Max, where the thumb is
       release()
       press(RAIL)
@@ -641,8 +791,8 @@ describe('arriving at Ultra, frame by frame', () => {
       return frames.length
     })
     try {
-      const { rerender } = render(<ThinkingSlider chat={chat(options({ thinking: 'high', ultra: false }))} />)
-      rerender(<ThinkingSlider chat={chat(options({ thinking: 'high', ultra: true }))} />)
+      const { rerender } = render(<ThinkingSlider chat={chat(options({ levels: NO_OFF, thinking: 'high', ultra: false }))} />)
+      rerender(<ThinkingSlider chat={chat(options({ levels: NO_OFF, thinking: 'high', ultra: true }))} />)
       expect(root().classList.contains('thinking-slider--flying')).toBe(true)
       expect(fillAt()).toBe('0.4')
       // A frame just past impact (from High: lands ≈53% of the way through
@@ -670,9 +820,9 @@ describe('arriving at Ultra, frame by frame', () => {
   ): Promise<{ meteors: Set<Element>; rerender: (o: { thinking: string; ultra: boolean }) => void }> {
     vi.useFakeTimers()
     answer = respond
-    const { rerender: raw } = render(<ThinkingSlider chat={chat(options({ thinking: 'low', ultra: false }))} />)
+    const { rerender: raw } = render(<ThinkingSlider chat={chat(options({ levels: NO_OFF, thinking: 'low', ultra: false }))} />)
     const rerender = (o: { thinking: string; ultra: boolean }): void =>
-      raw(<ThinkingSlider chat={chat(options(o))} />)
+      raw(<ThinkingSlider chat={chat(options({ ...o, levels: NO_OFF }))} />)
     const meteors = new Set<Element>()
     let elapsed = 0
     const check = (): void => {
@@ -766,13 +916,13 @@ describe('arriving at Ultra, frame by frame', () => {
   it('lets go where the CLI is when it refuses, without the thumb sliding back from Ultra', async () => {
     vi.useFakeTimers()
     answer = () => after(10)
-    const { rerender } = render(<ThinkingSlider chat={chat(options({ thinking: 'low', ultra: false }))} />)
+    const { rerender } = render(<ThinkingSlider chat={chat(options({ levels: NO_OFF, thinking: 'low', ultra: false }))} />)
     fireEvent.keyDown(slider(), { key: 'End' })
     const first = meteor()
     expect(first).not.toBeNull()
     // Ultra on, the calls through — and then the refusal rolls it back, the
     // meteor still in the air.
-    rerender(<ThinkingSlider chat={chat(options({ thinking: 'high', ultra: true }))} />)
+    rerender(<ThinkingSlider chat={chat(options({ levels: NO_OFF, thinking: 'high', ultra: true }))} />)
     await act(async () => {
       await vi.advanceTimersByTimeAsync(30)
     })
@@ -781,7 +931,7 @@ describe('arriving at Ultra, frame by frame', () => {
     // refusal brings it back it comes from there, with the fill, rather than
     // sliding back into view from Ultra, where it never was.
     expect(thumbLeft()).toBe('0%')
-    rerender(<ThinkingSlider chat={chat(options({ thinking: 'high', ultra: false }))} />)
+    rerender(<ThinkingSlider chat={chat(options({ levels: NO_OFF, thinking: 'high', ultra: false }))} />)
     // The preview let go with the calls: the refusal shows straight away.
     expect(slider().getAttribute('aria-valuetext')).toBe('High')
     expect(meteor()).toBeNull()
@@ -797,6 +947,91 @@ describe('arriving at Ultra, frame by frame', () => {
       await vi.advanceTimersByTimeAsync(3000)
     })
     expect(meteor()).toBeNull()
+  })
+})
+
+describe('the Off stop, by pointer', () => {
+  const RAIL = 300
+  const root = (): Element => document.querySelector('.thinking-slider') as Element
+  const thumbLeft = (): string => {
+    const carrier = document.querySelector('.thinking-carrier') as HTMLElement
+    const off = carrier.style.getPropertyValue('--off')
+    if (off !== '0px') return off
+    return `${Math.round(Number(carrier.style.getPropertyValue('--f')) * 100)}%`
+  }
+  let rect: { mockRestore: () => void } | null = null
+  beforeEach(() => {
+    // A rail 300px wide at the window's left edge: seven stops, Off at 0,
+    // Low at 50, … Ultra at 300.
+    rect = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      const width = this.classList.contains('thinking-rail') ? RAIL : 0
+      return { left: 0, top: 0, right: width, bottom: 0, width, height: 0, x: 0, y: 0, toJSON: () => ({}) }
+    })
+  })
+  afterEach(() => {
+    rect?.mockRestore()
+  })
+  const pointerDown = (x: number): void => {
+    fireEvent.pointerDown(slider(), { button: 0, clientX: x, pointerId: 1 })
+  }
+  const pointerMove = (x: number): void => {
+    fireEvent.pointerMove(slider(), { clientX: x, pointerId: 1 })
+  }
+  const pointerUp = (): void => {
+    fireEvent.pointerUp(slider(), { pointerId: 1 })
+  }
+
+  it('a press at the left end selects Off', async () => {
+    render(<ThinkingSlider chat={chat(options({ thinking: 'medium', ultra: false }))} />)
+    pointerDown(0)
+    expect(thumbLeft()).toBe('0%')
+    pointerUp()
+    expect(thumbLeft()).toBe('0%')
+    await settle()
+    expect(calls).toEqual([['setSelectOption', ['chat-1', 'thinking', 'off']]])
+  })
+
+  it('a drag from Low to Off follows the hand, onto the empty bar, and sends Off on release', async () => {
+    render(<ThinkingSlider chat={chat(options({ thinking: 'low', ultra: false }))} />)
+    pointerDown(50)
+    pointerMove(0)
+    expect(root().classList.contains('thinking-slider--tracking')).toBe(true)
+    expect(thumbLeft()).toBe('0%')
+    expect(root().classList.contains('thinking-slider--off')).toBe(true)
+    expect(calls).toEqual([])
+    pointerUp()
+    await settle()
+    expect(calls).toEqual([['setSelectOption', ['chat-1', 'thinking', 'off']]])
+  })
+
+  it('a press in the left end cap, short of the rail, clamps to Off', async () => {
+    render(<ThinkingSlider chat={chat(options({ thinking: 'medium', ultra: false }))} />)
+    pointerDown(-20)
+    pointerUp()
+    await settle()
+    expect(calls).toEqual([['setSelectOption', ['chat-1', 'thinking', 'off']]])
+  })
+
+  it('a CLI that offers only Off: one stop, the knob at the start, nowhere to go', async () => {
+    const onlyOff = options({ thinking: 'off', ultra: false, levels: ['off'] }).filter((o) => o.id !== 'ultra')
+    render(<ThinkingSlider chat={chat(onlyOff)} />)
+    expect(slider().getAttribute('aria-valuemin')).toBe('0')
+    expect(slider().getAttribute('aria-valuemax')).toBe('0')
+    expect(slider().getAttribute('aria-valuenow')).toBe('0')
+    expect(slider().getAttribute('aria-valuetext')).toBe('Off')
+    expect(thumbLeft()).toBe('0%')
+    expect(root().classList.contains('thinking-slider--off')).toBe(true)
+    for (const key of ['ArrowRight', 'ArrowUp', 'End', 'ArrowLeft', 'Home']) {
+      fireEvent.keyDown(slider(), { key })
+      fireEvent.keyUp(slider(), { key })
+    }
+    pointerDown(RAIL)
+    pointerUp()
+    await settle()
+    expect(thumbLeft()).toBe('0%')
+    expect(calls).toEqual([])
   })
 })
 

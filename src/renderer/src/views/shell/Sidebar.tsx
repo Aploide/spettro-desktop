@@ -34,7 +34,7 @@ import Spinner from './Spinner'
 import ContextMenu, { type ContextMenuEntry } from './ContextMenu'
 import InlineRename from './InlineRename'
 import { groupSessions, type ProjectGroup } from './sessionGroups'
-import { basename, isMac, relativeTime, shortcutLabel, withShortcut } from './util'
+import { basename, relativeTime, shortcutLabel, withShortcut } from './util'
 import { ArchiveIcon, ChevronRightIcon, ClearIcon, DownloadIcon, GearIcon, MagnifyIcon, PinIcon, PlusIcon } from './icons'
 
 interface Props {
@@ -123,9 +123,9 @@ function Sidebar({ onOpenWorkflows }: Props): JSX.Element {
       action: onOpenWorkflows
     },
     {
-      // The companion app is iPhone-only, so the promise only makes sense on
-      // the Mac it pairs with; elsewhere it is plain remote access.
-      label: `${isMac() ? 'Control from your iPhone…' : 'Remote access…'}${remoteOn ? ' (on)' : ''}`,
+      // The companion app runs on iPhone and Android alike, so the promise
+      // holds on every computer.
+      label: `Control from your phone…${remoteOn ? ' (on)' : ''}`,
       action: () => openSettings('remote')
     }
   ]

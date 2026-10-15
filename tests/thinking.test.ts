@@ -8,8 +8,10 @@
 import { describe, expect, it } from 'vitest'
 import type { ACPConfigOption } from '@shared/acp'
 import {
+  OFF_CAPTION,
   ULTRA,
   callsFor,
+  isOff,
   modelReasons,
   previewState,
   thinkingState
@@ -63,9 +65,10 @@ function permission(value: string): ACPConfigOption {
 }
 
 describe('where the thumb sits', () => {
-  it('is Low … Max, then Ultra — no Off stop', () => {
+  it('is Off, Low … Max, then Ultra', () => {
     const state = thinkingState([thinking('high'), ultra(false)])
     expect(state?.stops.map((s) => s.label)).toEqual([
+      'Off',
       'Low',
       'Medium',
       'High',
@@ -78,28 +81,58 @@ describe('where the thumb sits', () => {
   it('is Ultra whenever ultracode is on, whatever the level', () => {
     // Ultra is high + ultracode; a level set elsewhere (/thinking max) while
     // ultracode is on still reads as Ultra — that is what will run.
-    for (const level of ['high', 'max', 'low']) {
+    for (const level of ['high', 'max', 'low', 'off']) {
       const state = thinkingState([thinking(level), ultra(true)])
       expect(state?.label).toBe('Ultra')
-      expect(state?.index).toBe(5)
+      expect(state?.index).toBe(6)
     }
   })
 
   it('is the matching level otherwise, in plain words', () => {
     const state = thinkingState([thinking('x-high'), ultra(false)])
     expect(state?.label).toBe('Extra high')
-    expect(state?.index).toBe(3)
+    expect(state?.index).toBe(4)
   })
 
-  it('rests at the far left, labelled Off, when thinking is off', () => {
-    const state = thinkingState([thinking('off'), ultra(false)])
-    expect(state?.index).toBe(-1)
-    expect(state?.label).toBe('Off')
+  it('sits on the Off stop when thinking is off', () => {
+    // The CLI's default: the slider's most common resting place.
+    const state = thinkingState([thinking('off'), ultra(false)])!
+    expect(state.index).toBe(0)
+    expect(state.label).toBe('Off')
+    expect(state.stops[0].caption).toBe(OFF_CAPTION)
+    expect(isOff(state)).toBe(true)
   })
 
-  it('keeps Low → Max order whatever order the CLI lists them in', () => {
+  it('keeps Off → Max order whatever order the CLI lists them in', () => {
     const state = thinkingState([thinking('low', ['max', 'off', 'low', 'high'])])
-    expect(state?.stops.map((s) => s.id)).toEqual(['low', 'high', 'max'])
+    expect(state?.stops.map((s) => s.id)).toEqual(['off', 'low', 'high', 'max'])
+  })
+
+  it('puts Off first and a level it doesn’t know after Max', () => {
+    const state = thinkingState([thinking('low', ['turbo', 'off', 'low'])])
+    expect(state?.stops.map((s) => s.id)).toEqual(['off', 'low', 'turbo'])
+  })
+
+  it('offers no Off stop when the CLI doesn’t list off, and leaves an off it is set to unset', () => {
+    const state = thinkingState([thinking('off', ['low', 'medium', 'high', 'x-high', 'max']), ultra(false)])!
+    expect(state.stops.map((s) => s.id)).toEqual(['low', 'medium', 'high', 'x-high', 'max', 'ultra'])
+    expect(state.index).toBe(-1)
+    expect(state.label).toBe('Off')
+    expect(isOff(state)).toBe(true)
+  })
+
+  it('is a single Off stop when the CLI offers only off and no ultra', () => {
+    const state = thinkingState([thinking('off', ['off'])])!
+    expect(state.stops.map((s) => s.id)).toEqual(['off'])
+    expect(state.index).toBe(0)
+    expect(state.label).toBe('Off')
+    expect(isOff(state)).toBe(true)
+  })
+
+  it('offers every level, Off included, when the CLI lists none', () => {
+    // The fallback stands in for the CLI's own list, which always has Off.
+    const state = thinkingState([thinking('high', [])])
+    expect(state?.stops.map((s) => s.id)).toEqual(['off', 'low', 'medium', 'high', 'x-high', 'max'])
   })
 
   it('puts a level it doesn’t know after Max, under the CLI’s name', () => {
@@ -119,6 +152,7 @@ describe('where the thumb sits', () => {
     expect(thinkingState([permission('restricted'), thinking('high'), ultra(true)])?.paused).toBe(false)
     // Off is never paused: there is nothing to hold back.
     expect(thinkingState([permission('ask-first'), thinking('high'), ultra(false)])?.paused).toBe(false)
+    expect(thinkingState([permission('ask-first'), thinking('off'), ultra(false)])?.paused).toBe(false)
   })
 })
 
@@ -143,12 +177,55 @@ describe('what a move sends', () => {
     expect(callsFor(false, stop('low'))).toEqual([{ configId: 'thinking', value: 'low' }])
   })
 
+  it('to Off: thinking off alone', () => {
+    expect(callsFor(false, stop('off'))).toEqual([{ configId: 'thinking', value: 'off' }])
+  })
+
+  it('from Off to a level: the level alone', () => {
+    expect(callsFor(false, stop('low'))).toEqual([{ configId: 'thinking', value: 'low' }])
+  })
+
+  it('from Ultra to Off: ultracode off first, then thinking off', () => {
+    expect(callsFor(true, stop('off'))).toEqual([
+      { configId: 'ultra', value: false },
+      { configId: 'thinking', value: 'off' }
+    ])
+  })
+
   it('previews the move, paused at once under Ask first', () => {
     const base = thinkingState([permission('ask-first'), thinking('max'), ultra(false)])!
     const preview = previewState(base, ULTRA)
-    expect(preview.index).toBe(5)
+    expect(preview.index).toBe(6)
     expect(preview.ultraOn).toBe(true)
     expect(preview.paused).toBe(true)
+  })
+
+  it('previews Off from paused Ultra: index 0, neither lit nor paused', () => {
+    const base = thinkingState([permission('ask-first'), thinking('high'), ultra(true, true)])!
+    const preview = previewState(base, stop('off'))
+    expect(preview).toMatchObject({
+      index: 0,
+      label: 'Off',
+      thinking: 'off',
+      ultraOn: false,
+      paused: false
+    })
+  })
+
+  it('previews Ultra from Off under Ask first: paused at once', () => {
+    const base = thinkingState([permission('ask-first'), thinking('off'), ultra(false)])!
+    const preview = previewState(base, ULTRA)
+    expect(preview.index).toBe(6)
+    expect(preview.paused).toBe(true)
+    expect(preview.thinking).toBe('high')
+  })
+
+  it('isOff: the Off stop, an unset off, not Ultra', () => {
+    const noOff = ['low', 'medium', 'high', 'x-high', 'max']
+    expect(isOff(thinkingState([thinking('off')])!)).toBe(true)
+    expect(isOff(thinkingState([thinking('off', noOff)])!)).toBe(true)
+    expect(isOff(thinkingState([thinking('off'), ultra(true)])!)).toBe(false)
+    expect(isOff(thinkingState([thinking('low')])!)).toBe(false)
   })
 })
 

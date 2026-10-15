@@ -4,7 +4,7 @@ A desktop UI for the [spettro](https://spettro.app) command-line agent, for
 Linux and Windows. Built with Electron, React and TypeScript (electron-vite +
 electron-builder). It is a port of the macOS Spettro.app: chat with an ACP
 agent, an integrated terminal (node-pty + xterm.js), and a remote host that
-lets the iPhone app pair over the local network.
+lets the iPhone and Android apps pair over the local network.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for how the codebase is laid out.
 

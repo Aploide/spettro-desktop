@@ -120,7 +120,9 @@ export function registerIpc(
     closeChat: async (chatId) => model.closeChat(chatId),
     togglePin: async (chatId) => model.togglePin(chatId),
     toggleArchive: async (chatId) => model.toggleArchive(chatId),
-    renameChat: async (chatId, title) => model.renameChat(chatId, title),
+    renameChat: async (chatId, title) => {
+      model.renameChat(chatId, title)
+    },
     selectSession: async (chatId) => model.selectSession(chatId),
     listCLISessions: (projectPath) => model.listCLISessions(projectPath),
     importCLISession: (sessionId, projectPath) => model.importCLISession(sessionId, projectPath),

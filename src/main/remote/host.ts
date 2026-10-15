@@ -5,10 +5,11 @@
 // Lifetime: the listener runs for as long as remote access is switched on,
 // independent of whether any phone is connected — the phone is the thing that
 // comes and goes. Sharing is off by default and opt-in, matching /remote in
-// the TUI.
+// the TUI; once on, it stays on across launches (onSharingChanged persists
+// it, restoreSharing brings it back) until the user turns it off.
 
 import { networkInterfaces } from 'os'
-import { WebSocketServer } from 'ws'
+import { WebSocketServer, type WebSocket } from 'ws'
 import QRCodeLib from 'qrcode'
 import type { JSONValue } from '../../shared/acp'
 import type { ChatSummary, RemoteHostState } from '../../shared/model'
@@ -19,11 +20,23 @@ import {
   RemoteMethod,
   chatSummaryToWire,
   rfc3339,
+  type RemoteGoodbyeReason,
   type RemoteHostStateParams
 } from '../../shared/remote'
 import type { RemoteBridge } from './bridge'
+import {
+  CLOSE_POLICY,
+  CLOSE_TRY_AGAIN_LATER,
+  FailedAuthLimiter,
+  HEARTBEAT_MS,
+  LAN_ORIGIN,
+  MAX_PAYLOAD_BYTES,
+  MAX_SESSIONS,
+  isProxiedConnection,
+  type ConnectionOrigin
+} from './connectionGuard'
 import { RemoteAdvertiser } from './discovery'
-import { RemoteHostSession, type RemoteHostSessionDelegate } from './hostSession'
+import { RemoteHostSession, type RemoteHostSessionDelegate, type WireSocket } from './hostSession'
 import { HostIdentityStore, PairedDeviceStore } from './pairedDevices'
 import {
   buildPairingURL,
@@ -31,6 +44,14 @@ import {
   isPairingWindowExpired,
   type PairingWindow
 } from './pairing'
+
+/** Whether a listen error means only that the preferred port can't be had
+ *  — taken, or reserved by the OS (Windows keeps whole ranges) — which is
+ *  worth falling back over. Any other listen error is a real failure. */
+function portRefused(error: unknown): boolean {
+  const code = (error as NodeJS.ErrnoException).code
+  return code === 'EADDRINUSE' || code === 'EACCES' || code === 'EPERM'
+}
 
 function appVersion(): string {
   try {
@@ -63,20 +84,42 @@ function primaryLANAddress(): string | undefined {
   return best
 }
 
+/** permission/ask and question/ask params: the host's prompt id, the chat
+ *  when there is one, and the agent's request verbatim. */
+function askParams(promptId: string, chatId: string | null, raw: JSONValue): JSONValue {
+  const params: { [key: string]: JSONValue } = { promptID: promptId, request: raw }
+  if (chatId) params.chatID = chatId
+  return params
+}
+
 export class RemoteHost implements RemoteHostSessionDelegate {
   readonly bridge: RemoteBridge
   private readonly onStateChanged: (s: RemoteHostState) => void
+  private readonly onSharingChanged: (enabled: boolean) => void
   private readonly devices: PairedDeviceStore
   private readonly identity: HostIdentityStore
   private readonly advertiser = new RemoteAdvertiser()
   private readonly version = appVersion()
+  private readonly preferredPort: number
 
   private wss: WebSocketServer | null = null
   private port: number | null = null
   private enabled = false
   private starting: Promise<void> | null = null
+  /** Bumped by every start and stop: a listener that opens after it was
+   *  overtaken is closed again instead of taken on. */
+  private listenGeneration = 0
+  /** Starts, one at a time — each wants the preferred port, which the one
+   *  before may be about to take. */
+  private lifecycle: Promise<void> = Promise.resolve()
   private sessions: RemoteHostSession[] = []
   private connectedDeviceIds = new Set<string>()
+  private readonly authLimiter = new FailedAuthLimiter()
+  private heartbeat: NodeJS.Timeout | null = null
+  /** This listener's goodbye has gone out: one per shutdown, and nothing
+   *  after it that could read as the host being back. Reset when sharing
+   *  starts again. */
+  private goodbyeSent = false
 
   private pairingWindow: PairingWindow | null = null
   private pairingTimer: NodeJS.Timeout | null = null
@@ -91,9 +134,22 @@ export class RemoteHost implements RemoteHostSessionDelegate {
   /** Listeners registered on bridge.events, kept for shutdown(). */
   private readonly bridgeListeners: [string, (...args: never[]) => void][] = []
 
-  constructor(bridge: RemoteBridge, opts: { dataDir: string; onStateChanged: (s: RemoteHostState) => void }) {
+  constructor(
+    bridge: RemoteBridge,
+    opts: {
+      dataDir: string
+      onStateChanged: (s: RemoteHostState) => void
+      /** The user turned sharing on or off — persisted so a launch can
+       *  restore it. Not called when the app quits with sharing on. */
+      onSharingChanged?: (enabled: boolean) => void
+      /** The port tried first (tests); REMOTE_PREFERRED_PORT otherwise. */
+      preferredPort?: number
+    }
+  ) {
     this.bridge = bridge
     this.onStateChanged = opts.onStateChanged
+    this.onSharingChanged = opts.onSharingChanged ?? ((): void => undefined)
+    this.preferredPort = opts.preferredPort ?? REMOTE_PREFERRED_PORT
     this.devices = new PairedDeviceStore(opts.dataDir)
     this.identity = new HostIdentityStore(opts.dataDir)
     this.wireBridgeEvents()
@@ -111,6 +167,10 @@ export class RemoteHost implements RemoteHostSessionDelegate {
 
   get hostVersion(): string {
     return this.version
+  }
+
+  authFailed(session: RemoteHostSession): void {
+    this.authLimiter.recordFailure(session.origin)
   }
 
   openPairingSecret(): Buffer | null {
@@ -135,7 +195,7 @@ export class RemoteHost implements RemoteHostSessionDelegate {
     return { key, revoked: record.revoked }
   }
 
-  /** Called by a session once it has authenticated. */
+  /** Called by a session once its auth reply has gone out. */
   sessionAuthenticated(session: RemoteHostSession): void {
     const deviceId = session.deviceId
     if (!deviceId) return
@@ -148,13 +208,52 @@ export class RemoteHost implements RemoteHostSessionDelegate {
       if (other !== session && other.deviceId === deviceId) other.close()
     }
     this.sessions = this.sessions.filter((s) => s === session || s.deviceId !== deviceId)
-    // A phone that just attached is shown the live agent state immediately
-    // rather than being left to assume.
-    session.sendHostState({
-      agentReady: this.bridge.agentReady(),
-      shuttingDown: false
+    // The prompts this session was never told about: everything from here
+    // on reaches it as a broadcast.
+    const waiting = this.bridge.pendingPrompts()
+    // A phone that just attached is shown the live agent state rather than
+    // being left to assume — a turn later rather than right behind the
+    // reply, so the phone has had its answer in hand for a moment before
+    // the first notification arrives. Then whatever is still waiting on an
+    // answer, asked again exactly as it was asked: a phone that attaches
+    // mid-prompt (or comes back from the background) would otherwise never
+    // see the approval the turn is blocked on.
+    setImmediate(() => {
+      if (!this.sessions.includes(session)) return
+      session.sendHostState(this.hostStateParams(this.bridge.agentReady(), false))
+      const still = new Set(this.bridge.pendingPrompts().map((p) => p.promptId))
+      for (const prompt of waiting) {
+        if (!still.has(prompt.promptId)) continue
+        const method = prompt.kind === 'permission' ? RemoteMethod.permissionAsk : RemoteMethod.questionAsk
+        session.notify(method, askParams(prompt.promptId, prompt.chatId, prompt.raw))
+      }
     })
     this.publishState()
+  }
+
+  /** A host/state as this host sends it. */
+  private hostStateParams(
+    agentReady: boolean,
+    shuttingDown: boolean,
+    message?: string,
+    reason?: RemoteGoodbyeReason
+  ): RemoteHostStateParams {
+    const params: RemoteHostStateParams = { agentReady, shuttingDown }
+    if (message !== undefined && message !== null) params.message = message
+    if (reason !== undefined) params.reason = reason
+    return params
+  }
+
+  /** Tells every attached phone this disconnect is deliberate, and why —
+   *  once: whichever of the app's quit, the model's last emission and the
+   *  listener closing gets here first says it, and the rest are no-ops.
+   *  `message` stays as it always was (only sharing-off has one), so a
+   *  phone that predates `reason` still tells a quit from sharing off. */
+  sayGoodbye(reason: RemoteGoodbyeReason): void {
+    if (this.goodbyeSent) return
+    this.goodbyeSent = true
+    const message = reason === 'sharing-off' ? 'Remote access was turned off.' : undefined
+    this.broadcast(RemoteMethod.hostState, this.hostStateParams(false, true, message, reason) as unknown as JSONValue)
   }
 
   sessionClosed(session: RemoteHostSession): void {
@@ -166,52 +265,171 @@ export class RemoteHost implements RemoteHostSessionDelegate {
     }
   }
 
+  unpairDevice(session: RemoteHostSession): void {
+    const deviceId = session.deviceId
+    if (!deviceId) return
+    const name = this.devices.device(deviceId)?.name ?? deviceId
+    // Gone already (a second request racing the first) is fine: the phone
+    // wanted it gone, and it is.
+    this.devices.remove(deviceId)
+    // Normal closure: the phone asked for this, and stopped listening for a
+    // drop before it did.
+    for (const s of this.sessions.filter((s) => s.deviceId === deviceId)) s.close(1000)
+    this.connectedDeviceIds.delete(deviceId)
+    this.publishState()
+    console.info(`[remote] ${name} unpaired itself`)
+  }
+
   // MARK: Lifecycle
 
   async setEnabled(v: boolean): Promise<void> {
-    if (v) await this.start()
-    else this.stop()
+    if (v) {
+      await this.start()
+      // Turned off again while the listener was opening: that stands.
+      if (!this.enabled) return
+    } else this.stop()
+    this.onSharingChanged(v)
   }
 
-  private async start(): Promise<void> {
-    if (this.enabled) return
+  /** At launch: sharing left on when the app last quit is on again, since a
+   *  phone away from this computer has no way to turn it back on itself.
+   *  `wasOn` is the persisted preference (onSharingChanged keeps it). */
+  async restoreSharing(wasOn: boolean): Promise<void> {
+    if (wasOn) await this.setEnabled(true)
+  }
+
+  private start(): Promise<void> {
+    if (this.enabled) return Promise.resolve()
     if (this.starting) return this.starting
-    this.starting = (async () => {
-      // Preferred port first; if it's taken (another Spettro, or anything
-      // else) let the OS pick — clients find us by Bonjour, not port number.
-      let wss: WebSocketServer
-      try {
-        wss = await this.listen(REMOTE_PREFERRED_PORT)
-      } catch {
-        wss = await this.listen(0)
+    const generation = ++this.listenGeneration
+    const starting = this.serialize(async () => {
+      if (generation !== this.listenGeneration) return
+      const wss = await this.bind()
+      if (generation !== this.listenGeneration) {
+        // Stopped while it was opening.
+        wss.close()
+        return
       }
-      this.wss = wss
-      const address = wss.address()
-      this.port = typeof address === 'object' && address !== null ? address.port : null
-      wss.on('connection', (socket) => {
-        if (!this.enabled) {
-          socket.close()
-          return
-        }
-        this.sessions.push(new RemoteHostSession(socket, this))
-      })
-      wss.on('error', (error) => {
-        console.error('[remote] listener error', error)
-      })
+      this.adopt(wss)
+      this.goodbyeSent = false
       this.enabled = true
       this.advertise()
       this.publishState()
-    })()
-    try {
-      await this.starting
-    } finally {
-      this.starting = null
+    })
+    this.starting = starting
+    const clear = (): void => {
+      if (this.starting === starting) this.starting = null
     }
+    starting.then(clear, clear)
+    return starting
+  }
+
+  /** Runs a start once the one before it is done. */
+  private serialize(task: () => Promise<void>): Promise<void> {
+    const run = this.lifecycle.then(task)
+    this.lifecycle = run.catch(() => undefined)
+    return run
+  }
+
+  /** Opens a listener on the preferred port (7879). If something else
+   *  holds it — another Spettro, or anything else — or the OS reserves it,
+   *  the OS picks one instead: phones find the host by Bonjour, not port. */
+  private async bind(): Promise<WebSocketServer> {
+    try {
+      return await this.listen(this.preferredPort)
+    } catch (error) {
+      if (!portRefused(error)) throw error
+      return await this.listen(0)
+    }
+  }
+
+  /** Makes a freshly opened listener the host's. */
+  private adopt(wss: WebSocketServer): void {
+    this.wss = wss
+    const address = wss.address()
+    this.port = typeof address === 'object' && address !== null ? address.port : null
+    wss.on('connection', (socket, req) => {
+      if (!this.enabled || this.wss !== wss) {
+        socket.close()
+        return
+      }
+      // Relayed by a Cloudflare tunnel: turned away before hello, so a
+      // cloudflared left running (or pointed here by hand) can't put the
+      // relay on the internet. See isProxiedConnection.
+      if (isProxiedConnection(req.headers)) {
+        socket.close(CLOSE_POLICY)
+        return
+      }
+      this.watchHeartbeat(socket)
+      this.acceptSocket(socket, { peerIp: req.socket.remoteAddress ?? 'unknown' }, req.socket)
+    })
+    this.startHeartbeat(wss)
+    wss.on('error', (error) => {
+      console.error('[remote] listener error', error)
+    })
+  }
+
+  /** Takes on a connection the listener accepted: it is sent `hello` at
+   *  once, and nothing else until it authenticates. Null when it was turned
+   *  away instead: an address blocked for failing auth, or one socket too
+   *  many. */
+  acceptSocket(socket: WebSocket, origin: ConnectionOrigin = LAN_ORIGIN, wire?: WireSocket): RemoteHostSession | null {
+    const reject = (code: number): null => {
+      try {
+        socket.close(code)
+      } catch {
+        /* already gone */
+      }
+      return null
+    }
+    // A phone that failed its way into a block can still pair while a code
+    // is up: that is how it gets a working key again.
+    if (this.authLimiter.isBlocked(origin) && !this.openPairingSecret()) return reject(CLOSE_POLICY)
+    if (this.sessions.length >= MAX_SESSIONS) return reject(CLOSE_TRY_AGAIN_LATER)
+    const session = new RemoteHostSession(socket, this, origin, wire)
+    this.sessions.push(session)
+    return session
+  }
+
+  // MARK: Heartbeat
+
+  private readonly alive = new WeakMap<WebSocket, boolean>()
+
+  private watchHeartbeat(socket: WebSocket): void {
+    this.alive.set(socket, true)
+    socket.on('pong', () => this.alive.set(socket, true))
+  }
+
+  /** Pings every socket each HEARTBEAT_MS and ends any that didn't answer
+   *  the last one: a phone that vanished (or a NAT that forgot it)
+   *  otherwise holds its socket open forever. */
+  private startHeartbeat(wss: WebSocketServer): void {
+    this.stopHeartbeat()
+    this.heartbeat = setInterval(() => {
+      for (const socket of wss.clients) {
+        if (this.alive.get(socket) === false) {
+          socket.terminate()
+          continue
+        }
+        this.alive.set(socket, false)
+        try {
+          socket.ping()
+        } catch {
+          /* closing anyway */
+        }
+      }
+    }, HEARTBEAT_MS)
+    this.heartbeat.unref?.()
+  }
+
+  private stopHeartbeat(): void {
+    if (this.heartbeat) clearInterval(this.heartbeat)
+    this.heartbeat = null
   }
 
   private listen(port: number): Promise<WebSocketServer> {
     return new Promise((resolve, reject) => {
-      const wss = new WebSocketServer({ port })
+      const wss = new WebSocketServer({ port, maxPayload: MAX_PAYLOAD_BYTES })
       const onError = (error: Error): void => {
         wss.close()
         reject(error)
@@ -224,24 +442,24 @@ export class RemoteHost implements RemoteHostSessionDelegate {
     })
   }
 
-  private stop(): void {
+  private stop(reason: RemoteGoodbyeReason = 'sharing-off'): void {
+    // Whatever start is still opening a listener is overtaken.
+    this.listenGeneration++
+    this.starting = null
     if (!this.enabled && !this.wss) {
       this.closePairing()
       return
     }
     // Tell attached phones this is deliberate before dropping them, so they
-    // show "sharing was turned off" instead of retrying against what looks
-    // like a flaky network.
-    this.broadcast(RemoteMethod.hostState, {
-      agentReady: false,
-      shuttingDown: true,
-      message: 'Remote access was turned off.'
-    } satisfies RemoteHostStateParams as unknown as JSONValue)
+    // show "sharing was turned off" (or "Spettro quit") instead of retrying
+    // against what looks like a flaky network.
+    this.sayGoodbye(reason)
     for (const session of this.sessions) session.close()
     this.sessions = []
     this.connectedDeviceIds.clear()
     this.closePairingInternal()
     this.advertiser.stop()
+    this.stopHeartbeat()
     this.wss?.close()
     this.wss = null
     this.port = null
@@ -266,19 +484,15 @@ export class RemoteHost implements RemoteHostSessionDelegate {
    *  be on for a scan to reach anything, so turning it on is part of "show me
    *  the code" rather than a separate step. */
   async openPairing(): Promise<void> {
-    if (!this.enabled) await this.start()
+    if (!this.enabled) {
+      await this.start()
+      if (!this.enabled) return
+      this.onSharingChanged(true)
+    }
     if (this.pairingTimer) clearTimeout(this.pairingTimer)
     const window = createPairingWindow()
     this.pairingWindow = window
-    this.pairingURL = buildPairingURL({
-      protocolVersion: REMOTE_PROTOCOL_VERSION,
-      hostID: this.identity.hostId,
-      hostName: this.identity.hostName,
-      hostKind: 'app',
-      secret: window.secret,
-      address: primaryLANAddress(),
-      port: this.port ?? undefined
-    })
+    this.pairingURL = this.buildPairingURLFor(window)
     try {
       // Medium error correction, like the Mac host: the payload is ~150
       // characters and a denser code is harder to scan.
@@ -299,6 +513,35 @@ export class RemoteHost implements RemoteHostSessionDelegate {
       this.publishState()
     }, PAIRING_WINDOW_MS)
     this.publishState()
+  }
+
+  /** What the QR says for a window: who and where this host is. */
+  private buildPairingURLFor(window: PairingWindow): string {
+    return buildPairingURL({
+      protocolVersion: REMOTE_PROTOCOL_VERSION,
+      hostID: this.identity.hostId,
+      hostName: this.identity.hostName,
+      hostKind: 'app',
+      secret: window.secret,
+      address: primaryLANAddress(),
+      port: this.port ?? undefined
+    })
+  }
+
+  /** Redraws an open code after what it carries changed (the name). */
+  private refreshPairingURL(): void {
+    if (!this.pairingWindow || isPairingWindowExpired(this.pairingWindow)) return
+    const url = this.buildPairingURLFor(this.pairingWindow)
+    if (url === this.pairingURL) return
+    this.pairingURL = url
+    void QRCodeLib.toDataURL(url, { errorCorrectionLevel: 'M', margin: 2, scale: 6 })
+      .then((qr) => {
+        if (this.pairingURL === url) {
+          this.pairingQR = qr
+          this.publishState()
+        }
+      })
+      .catch(() => undefined)
   }
 
   closePairing(): void {
@@ -322,6 +565,10 @@ export class RemoteHost implements RemoteHostSessionDelegate {
 
   revokeDevice(id: string): void {
     this.devices.revoke(id)
+    // A phone attached right now goes too, not at its next reconnect: it
+    // comes straight back, and resume answers it with -33005.
+    for (const s of this.sessions.filter((s) => s.deviceId === id)) s.close(1000)
+    this.connectedDeviceIds.delete(id)
     this.publishState()
   }
 
@@ -330,26 +577,7 @@ export class RemoteHost implements RemoteHostSessionDelegate {
     // The advertisement and any open pairing payload carry the name; refresh
     // both so what the phone sees matches what the user typed.
     if (this.enabled) this.advertise()
-    if (this.pairingWindow && !isPairingWindowExpired(this.pairingWindow)) {
-      this.pairingURL = buildPairingURL({
-        protocolVersion: REMOTE_PROTOCOL_VERSION,
-        hostID: this.identity.hostId,
-        hostName: this.identity.hostName,
-        hostKind: 'app',
-        secret: this.pairingWindow.secret,
-        address: primaryLANAddress(),
-        port: this.port ?? undefined
-      })
-      const url = this.pairingURL
-      void QRCodeLib.toDataURL(url, { errorCorrectionLevel: 'M', margin: 2, scale: 6 })
-        .then((qr) => {
-          if (this.pairingURL === url) {
-            this.pairingQR = qr
-            this.publishState()
-          }
-        })
-        .catch(() => undefined)
-    }
+    this.refreshPairingURL()
     this.publishState()
   }
 
@@ -371,8 +599,13 @@ export class RemoteHost implements RemoteHostSessionDelegate {
     }
   }
 
-  shutdown(): void {
-    this.stop()
+  /** Quitting: phones are told goodbye and the listener closed. `restart`
+   *  when the app is quitting to install an update. */
+  shutdown(reason: RemoteGoodbyeReason = 'quit'): void {
+    // Said here as well as in stop(): stop() says nothing for a host that
+    // isn't listening, and a phone it took on is still owed one.
+    this.sayGoodbye(reason)
+    this.stop(reason)
     for (const [event, listener] of this.bridgeListeners) {
       this.bridge.events.off(event, listener as (...args: unknown[]) => void)
     }
@@ -457,20 +690,22 @@ export class RemoteHost implements RemoteHostSessionDelegate {
     })
 
     on('host-state', (state: { agentReady: boolean; shuttingDown: boolean; message?: string }) => {
-      const params: { [key: string]: JSONValue } = {
-        agentReady: state.agentReady,
-        shuttingDown: state.shuttingDown
+      // The model's last word as the app quits. A no-op when the app
+      // already said goodbye (with 'restart', for an update).
+      if (state.shuttingDown) {
+        this.sayGoodbye('quit')
+        return
       }
-      if (state.message !== undefined && state.message !== null) params.message = state.message
-      this.broadcast(RemoteMethod.hostState, params)
+      // After the goodbye, the agent being torn down isn't news.
+      if (this.goodbyeSent) return
+      const params = this.hostStateParams(state.agentReady, state.shuttingDown, state.message)
+      this.broadcast(RemoteMethod.hostState, params as unknown as JSONValue)
     })
 
     // Blocking prompts fan out to every attached screen with the
     // host-assigned promptID; the request payload is the ACP one, verbatim.
     on('permission-ask', (promptId: string, chatId: string | null, raw: JSONValue) => {
-      const params: { [key: string]: JSONValue } = { promptID: promptId, request: raw }
-      if (chatId) params.chatID = chatId
-      this.broadcast(RemoteMethod.permissionAsk, params)
+      this.broadcast(RemoteMethod.permissionAsk, askParams(promptId, chatId, raw))
     })
 
     on('permission-resolved', (promptId: string, resolvedBy: string | null) => {
@@ -481,9 +716,7 @@ export class RemoteHost implements RemoteHostSessionDelegate {
     })
 
     on('question-ask', (promptId: string, chatId: string | null, raw: JSONValue) => {
-      const params: { [key: string]: JSONValue } = { promptID: promptId, request: raw }
-      if (chatId) params.chatID = chatId
-      this.broadcast(RemoteMethod.questionAsk, params)
+      this.broadcast(RemoteMethod.questionAsk, askParams(promptId, chatId, raw))
     })
 
     on('question-resolved', (promptId: string, resolvedBy: string | null) => {

@@ -17,6 +17,7 @@
     "rebuild:native": "electron-builder install-app-deps",
     "pack:linux": "electron-vite build && electron-builder --linux --x64 --arm64",
     "pack:win": "electron-vite build && electron-builder --win --x64 --arm64",
+    "pack:mac": "electron-vite build && electron-builder --mac --x64 --arm64",
     "pack": "electron-vite build && electron-builder",
     "visual": "vite build -c tools/visual/vite.config.ts && tools/visual/shoot.sh",
     "test": "vitest run",

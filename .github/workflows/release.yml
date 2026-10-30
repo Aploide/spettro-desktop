@@ -78,6 +78,49 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  # macOS follows the Windows pattern for the same reasons: node-pty ships
+  # darwin-x64 and darwin-arm64 prebuilds, so the Apple Silicon runner
+  # cross-packages x64 with no rebuild, and one invocation writes a single
+  # latest-mac.yml covering both arches.
+  macos:
+    needs: verify
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Set version from tag
+        shell: bash
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          PKG_VERSION="$(node -p "require('./package.json').version")"
+
+          if [ "$PKG_VERSION" != "$TAG_VERSION" ]; then
+            npm version --no-git-tag-version "$TAG_VERSION"
+          else
+            echo "package.json version already $TAG_VERSION; skipping npm version"
+          fi
+
+      - name: Build
+        run: npm run build
+
+      # Ad-hoc signed (mac.identity in electron-builder.yml) — there is no
+      # Developer ID certificate in the repo secrets.
+      - name: Package and publish (macOS x64 + arm64)
+        shell: bash
+        run: npx electron-builder --mac --x64 --arm64 --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   # Linux has no node-pty prebuilds, so each arch has to compile the addon
   # natively — hence one job per runner architecture rather than the single
   # cross-packaging job Windows gets.

@@ -24,7 +24,7 @@ npm run pack:linux   # build + package AppImage into release/
 npm run pack:win     # build + package NSIS installer + MSI into release/
 ```
 
-Icons live in `build/` (`icon.png` for Linux, `icon.ico` for Windows).
+Icons live in `build/` (`icon.png` for Linux and macOS, `icon.ico` for Windows).
 
 ## Releasing
 
@@ -36,12 +36,13 @@ git tag v1.0.0
 git push origin v1.0.0
 ```
 
-CI then builds on Linux and Windows, stamps the version from the tag into
+CI then builds on Linux, Windows and macOS, stamps the version from the tag into
 `package.json`, and publishes a GitHub Release named after the tag with:
 
 - `Spettro-1.0.0-linux-x86_64.AppImage`
 - `Spettro-Setup-1.0.0.exe` (NSIS installer)
 - `Spettro-1.0.0.msi`
+- `Spettro-1.0.0-mac-x64.dmg` / `Spettro-1.0.0-mac-arm64.dmg` (plus `.zip`s)
 
 The tag must be of the form `vX.Y.Z`; the `v` prefix is stripped for the
 package version.

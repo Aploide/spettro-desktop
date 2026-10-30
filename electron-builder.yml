@@ -40,6 +40,30 @@ win:
         - arm64
   icon: build/icon.ico
   artifactName: Spettro-${version}-win-${arch}.${ext}
+# No Developer ID is configured, so the app is ad-hoc signed — arm64 refuses
+# to launch an unsigned binary at all, and electron-builder skips signing
+# rather than falling back to ad-hoc unless told to. Hardened runtime is off
+# because, under an ad-hoc signature, its library validation rejects the
+# Electron frameworks (they carry Electron's Team ID); it only buys anything
+# for notarization, which needs a real certificate anyway. Gatekeeper still
+# quarantines the download on first open. The zip sits next to the dmg
+# because it is what latest-mac.yml points at — a dmg cannot be applied as
+# an update.
+mac:
+  identity: '-'
+  hardenedRuntime: false
+  target:
+    - target: dmg
+      arch:
+        - x64
+        - arm64
+    - target: zip
+      arch:
+        - x64
+        - arm64
+  category: public.app-category.developer-tools
+  icon: build/icon.png
+  artifactName: Spettro-${version}-mac-${arch}.${ext}
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true

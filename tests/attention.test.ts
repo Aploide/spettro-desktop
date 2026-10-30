@@ -4,16 +4,20 @@
 // arrived), in the order appModel emits them.
 
 import { EventEmitter } from 'events'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ACPPermissionRequest, ACPQuestionRequest } from '@shared/acp'
 
 const electron = vi.hoisted(() => ({
   badge: [] as number[],
+  bounces: [] as string[],
   shown: [] as { title: string; body: string; closed: boolean; click: () => void }[]
 }))
 
 vi.mock('electron', () => ({
-  app: { setBadgeCount: (n: number) => electron.badge.push(n), dock: undefined },
+  app: {
+    setBadgeCount: (n: number) => electron.badge.push(n),
+    dock: { bounce: (type: string) => electron.bounces.push(type) }
+  },
   Notification: class {
     static isSupported(): boolean {
       return true
@@ -90,9 +94,23 @@ function setup(): { model: EventEmitter & { opened: string[] }; win: FakeWindow 
   return { model, win }
 }
 
+// The window asks for attention differently per platform (the dock bounces
+// on macOS, the taskbar entry flashes elsewhere), so each case pins one
+// rather than inheriting whatever the suite happens to run on.
+const realPlatform = process.platform
+function onPlatform(platform: NodeJS.Platform): void {
+  Object.defineProperty(process, 'platform', { value: platform, configurable: true })
+}
+
 beforeEach(() => {
   electron.badge.length = 0
+  electron.bounces.length = 0
   electron.shown.length = 0
+  onPlatform('linux')
+})
+
+afterEach(() => {
+  onPlatform(realPlatform)
 })
 
 describe('attention', () => {
@@ -131,6 +149,15 @@ describe('attention', () => {
     electron.shown[0].click()
     expect(win.focused).toBe(true)
     expect(model.opened).toEqual(['c2'])
+  })
+
+  it('bounces the dock on macOS instead of flashing the window', () => {
+    onPlatform('darwin')
+    const { model, win } = setup()
+    model.emit('event', { type: 'permissions', requests: [permission()] })
+    model.emit('permission-ask', 'p1', 'c1')
+    expect(electron.bounces).toEqual(['informational'])
+    expect(win.flashing).toBe(false)
   })
 
   it('withdraws a notification once its prompt is answered', () => {
